@@ -49,12 +49,15 @@ export function serveClient(app: Express, dir: string, https: boolean): void {
       res.status(404).type('text').send('Not found');
     },
   );
-  app.use(express.static(dir, { index: false, maxAge: '1h' }));
-  // Every other GET is a page of the single-page app.
-  app.get(/^(?!\/api\/|\/health$).*/, (_req, res) => {
+  const page: express.RequestHandler = (_req, res) => {
     res.setHeader('Content-Security-Policy', csp);
     res.setHeader('Cache-Control', 'no-store');
     if (https) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     res.type('html').send(html);
-  });
+  };
+  // Never the file itself: it would go out without the CSP and be cached (QA 2026-11-09).
+  app.get('/index.html', page);
+  app.use(express.static(dir, { index: false, maxAge: '1h' }));
+  // Every other GET is a page of the single-page app.
+  app.get(/^(?!\/api\/|\/health$).*/, page);
 }

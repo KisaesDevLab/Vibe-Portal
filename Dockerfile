@@ -17,7 +17,8 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm --filter @vibe-portal/portal build \
  && pnpm --filter @vibe-portal/api deploy --prod /out \
- && cp tsconfig.base.json /out/
+ && cp tsconfig.base.json /out/ \
+ && rm -rf /out/src/__tests__
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production \
@@ -25,8 +26,9 @@ ENV NODE_ENV=production \
     DATA_DIR=/data/portal \
     STATIC_DIR=/app/web
 WORKDIR /app
-COPY --from=build --chown=node:node /out /app
-COPY --from=build --chown=node:node /src/apps/portal/dist /app/web
+# The code belongs to root: the app (uid 1000) can write only its data (QA 2026-11-09).
+COPY --from=build /out /app
+COPY --from=build /src/apps/portal/dist /app/web
 RUN mkdir -p /data/portal && chown node:node /data/portal
 USER node
 VOLUME ["/data/portal"]

@@ -9,7 +9,7 @@ import { and, asc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 import { schema } from '@vibe-portal/db';
 
 import type { Executor } from '../auth/grant';
-import { deliver, firmName, type Ctx } from '../context';
+import { firmName, type Ctx } from '../context';
 import { messageTo } from '../lib/notify';
 
 export const GATHER_MINUTES = 5;
@@ -106,8 +106,23 @@ export async function flush(ctx: Ctx): Promise<number> {
     ];
     // A person whose only contact does not match their choice still hears by that contact.
     if (to.length === 0) to.push(...[who.email, who.phone].filter((c): c is string => !!c));
-    for (const t of to) deliver(ctx, messageTo(t, subject, text));
-    sent += 1;
+    // Sent here, not in the background: a failure puts the notices back for the next run
+    // (QA 2026-11-09), so a short SMTP or Twilio outage does not lose them.
+    try {
+      for (const t of to) await ctx.notifier.send(messageTo(t, subject, text));
+      sent += 1;
+    } catch (err) {
+      ctx.log.error({ err, identityId }, 'new-files notice failed; will retry');
+      await ctx.db
+        .update(schema.notifyQueue)
+        .set({ sentAt: null })
+        .where(
+          inArray(
+            schema.notifyQueue.id,
+            claimed.map((c) => c.id),
+          ),
+        );
+    }
   }
   return sent;
 }

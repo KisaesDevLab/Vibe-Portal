@@ -28,7 +28,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    // The image is public and the source private (P40): no source maps (QA 2026-11-09).
+    sourcemap: false,
   },
   test: {
     environment: 'jsdom',

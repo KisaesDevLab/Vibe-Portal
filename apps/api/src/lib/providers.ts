@@ -11,6 +11,7 @@ import type { Message, Notifier } from './notify';
 export interface SmtpSettings {
   host: string;
   port: number;
+  /** TLS from the first byte (port 465). Otherwise STARTTLS is required (QA 2026-11-09). */
   secure: boolean;
   user?: string;
   pass?: string;
@@ -27,19 +28,42 @@ export interface TwilioSettings {
   baseUrl?: string;
 }
 
+interface Transport {
+  sendMail: (o: object) => Promise<{ messageId?: string }>;
+  verify: () => Promise<unknown>;
+}
+
+async function smtpTransport(s: SmtpSettings): Promise<Transport> {
+  const nodemailer = await import('nodemailer');
+  return nodemailer.default.createTransport({
+    host: s.host,
+    port: s.port,
+    secure: s.secure,
+    // Sign-in links and codes, and the password, never go over the network in clear: without
+    // TLS from the start, STARTTLS is required, not optional (QA 2026-11-09).
+    requireTLS: !s.secure,
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
+    ...(s.user ? { auth: { user: s.user, pass: s.pass ?? '' } } : {}),
+  }) as unknown as Transport;
+}
+
+/** Checks the SMTP settings by connecting; the reason when they do not work. */
+export async function checkSmtp(s: SmtpSettings): Promise<string | null> {
+  try {
+    await (await smtpTransport(s)).verify();
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : String(err);
+  }
+}
+
 /** Sends email by SMTP. */
 export function smtpSender(s: SmtpSettings, log: Logger): (msg: Message) => Promise<void> {
-  let transport: { sendMail: (o: object) => Promise<{ messageId?: string }> } | null = null;
+  let transport: Transport | null = null;
   return async (msg) => {
-    if (!transport) {
-      const nodemailer = await import('nodemailer');
-      transport = nodemailer.default.createTransport({
-        host: s.host,
-        port: s.port,
-        secure: s.secure,
-        ...(s.user ? { auth: { user: s.user, pass: s.pass ?? '' } } : {}),
-      });
-    }
+    if (!transport) transport = await smtpTransport(s);
     const info = await transport.sendMail({
       from: s.from,
       to: msg.to,

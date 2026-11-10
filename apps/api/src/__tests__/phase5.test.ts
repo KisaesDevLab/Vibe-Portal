@@ -184,3 +184,32 @@ describe('serving the client portal', () => {
     expect(health.body.status).toBe('ok');
   });
 });
+
+describe('QA 2026-11-09 (Phase 5)', () => {
+  it('blank numbers and flags count as not set; flags in any case', () => {
+    const c = loadConfig({
+      ...DB,
+      PORT: '',
+      SMTP_PORT: ' ',
+      SMTP_SECURE: '',
+      TRUST_CF_CONNECTING_IP: 'FALSE',
+    });
+    expect(c.PORT).toBe(3101);
+    expect(c.SMTP_PORT).toBe(587);
+    expect(c.SMTP_SECURE).toBeUndefined();
+    expect(c.TRUST_CF_CONNECTING_IP).toBe(false);
+    expect(loadConfig({ ...DB, SMTP_SECURE: 'True' }).SMTP_SECURE).toBe(true);
+    expect(() => loadConfig({ ...DB, SMTP_SECURE: 'yes' })).toThrow(/SMTP_SECURE/);
+  });
+
+  it('/index.html is the page, with its CSP and never cached', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'vibe-portal-web-'));
+    await mkdir(join(dir, 'assets'));
+    await writeFile(join(dir, 'index.html'), '<html><body><div id="root"></div></body></html>');
+    const app = createApp({ pingDb: async () => true, staticDir: dir });
+    const res = await request(app).get('/index.html').expect(200);
+    expect(res.headers['content-security-policy']).toContain("default-src 'self'");
+    expect(res.headers['cache-control']).toBe('no-store');
+    await rm(dir, { recursive: true, force: true });
+  });
+});

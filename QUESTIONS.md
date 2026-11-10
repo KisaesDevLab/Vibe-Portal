@@ -43,3 +43,4 @@
 | P39 | 2026-11-09 | Licence check | Like the other apps | Owner 2026-11-09: **none**; free with Vibe Files |
 | P40 | 2026-11-09 | Container image | Public GHCR image, private source | Owner 2026-11-09: as assumed; built and published on version tags (I ask before tagging) |
 | P41 | 2026-11-09 | Working in vibe-installer | Branch `feat/portal-app`, leaving the untracked admin-config addendum alone | Owner 2026-11-09: as assumed |
+| P42 | 2026-11-09 | The public image shows the server code (P40) | QA 2026-11-09: the API runs as TypeScript inside the image, so anyone who pulls the public image can read it (tests and source maps are now left out). Keeping the code private needs a private image (the installer would log in to GHCR) | |

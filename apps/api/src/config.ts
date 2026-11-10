@@ -4,20 +4,35 @@
 
 import { z } from 'zod';
 
-/** An env value; blank counts as not set (env templates leave "SMTP_USER=" empty). */
-const opt = (s: z.ZodTypeAny = z.string()) =>
-  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), s.optional());
-const flag = (dflt: 'true' | 'false') =>
+/** Blank counts as not set (env templates leave "SMTP_USER=" empty; QA 2026-11-09). */
+const blank = (v: unknown) => (typeof v === 'string' && v.trim() === '' ? undefined : v);
+const opt = (s: z.ZodTypeAny = z.string()) => z.preprocess(blank, s.optional());
+/** A number with a default; blank means the default. */
+const num = (dflt: number) =>
+  z.preprocess(blank, z.coerce.number().int().positive().default(dflt)) as z.ZodType<number>;
+/** true/false in any case; blank means the default. */
+const flag = (dflt: boolean) =>
+  z.preprocess(
+    (v) => (typeof v === 'string' ? (blank(v) as string | undefined)?.trim().toLowerCase() : v),
+    z
+      .enum(['true', 'false'])
+      .optional()
+      .transform((v) => (v === undefined ? dflt : v === 'true')),
+  ) as z.ZodType<boolean>;
+/** true/false in any case, or not set. */
+const optFlag = z.preprocess(
+  (v) => (typeof v === 'string' ? (blank(v) as string | undefined)?.trim().toLowerCase() : v),
   z
     .enum(['true', 'false'])
-    .default(dflt)
-    .transform((v) => v === 'true');
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
+) as z.ZodType<boolean | undefined>;
 
 const Schema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     LOG_LEVEL: z.string().default('info'),
-    PORT: z.coerce.number().int().positive().default(3101),
+    PORT: num(3101),
     DATABASE_URL: z.string().min(1),
     /** Where encrypted file blobs and the key file live (P6, P28). */
     DATA_DIR: z.string().min(1).default('/data/portal'),
@@ -29,16 +44,17 @@ const Schema = z
      * Count rate limits by Cloudflare's CF-Connecting-IP (the portal is reached through the
      * Cloudflare Tunnel). Turn off only when the portal is reached some other way.
      */
-    TRUST_CF_CONNECTING_IP: flag('true'),
+    TRUST_CF_CONNECTING_IP: flag(true),
 
     // P38: email by SMTP, texts by Twilio. "console" only logs (development).
     EMAIL_PROVIDER: z.enum(['smtp', 'console']).default('console'),
     EMAIL_FROM: opt(),
     SMTP_HOST: opt(),
-    SMTP_PORT: z.coerce.number().int().positive().default(587),
+    SMTP_PORT: num(587),
     SMTP_USER: opt(),
     SMTP_PASS: opt(),
-    SMTP_SECURE: flag('false'),
+    /** TLS from the first byte; when not set, true on port 465 (QA 2026-11-09). */
+    SMTP_SECURE: optFlag,
     SMS_PROVIDER: z.enum(['twilio', 'console', 'none']).default('console'),
     TWILIO_ACCOUNT_SID: opt(),
     TWILIO_AUTH_TOKEN: opt(),

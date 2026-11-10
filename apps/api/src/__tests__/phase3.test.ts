@@ -438,3 +438,24 @@ describe('the key file (P28)', () => {
     expect(await w.t.db.select().from(schema.firmKeyEnvelope)).toHaveLength(1);
   });
 });
+
+describe('a failed notice is retried (QA 2026-11-09)', () => {
+  it('puts the notices back when sending fails, and sends them next time', async () => {
+    const a = await w.member('a@example.test');
+    const id = (await add(Buffer.from('1'), '1.pdf').expect(201)).body.fileId as string;
+    await show(id, { [a.id]: true });
+    w.later(6);
+    const real = w.ctx.notifier;
+    w.ctx.notifier = {
+      send: async () => {
+        throw new Error('smtp down');
+      },
+    };
+    expect(await flush(w.ctx)).toBe(0);
+    w.ctx.notifier = real;
+    const before = w.notes.sent.length;
+    w.later(1);
+    expect(await flush(w.ctx)).toBe(1);
+    expect(w.notes.sent.slice(before)).toEqual([expect.objectContaining({ to: 'a@example.test' })]);
+  });
+});

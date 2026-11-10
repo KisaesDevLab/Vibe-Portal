@@ -17,25 +17,32 @@ import { openKeyring } from './files/keyring';
 import { flush } from './files/notify-queue';
 import { purgeUploads } from './firm/uploads';
 import { consoleNotifier, type Notifier } from './lib/notify';
-import { routedNotifier, smtpSender, twilioSender } from './lib/providers';
+import {
+  checkSmtp,
+  routedNotifier,
+  smtpSender,
+  twilioSender,
+  type SmtpSettings,
+} from './lib/providers';
 import { VERSION } from './version';
+
+function smtpSettings(config: Config): SmtpSettings {
+  return {
+    host: config.SMTP_HOST ?? '',
+    port: config.SMTP_PORT,
+    secure: config.SMTP_SECURE ?? config.SMTP_PORT === 465,
+    ...(config.SMTP_USER ? { user: config.SMTP_USER } : {}),
+    ...(config.SMTP_PASS ? { pass: config.SMTP_PASS } : {}),
+    from: config.EMAIL_FROM ?? '',
+  };
+}
 
 /** Email by SMTP and texts by Twilio (P38); "console" only logs, and never in production. */
 function buildNotifier(config: Config, log: pino.Logger): Notifier {
   const consoleSend = consoleNotifier(log, { redact: config.NODE_ENV === 'production' });
   const email =
     config.EMAIL_PROVIDER === 'smtp'
-      ? smtpSender(
-          {
-            host: config.SMTP_HOST ?? '',
-            port: config.SMTP_PORT,
-            secure: config.SMTP_SECURE,
-            ...(config.SMTP_USER ? { user: config.SMTP_USER } : {}),
-            ...(config.SMTP_PASS ? { pass: config.SMTP_PASS } : {}),
-            from: config.EMAIL_FROM ?? '',
-          },
-          log,
-        )
+      ? smtpSender(smtpSettings(config), log)
       : (m: Parameters<Notifier['send']>[0]) => consoleSend.send(m);
   const sms =
     config.SMS_PROVIDER === 'twilio'
@@ -113,6 +120,14 @@ async function main(): Promise<void> {
   setInterval(() => {
     purgeUploads(ctx).catch((err: unknown) => log.error({ err }, 'upload purge failed'));
   }, 3_600_000).unref();
+  if (config.EMAIL_PROVIDER === 'smtp') {
+    // Said at startup, not discovered when a client cannot sign in (QA 2026-11-09).
+    void checkSmtp(smtpSettings(config)).then((why) => {
+      if (why)
+        log.warn({ host: config.SMTP_HOST, port: config.SMTP_PORT, why }, 'SMTP check failed');
+      else log.info({ host: config.SMTP_HOST }, 'SMTP check ok');
+    });
+  }
   app.listen(config.PORT, () => {
     log.info({ port: config.PORT, version: VERSION }, 'vibe-portal api listening');
   });
