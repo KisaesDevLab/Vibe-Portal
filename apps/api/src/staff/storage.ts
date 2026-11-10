@@ -29,7 +29,7 @@ import {
   runMove,
   storageState,
 } from '../files/storage';
-import { snapshotIfDue } from '../files/snapshot';
+import { forgetBucket, snapshotIfDue } from '../files/snapshot';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import type { StaffSession } from './auth';
@@ -127,6 +127,16 @@ export function storageRouter(ctx: Ctx): Router {
       if (!f) throw new Error('firm row missing');
       if (f.storage === 'b2' || f.storageOther || isMoving()) {
         throw new HttpError(409, 'b2_in_use');
+      }
+      // The database copies sent there (and the portal's mark) go with it.
+      const s = b2Settings(ctx, f);
+      if (s) {
+        try {
+          await forgetBucket(openB2(ctx, s));
+        } catch (err) {
+          refuse(res, err);
+          return;
+        }
       }
       await ctx.db.update(schema.firm).set({
         b2Endpoint: '',

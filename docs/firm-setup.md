@@ -213,8 +213,9 @@ newest 14. Settings > Storage shows when the last one went (**Send a database co
 one at once), and History records it if one fails. **The bucket and the seal file are then
 enough to get everything back.** Keep a copy of `data/.firm-key.seal` somewhere other than the
 appliance and other than the bucket: without it neither the copies nor the files can be opened.
-Changes made after the last daily copy (a file shared since, a new client) are lost; the files
-themselves are still in the bucket and Vibe Files can share them again.
+What changed after the last daily copy is lost: a file shared since can be shared again from
+Vibe Files, but **a client upload that arrived since and was not yet collected by Vibe Files
+cannot be opened**, and is gone. **Remove bucket** deletes these copies from the bucket too.
 
 To restore onto a new appliance from the bucket: install the portal, start it once and stop it,
 then run the portal's `snapshot-restore` command with the bucket's settings (`B2_ENDPOINT`,

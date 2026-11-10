@@ -516,10 +516,20 @@ describe('looking after the bucket (P51 follow-ups)', () => {
     let s = await boss.get('/api/staff/v1/settings/storage').expect(200);
     expect(s.body.note.refused).toEqual(expect.objectContaining({ count: 30, total: 30 }));
 
+    // A small firm: fifteen files, none named, is still too many to be leftovers.
+    bucket.items.clear();
+    for (let i = 0; i < 15; i++) {
+      const k = randomUUID();
+      bucket.items.set(k, Buffer.from(`file ${i}`));
+      bucket.modified.set(k, old);
+    }
+    await sweep(w.ctx, true);
+    expect(bucket.items.size).toBe(15);
+
     // Another portal's bucket (a new install with an empty database): not even looked at.
     bucket.noteItems.set('install-id', { body: Buffer.from(randomUUID()), modified: new Date() });
     await sweep(w.ctx, true);
-    expect(bucket.items.size).toBe(30);
+    expect(bucket.items.size).toBe(15);
     s = await boss.get('/api/staff/v1/settings/storage').expect(200);
     expect(s.body.note.otherBucket).toBe(true);
   });
@@ -591,12 +601,20 @@ describe('database snapshots in the bucket (P51)', () => {
       await fresh.db
         .insert(schema.events)
         .values({ kind: 'settings_updated', actorKind: 'system', actor: 'test', detail: {} });
+      // The restored database is older than the files: no sweep for a week.
+      expect(Date.parse(firm?.storageNote?.sweepHoldUntil ?? '')).toBeGreaterThan(Date.now());
       // A database with clients in it is not overwritten unless asked.
       await expect(restoreSnapshot(fresh.db, opened)).rejects.toThrow('--replace');
       await restoreSnapshot(fresh.db, opened, true);
     } finally {
       await fresh.close();
     }
+
+    // Removing the bucket (files back on the appliance) takes the copies with it.
+    await move(boss, 'local');
+    await boss.delete('/api/staff/v1/settings/storage/b2').expect(200);
+    expect(snapshots()).toEqual([]);
+    expect(bucket.noteItems.size).toBe(0);
   });
 
   it('one a day, the newest fourteen kept; a failure is said once', async () => {
@@ -630,5 +648,9 @@ describe('database snapshots in the bucket (P51)', () => {
     await snapshotIfDue(w.ctx);
     const [g] = await w.t.db.select().from(schema.firm);
     expect(g?.storageNote?.snapshotError).toBeNull();
+    // The sweep leaves the snapshot's record alone.
+    await sweep(w.ctx, true);
+    const [h] = await w.t.db.select().from(schema.firm);
+    expect(h?.storageNote?.snapshotAt).toBe(g?.storageNote?.snapshotAt);
   });
 });

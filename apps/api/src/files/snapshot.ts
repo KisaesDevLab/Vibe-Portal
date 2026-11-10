@@ -50,7 +50,6 @@ export interface SnapshotHeader {
   takenAt: string;
   installId: string;
   migrations: string[];
-  tables: Record<string, number>;
   envelope: {
     firmId: string;
     wrappedMfk: string;
@@ -131,7 +130,6 @@ export async function takeSnapshot(ctx: Ctx, bucket: Bucket): Promise<string> {
   const [firm] = await ctx.db.select().from(schema.firm);
   if (!env || !firm) throw new Error('the portal has not been set up');
   const lines: string[] = [];
-  const counts: Record<string, number> = {};
   let migrations: string[] = [];
   // One consistent picture of every table.
   await ctx.db.transaction(
@@ -143,7 +141,6 @@ export async function takeSnapshot(ctx: Ctx, bucket: Bucket): Promise<string> {
           tx,
           sql`SELECT row_to_json(x)::text AS j FROM ${sql.identifier(t)} x`,
         );
-        counts[t] = rows.length;
         for (const r of rows) lines.push(`${JSON.stringify(t)}\t${r.j}`);
       }
     },
@@ -156,7 +153,6 @@ export async function takeSnapshot(ctx: Ctx, bucket: Bucket): Promise<string> {
     takenAt: ctx.now().toISOString(),
     installId: firm.installId,
     migrations,
-    tables: counts,
     envelope: {
       firmId: env.firmId,
       wrappedMfk: b64(env.wrappedMfk),
@@ -177,6 +173,12 @@ export async function takeSnapshot(ctx: Ctx, bucket: Bucket): Promise<string> {
   all.sort();
   for (const old of all.slice(0, Math.max(0, all.length - KEEP))) await bucket.removeNote(old);
   return name;
+}
+
+/** Removes every snapshot and the portal's mark from a bucket it no longer uses. */
+export async function forgetBucket(bucket: Bucket): Promise<void> {
+  for (const s of await listSnapshots(bucket)) await bucket.removeNote(s.name);
+  await bucket.removeNote('install-id');
 }
 
 /** The newest first. */
@@ -303,6 +305,12 @@ export async function restoreSnapshot(
       }
       counts[t] = lines.length;
     }
+    // The database is older than the files written since this snapshot: the sweep for leftover
+    // files holds off for a week (storage.ts).
+    const hold = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString();
+    await tx.execute(
+      sql`UPDATE firm SET storage_note = coalesce(storage_note, '{}'::jsonb) || ${JSON.stringify({ sweepHoldUntil: hold })}::jsonb`,
+    );
     // Identity columns carry on after the restored rows.
     const ids = await query<{ t: string; c: string }>(
       tx,

@@ -346,11 +346,15 @@ export async function sweep(ctx: Ctx, force = false): Promise<void> {
     const state = f.storageMove?.state;
     if (f.storageOther || state === 'requested' || state === 'running') return;
     const now = ctx.now();
-    const note: StorageNote = { ...(f.storageNote ?? {}) };
-    if (!force && note.sweptAt && now.getTime() - Date.parse(note.sweptAt) < SWEEP_EVERY_MS) {
+    const was = f.storageNote ?? {};
+    if (!force && was.sweptAt && now.getTime() - Date.parse(was.sweptAt) < SWEEP_EVERY_MS) {
       return;
     }
-    note.sweptAt = now.toISOString();
+    // Just restored from a snapshot: an older database than the files. Hold off for a week, in
+    // case a newer copy turns up that names the files this one does not.
+    if (was.sweepHoldUntil && now.getTime() < Date.parse(was.sweepHoldUntil)) return;
+    // Only the sweep's own fields: the snapshot keeps its own in the same note.
+    const note: StorageNote = { sweptAt: now.toISOString() };
     const store = ctx.blobs.where.primary;
     if (store.kind === 'b2') {
       const mark = (await (store as Bucket).getNote(MARK))?.toString('utf8').trim();
@@ -370,8 +374,10 @@ export async function sweep(ctx: Ctx, force = false): Promise<void> {
       if (o.modified.getTime() >= cutoff || ctx.blobs.isRecent(o.key)) continue;
       if (!(await inUse(ctx, o.key))) leftovers.push(o.key);
     }
-    if (leftovers.length > Math.max(20, Math.floor(total / 10))) {
-      note.refused = { at: note.sweptAt, count: leftovers.length, total };
+    // Real leftovers come one at a time (a delete that failed). Many at once means the database
+    // does not match the files: none is removed, however few files there are.
+    if (leftovers.length > Math.max(3, Math.floor(total / 10))) {
+      note.refused = { at: now.toISOString(), count: leftovers.length, total };
       await saveNote(ctx, note);
       ctx.log.error(
         { count: leftovers.length, total },
