@@ -33,6 +33,18 @@ export const LIMITS = {
   uploadPerIdentityDay: { max: 300, windowSeconds: 24 * 60 * 60 },
   /** Files sent for one client by all its people in an hour. */
   uploadPerClient: { max: 200, windowSeconds: 60 * 60 },
+  /** Secure links to people outside, made by one staff member in a day (P49). */
+  outsideSharePerStaff: { max: 50, windowSeconds: 24 * 60 * 60 },
+  /** Every call about secure links from one address. */
+  outsidePerIp: { max: 60, windowSeconds: 60 },
+  /** Access codes asked for from one address. */
+  outsideCodePerIp: { max: 10, windowSeconds: 60 },
+  /** Access codes tried from one address. */
+  outsideVerifyPerIp: { max: 20, windowSeconds: 60 },
+  /** One access code a minute for a link (also checked against the last code's time, so
+   *  two windows cannot give two codes seconds apart), and ten a day. */
+  outsideCodeMinute: { max: 1, windowSeconds: 60 },
+  outsideCodeDay: { max: 10, windowSeconds: 24 * 60 * 60 },
   /** Wrong firm keys from one address. */
   badKeyPerIp: { max: 20, windowSeconds: 15 * 60 },
 } satisfies Record<string, Limit>;

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
 // The staff page (D13): clients and their people and files, access requests, client uploads,
-// the history, and Settings (P36). Sharing new files stays in Vibe Files.
+// the history, and Settings (P36). Sharing new files stays in Vibe Files; sending a file that
+// is already here to someone outside the client, by a secure link, is done here (P49).
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
@@ -14,6 +15,7 @@ import {
   when,
   type ClientRow,
   type Invitation,
+  type OutsideShare,
   type PortalUser,
   type SharedFile,
   type StaffMe,
@@ -243,10 +245,15 @@ function ClientDetail(): JSX.Element {
     `/v1/clients/${id}/users`,
   );
   const files = useLoad<{ files: SharedFile[] }>(`/v1/files?clientId=${id}`);
+  const links = useLoad<{ shares: OutsideShare[] }>(`/v1/shares?clientId=${id}`);
   const reload = (): void => {
     people.reload();
     files.reload();
+    links.reload();
   };
+  /** The file "Send securely" was pressed on, while its form is open. */
+  const [sending, setSending] = useState<string | null>(null);
+  const [sentNote, setSentNote] = useState('');
   const { act, busy, error } = useAct(reload);
   const [inv, setInv] = useState({ email: '', phone: '', name: '', roleLabel: '' });
   const label = (u: PortalUser): string => u.name || u.email || u.phone || '?';
@@ -395,6 +402,19 @@ function ClientDetail(): JSX.Element {
               <td style={td}>
                 <Button
                   size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  aria-label={`Send ${f.name} securely`}
+                  style={{ marginRight: 6 }}
+                  onClick={() => {
+                    setSentNote('');
+                    setSending(f.fileId);
+                  }}
+                >
+                  Send securely…
+                </Button>
+                <Button
+                  size="sm"
                   variant="danger"
                   disabled={busy}
                   aria-label={`Remove ${f.name}`}
@@ -415,7 +435,255 @@ function ClientDetail(): JSX.Element {
           ))}
         </Table>
       </Card>
+      {sentNote && <p role="status">{sentNote}</p>}
+      {sending && files.data && (
+        <SendSecurely
+          key={sending}
+          clientId={id}
+          files={files.data.files}
+          first={sending}
+          onSent={(note) => {
+            setSending(null);
+            setSentNote(note);
+            links.reload();
+          }}
+          onCancel={() => setSending(null)}
+        />
+      )}
+      <SecureLinks
+        load={links}
+        busy={busy}
+        onRevoke={(s) => {
+          if (
+            window.confirm(
+              `Revoke the link sent to ${s.email}? It stops working at once, even if it is open.`,
+            )
+          ) {
+            void act(`/v1/shares/${s.id}`, { method: 'DELETE' });
+          }
+        }}
+      />
     </div>
+  );
+}
+
+/** The form that sends files of one client to someone outside it, by a secure link (P49). */
+function SendSecurely({
+  clientId,
+  files,
+  first,
+  onSent,
+  onCancel,
+}: {
+  clientId: string;
+  files: SharedFile[];
+  first: string;
+  onSent: (note: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const { act, busy, error } = useAct(() => undefined);
+  const [picked, setPicked] = useState<Set<string>>(new Set([first]));
+  const [to, setTo] = useState({ email: '', name: '', organization: '', message: '' });
+  const [download, setDownload] = useState(false);
+  const [watermark, setWatermark] = useState(false);
+  const [days, setDays] = useState(30);
+  const toggle = (fileId: string, on: boolean): void => {
+    const next = new Set(picked);
+    if (on) next.add(fileId);
+    else next.delete(fileId);
+    setPicked(next);
+  };
+  const send = async (e: FormEvent): Promise<void> => {
+    e.preventDefault();
+    const email = to.email.trim();
+    const made = await act('/v1/shares', {
+      body: {
+        clientId,
+        fileIds: files.filter((f) => picked.has(f.fileId)).map((f) => f.fileId),
+        email,
+        name: to.name.trim(),
+        organization: to.organization.trim(),
+        message: to.message.trim(),
+        canDownload: download,
+        watermark,
+        days,
+      },
+    });
+    if (made) {
+      onSent(
+        `Secure link sent to ${email}. It expires in ${days} days and can be revoked anytime.`,
+      );
+    }
+  };
+  const row = { display: 'flex', gap: 6, alignItems: 'center' };
+  return (
+    <Card title="Send securely to someone outside the client">
+      <form onSubmit={send} style={{ display: 'grid', gap: 10, maxWidth: 520 }}>
+        <p style={{ margin: 0 }}>
+          For a lender, a lawyer or another accountant. They get an email with a private link, and
+          must enter a one-time code sent to the same address before they see anything. They do not
+          get a portal account.
+        </p>
+        <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 4 }}>
+          <legend style={{ padding: 0, fontWeight: 600 }}>Files to send</legend>
+          {files.map((f) => (
+            <label key={f.fileId} style={row}>
+              <input
+                type="checkbox"
+                checked={picked.has(f.fileId)}
+                onChange={(e) => toggle(f.fileId, e.target.checked)}
+              />
+              <span style={{ overflowWrap: 'anywhere' }}>{f.name}</span>
+            </label>
+          ))}
+        </fieldset>
+        <Input
+          label="Recipient email"
+          name="shareEmail"
+          type="email"
+          value={to.email}
+          onChange={(e) => setTo({ ...to, email: e.target.value })}
+        />
+        <Input
+          label="Recipient name"
+          name="shareName"
+          maxLength={120}
+          value={to.name}
+          onChange={(e) => setTo({ ...to, name: e.target.value })}
+        />
+        <Input
+          label="Organization"
+          name="shareOrganization"
+          maxLength={120}
+          value={to.organization}
+          onChange={(e) => setTo({ ...to, organization: e.target.value })}
+        />
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Access</span>
+          <select
+            value={download ? 'download' : 'view'}
+            onChange={(e) => setDownload(e.target.value === 'download')}
+          >
+            <option value="view">View only (PDFs and pictures)</option>
+            <option value="download">View and download</option>
+          </select>
+        </label>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Link works for</span>
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
+            <option value={7}>7 days</option>
+            <option value={30}>30 days</option>
+            <option value={90}>90 days</option>
+          </select>
+        </label>
+        <label style={row}>
+          <input
+            type="checkbox"
+            checked={watermark}
+            onChange={(e) => setWatermark(e.target.checked)}
+          />
+          <span>Watermark PDFs with the recipient&apos;s name and the date</span>
+        </label>
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Message in the email (optional)</span>
+          <textarea
+            rows={3}
+            maxLength={1000}
+            value={to.message}
+            onChange={(e) => setTo({ ...to, message: e.target.value })}
+          />
+        </label>
+        {!download && (
+          <p style={{ margin: 0, fontSize: 13 }}>
+            View only shows the document on the page with no download button. It cannot stop a
+            screenshot.
+          </p>
+        )}
+        <Problem text={error} />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button type="submit" disabled={busy || picked.size === 0 || !to.email.trim()}>
+            Send secure link
+          </Button>
+          <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>
+            Cancel
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+const SHARE_STATE: Record<OutsideShare['status'], string> = {
+  sent: 'Sent, not opened',
+  opened: 'Opened',
+  expired: 'Expired',
+  revoked: 'Revoked',
+  locked: 'Locked: too many wrong codes',
+};
+
+/** The secure links sent for one client, and the button that ends one (P49). */
+function SecureLinks({
+  load,
+  busy,
+  onRevoke,
+}: {
+  load: Load<{ shares: OutsideShare[] }>;
+  busy: boolean;
+  onRevoke: (share: OutsideShare) => void;
+}): JSX.Element {
+  const shares = load.data?.shares ?? [];
+  return (
+    <Card title="Secure links sent outside">
+      <Status load={load} what="the secure links" />
+      {load.data && shares.length === 0 && (
+        <p>None yet. Use &ldquo;Send securely&rdquo; beside a file above.</p>
+      )}
+      {shares.length > 0 && (
+        <Table head={['To', 'Files', 'Access', 'State', 'Sent', 'Expires', 'Opened', 'Actions']}>
+          {shares.map((s) => (
+            <tr key={s.id}>
+              <td style={td}>
+                {s.name ? `${s.name} (${s.email})` : s.email}
+                {s.organization && `, ${s.organization}`}
+              </td>
+              <td style={td}>
+                {s.files.map((f) => (f.removed ? `${f.name} (removed)` : f.name)).join(', ')}
+              </td>
+              <td style={td}>
+                {s.canDownload ? 'View and download' : 'View only'}
+                {s.watermark && ', watermarked'}
+              </td>
+              <td style={td}>
+                {SHARE_STATE[s.status]}
+                {s.status === 'revoked' && ` ${when(s.revokedAt)}`}
+              </td>
+              <td style={td}>
+                {when(s.createdAt)} by {s.createdBy}
+              </td>
+              <td style={td}>{when(s.expiresAt)}</td>
+              <td style={td}>
+                {s.opens === 0
+                  ? '—'
+                  : `${s.opens} ${s.opens === 1 ? 'time' : 'times'}, last ${when(s.lastOpenedAt)}`}
+              </td>
+              <td style={td}>
+                {(s.status === 'sent' || s.status === 'opened') && (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={busy}
+                    aria-label={`Revoke the link sent to ${s.email}`}
+                    onClick={() => onRevoke(s)}
+                  >
+                    Revoke
+                  </Button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </Table>
+      )}
+    </Card>
   );
 }
 
@@ -572,7 +840,8 @@ function History(): JSX.Element {
   return (
     <Card title="History">
       <p>
-        The newest 300 events: sign-ins, invitations, sharing, client views and downloads, uploads.
+        The newest 300 events: sign-ins, invitations, sharing, client views and downloads, uploads,
+        and secure links sent outside (&ldquo;outside&rdquo; events).
       </p>
       <Status load={load} what="the history" />
       {load.data && rows.length === 0 && <p>Nothing has happened yet.</p>}

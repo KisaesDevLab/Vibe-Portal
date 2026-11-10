@@ -6,8 +6,9 @@ import { schema, type Database } from '@vibe-portal/db';
 import type { EventKind } from '@vibe-portal/types';
 
 export interface Actor {
-  kind: 'firm_key' | 'staff' | 'client' | 'system';
-  /** "PC-NAME\user" for Vibe Files (P15); the identity id for a client. */
+  kind: 'firm_key' | 'staff' | 'client' | 'system' | 'recipient';
+  /** "PC-NAME\user" for Vibe Files (P15); the identity id for a client; the email of
+   *  someone outside sent a secure link (P49). */
   name: string;
 }
 

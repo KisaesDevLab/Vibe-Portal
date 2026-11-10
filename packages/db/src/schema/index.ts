@@ -234,13 +234,73 @@ export const events = pgTable('events', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
   at: ts('at').notNull().defaultNow(),
   kind: text('kind').notNull(),
-  actorKind: text('actor_kind', { enum: ['firm_key', 'staff', 'client', 'system'] }).notNull(),
+  actorKind: text('actor_kind', {
+    enum: ['firm_key', 'staff', 'client', 'system', 'recipient'],
+  }).notNull(),
   actor: text('actor').notNull(),
   clientId: uuid('client_id'),
   fileId: uuid('file_id'),
   uploadId: uuid('upload_id'),
   identityId: uuid('identity_id'),
   detail: jsonb('detail').notNull().default({}),
+});
+
+/** Files sent to someone outside the client by a private link (P49). */
+export const fileShare = pgTable('file_share', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  clientId: uuid('client_id')
+    .notNull()
+    .references(() => clients.id),
+  secretHash: text('secret_hash').notNull(),
+  recipientEmail: text('recipient_email').notNull(),
+  recipientName: text('recipient_name').notNull().default(''),
+  organization: text('organization').notNull().default(''),
+  message: text('message').notNull().default(''),
+  canDownload: boolean('can_download').notNull().default(false),
+  watermark: boolean('watermark').notNull().default(false),
+  createdBy: text('created_by').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  expiresAt: ts('expires_at').notNull(),
+  revokedAt: ts('revoked_at'),
+  /** The staff member, or 'lockout' after too many wrong codes. */
+  revokedBy: text('revoked_by'),
+  wrongTries: integer('wrong_tries').notNull().default(0),
+  opens: integer('opens').notNull().default(0),
+  firstOpenedAt: ts('first_opened_at'),
+  lastOpenedAt: ts('last_opened_at'),
+});
+
+export const fileShareItem = pgTable(
+  'file_share_item',
+  {
+    shareId: uuid('share_id')
+      .notNull()
+      .references(() => fileShare.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => files.id),
+  },
+  (t) => [primaryKey({ columns: [t.shareId, t.fileId] })],
+);
+
+export const fileShareCode = pgTable('file_share_code', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  shareId: uuid('share_id')
+    .notNull()
+    .references(() => fileShare.id, { onDelete: 'cascade' }),
+  codeHash: text('code_hash').notNull(),
+  attempts: integer('attempts').notNull().default(0),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  expiresAt: ts('expires_at').notNull(),
+  usedAt: ts('used_at'),
+});
+
+export const fileShareGrant = pgTable('file_share_grant', {
+  tokenHash: text('token_hash').primaryKey(),
+  shareId: uuid('share_id')
+    .notNull()
+    .references(() => fileShare.id, { onDelete: 'cascade' }),
+  expiresAt: ts('expires_at').notNull(),
 });
 
 export const sessions = pgTable('sessions', {

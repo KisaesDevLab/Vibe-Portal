@@ -57,6 +57,14 @@ export function say(err: unknown): string {
     phone_us_only: 'Please give a US or Canadian mobile number, or use your email.',
     photo_unreadable: 'This photo could not be read. Try taking it again or saving it as JPG.',
     already_received: 'The firm has already received this file.',
+    code_wait: 'A code was sent a moment ago. Wait a minute before asking for another.',
+    too_many_codes:
+      'Too many codes were sent for this link today. Try again tomorrow, or ask the firm for a new link.',
+    code_locked: 'Too many wrong tries with that code. Send a new code.',
+    code_expired: 'That code has expired or was already used. Send a new code.',
+    email_failed: 'The email could not be sent. Try again in a few minutes.',
+    not_verified: 'This page has locked. Open the link again and enter a new code.',
+    view_only: 'This document can be viewed here but not downloaded.',
     network: 'The portal cannot be reached right now. Try again later.',
   };
   return words[code] ?? 'Something went wrong. Try again.';

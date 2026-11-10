@@ -10,11 +10,14 @@ const DAY = 24 * 3_600_000;
 
 export async function purgeStale(db: Database, now: Date): Promise<void> {
   const dayAgo = new Date(now.getTime() - DAY);
-  // Rate-limit windows are at most an hour long.
+  // Rate-limit windows are at most a day long.
   await db.delete(schema.rateLimit).where(lt(schema.rateLimit.windowStart, dayAgo));
   // Sign-in links and codes, used or not, a day after they stopped working.
   await db.delete(schema.signInChallenge).where(lt(schema.signInChallenge.expiresAt, dayAgo));
   await db.delete(schema.sessions).where(lt(schema.sessions.expiresAt, now));
+  // Access codes and verified browsers of secure links (P49), once they stopped working.
+  await db.delete(schema.fileShareCode).where(lt(schema.fileShareCode.expiresAt, dayAgo));
+  await db.delete(schema.fileShareGrant).where(lt(schema.fileShareGrant.expiresAt, now));
   // Access requests never confirmed (no code returned) after a week.
   await db
     .delete(schema.accessRequest)

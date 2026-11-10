@@ -13,6 +13,7 @@ import { brandingRouter, staffSettingsRouter } from './staff/settings';
 import { errorHandler, requireJson, TRUST_CF_IP } from './lib/http';
 import { accessRequestsRouter } from './portal/access-requests';
 import { clientFilesRouter } from './portal/files';
+import { sharedRouter } from './portal/shared';
 import { clientUploadsRouter, type HeicConverter } from './portal/uploads';
 import { invitationsRouter } from './portal/invitations';
 import { serveClient } from './lib/static';
@@ -69,6 +70,8 @@ export function createApp(deps: AppDeps): Express {
     app.use('/api/portal/access-requests', accessRequestsRouter(ctx));
     app.use('/api/portal/files', clientFilesRouter(ctx));
     app.use('/api/portal/uploads', clientUploadsRouter(ctx, deps.convertHeic));
+    // Someone outside the client, with a secure link (P49): no account, no session.
+    app.use('/api/portal/shared', sharedRouter(ctx));
     app.use('/api/firm/v1', firmRouter(ctx));
     // The staff web page (D13): staff sign-in, then the firm API's work and Settings.
     app.use('/api/staff', requireJson);

@@ -46,5 +46,13 @@ export const EVENT_KINDS = [
   'file_added',
   'firm_key_created',
   'firm_key_revoked',
+  // Files sent to someone outside the client (P49).
+  'outside_share',
+  'outside_share_revoked',
+  'outside_code_sent',
+  'outside_verified',
+  'outside_view',
+  'outside_download',
+  'outside_locked',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];

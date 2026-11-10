@@ -123,6 +123,44 @@ change it); only one PC collects each upload. With every PC closed, uploads wait
 4. Upload a photo from the phone. Within a few minutes it is in `_Portal inbox`, named after
    the client, and Intake files it.
 
+## Sending a file to someone outside the client
+
+A lender, a lawyer or another accountant sometimes needs a client's document. They are not one of
+the client's people, so they get no portal account. Send them a **secure link** instead, from the
+staff page:
+
+1. Open the client. Beside a file under the shared files press **Send securely…**. The file must
+   already be on the portal: share it from Vibe Files first.
+2. Tick any other files of this client to send with it (up to 20).
+3. Enter the **recipient's email**, and their name and organization if you like (the recipient
+   sees them on the page, and they go in the watermark).
+4. **Access**: **View only** shows PDFs and pictures (PNG, JPEG) on the page with no download
+   button; it cannot stop a screenshot. **View and download** is needed for any other kind of
+   file.
+5. **Link works for** 7, 30 or 90 days.
+6. **Watermark PDFs** prints the recipient's name, organization and the day they opened it across
+   every page. It works for PDFs up to 30 MB that are not locked with a password.
+7. Add a message for the email if you like, and press **Send secure link**.
+
+What the recipient gets:
+
+- An email from your firm with a private link. It names neither the client nor the files.
+- On the page they press **Send access code**: a 6-digit code goes to the same address and lasts
+  10 minutes. Only someone who reads that mailbox gets in.
+- After the code the documents open for 30 minutes. Then the page locks, and a new code opens it
+  again, as often as needed until the link expires.
+
+**Secure links sent outside**, on the client's page, lists every link: to whom, which files,
+whether it was opened and how often. **Revoke** ends a link at once, even while it is open. Also:
+
+- 15 wrong codes in a row end a link (**Locked**), in case it reached the wrong hands. Send a new
+  one.
+- One recipient can hold 5 working links at a time. Revoke an old one to send another.
+- **Remove** a file from the portal and it leaves every link. Switch a client off and its links
+  stop for as long as it is off.
+- **History** shows each link sent and revoked, each code sent, and every view and download with
+  the recipient's email.
+
 ## Backups
 
 `sudo vibe backup portal` writes a snapshot under `/var/lib/vibe/portal/backups/` with the
@@ -142,3 +180,6 @@ uploads not yet collected by Vibe Files exist only on the portal.
 | Staff locked out after wrong tries                                           | Wait 15 minutes. Lost phone: an admin sends **New setup link**, or `sudo vibe portal staff-reset <email>`                                                                               |
 | No admin can sign in (left the firm, lost phone)                             | `sudo vibe portal staff-reset <email> --admin` for a staff member: they get a new setup link and become an admin                                                                        |
 | A staff member does not see a client, or has no **Requests** or **Settings** | An admin limited them: Settings › Staff › **Access**                                                                                                                                    |
+| Someone sent a secure link gets no access code                               | Their spam folder. One code a minute and ten a day per link. `sudo vibe logs portal` for the SMTP error                                                                                 |
+| Someone sent a secure link sees **Access locked**                            | 15 wrong codes ended the link: send a new one from the client's page                                                                                                                    |
+| **Send securely** says a PDF cannot be watermarked                           | The PDF is locked with a password or damaged: send it without the watermark, or share an unlocked copy from Vibe Files                                                                  |

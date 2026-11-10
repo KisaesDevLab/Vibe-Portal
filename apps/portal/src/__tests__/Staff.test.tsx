@@ -234,6 +234,7 @@ describe('staff page', () => {
           ],
         },
       },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
       [`POST /v1/clients/${id}/invites`]: { status: 201, body: { invitationId: 'i1' } },
       'PUT /v1/files/f1/visibility': { body: { ok: true } },
       'DELETE /v1/files/f1': { body: { ok: true } },
@@ -508,5 +509,145 @@ describe('staff page', () => {
     at('/staff/history');
     expect(await screen.findByText('staff sign in')).toBeTruthy();
     expect(calls.some((c) => c.path === '/v1/events?latest=1&limit=300')).toBe(true);
+  });
+
+  const portalFile = (fileId: string, name: string): object => ({
+    fileId,
+    name,
+    size: 10,
+    taxYear: 2025,
+    sharedAt: '2026-11-01T10:00:00Z',
+    sharedBy: 'PC1\\ann',
+    contentUpdatedAt: null,
+    users: [],
+  });
+  const LINK = {
+    id: 's1',
+    email: 'pat@first-bank.test',
+    name: 'Pat Roe',
+    organization: 'First Bank',
+    canDownload: false,
+    watermark: true,
+    createdAt: '2026-11-02T10:00:00Z',
+    createdBy: 'ann@firm.test',
+    expiresAt: '2026-12-02T10:00:00Z',
+    revokedAt: null,
+    opens: 2,
+    lastOpenedAt: '2026-11-03T10:00:00Z',
+    status: 'opened',
+    files: [
+      { fileId: 'f1', name: 'Return.pdf', removed: false },
+      { fileId: 'f9', name: 'Old.pdf', removed: true },
+    ],
+  };
+
+  it('client page: sends files to someone outside by a secure link, and revokes one (P49)', async () => {
+    const id = CLIENT.id;
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [USER], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: {
+        body: { files: [portalFile('f1', 'Return.pdf'), portalFile('f2', 'W-2.pdf')] },
+      },
+      [`/v1/shares?clientId=${id}`]: {
+        body: {
+          shares: [
+            LINK,
+            { ...LINK, id: 's0', status: 'revoked', revokedAt: '2026-11-04T10:00:00Z' },
+            { ...LINK, id: 's-1', status: 'locked', revokedAt: '2026-11-04T10:00:00Z' },
+          ],
+        },
+      },
+      'POST /v1/shares': { status: 201, body: { shareId: 's2', expiresAt: '2026-11-17T15:00Z' } },
+      'DELETE /v1/shares/s1': { body: { ok: true } },
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    at(`/staff/clients/${id}`);
+
+    // What was sent before: who, what, and what became of it.
+    const cell = await screen.findAllByText('Pat Roe (pat@first-bank.test), First Bank');
+    const row = within(cell[0]?.closest('tr') as HTMLElement);
+    expect(row.getByText('Return.pdf, Old.pdf (removed)')).toBeTruthy();
+    expect(row.getByText('View only, watermarked')).toBeTruthy();
+    expect(row.getByText('Opened')).toBeTruthy();
+    expect(row.getByText(/^2 times, last /)).toBeTruthy();
+    expect(screen.getByText('Locked: too many wrong codes')).toBeTruthy();
+    // Only a link that still works can be ended.
+    expect(screen.getAllByRole('button', { name: /^Revoke the link/ })).toHaveLength(1);
+
+    expect(screen.queryByLabelText('Recipient email')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Send W-2.pdf securely' }));
+    expect((screen.getByLabelText('W-2.pdf') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Return.pdf') as HTMLInputElement).checked).toBe(false);
+    const send = screen.getByRole('button', { name: 'Send secure link' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText('Return.pdf'));
+    fireEvent.change(screen.getByLabelText('Recipient email'), {
+      target: { value: ' lee@title-co.test ' },
+    });
+    fireEvent.change(screen.getByLabelText('Recipient name'), { target: { value: 'Lee Poe' } });
+    fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'Title Co' } });
+    fireEvent.change(screen.getByLabelText('Access'), { target: { value: 'download' } });
+    fireEvent.change(screen.getByLabelText('Link works for'), { target: { value: '7' } });
+    fireEvent.click(screen.getByLabelText(/^Watermark PDFs/));
+    fireEvent.change(screen.getByLabelText('Message in the email (optional)'), {
+      target: { value: 'For the closing.' },
+    });
+    fireEvent.click(send);
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Secure link sent to lee@title-co.test. It expires in 7 days and can be revoked anytime.',
+    );
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/v1/shares')?.body).toEqual({
+      clientId: id,
+      fileIds: ['f1', 'f2'],
+      email: 'lee@title-co.test',
+      name: 'Lee Poe',
+      organization: 'Title Co',
+      message: 'For the closing.',
+      canDownload: true,
+      watermark: true,
+      days: 7,
+    });
+    // The form closes, and the list is read again.
+    expect(screen.queryByLabelText('Recipient email')).toBeNull();
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === `/v1/shares?clientId=${id}`)).toHaveLength(2),
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Revoke the link sent to pat@first-bank.test' }),
+    );
+    expect(confirm).toHaveBeenCalledWith(
+      'Revoke the link sent to pat@first-bank.test? It stops working at once, even if it is open.',
+    );
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'DELETE' && c.path === '/v1/shares/s1')).toBe(true),
+    );
+  });
+
+  it('client page: a secure link the portal refuses says why, and the form stays (P49)', async () => {
+    const id = CLIENT.id;
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: { body: { files: [portalFile('f1', 'letter.docx')] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      'POST /v1/shares': { status: 400, body: { error: 'view_only_needs_preview' } },
+    });
+    at(`/staff/clients/${id}`);
+    expect(await screen.findByText(/None yet\. Use/)).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Send letter.docx securely' }));
+    fireEvent.change(screen.getByLabelText('Recipient email'), {
+      target: { value: 'lee@title-co.test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send secure link' }));
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'View only works for PDFs and pictures',
+    );
+    expect((screen.getByLabelText('Recipient email') as HTMLInputElement).value).toBe(
+      'lee@title-co.test',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByLabelText('Recipient email')).toBeNull();
   });
 });

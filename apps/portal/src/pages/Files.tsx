@@ -24,7 +24,7 @@ export interface PortalFile {
 export const contentUrl = (id: string, mode: 'view' | 'download'): string =>
   `/api/portal/files/${id}/content?mode=${mode}`;
 
-function sizeText(n: number): string {
+export function sizeText(n: number): string {
   if (n < 1024) return `${n} bytes`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;

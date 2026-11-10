@@ -32,6 +32,7 @@ import { VERSION } from '../version';
 import { firmFilesRouter } from './files';
 import { requireFirmKey } from './keys';
 import { firmEventsRouter } from './events';
+import { firmSharesRouter } from './shares';
 import { firmUploadsRouter } from './uploads';
 
 export const INVITE_DAYS = 7;
@@ -84,6 +85,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   r.use('/files', firmFilesRouter(ctx, staff));
   r.use('/uploads', firmUploadsRouter(ctx, staff));
   r.use('/events', firmEventsRouter(ctx));
+  // Secure links to people outside the client (P49): the staff page only.
+  if (staff) r.use('/shares', firmSharesRouter(ctx));
   // P48: a staff member limited to some clients reaches only those; any other answers as if it
   // were not on the portal. Access requests are not about one client yet, so they are for staff
   // who see every client. (Vibe Files, with the firm key, sees everything.)

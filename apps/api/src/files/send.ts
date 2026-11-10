@@ -58,6 +58,19 @@ export async function sendStored(
   }
 }
 
+/** Sends a file already in memory (a watermarked PDF), with the headers `sendStored` sets. */
+export function sendBytes(
+  res: Response,
+  bytes: Uint8Array,
+  f: Pick<Sendable, 'name' | 'inlineType'>,
+): void {
+  res.setHeader('Content-Type', f.inlineType ?? 'application/octet-stream');
+  res.setHeader('Content-Disposition', disposition(f.inlineType ? 'inline' : 'attachment', f.name));
+  res.setHeader('Content-Length', String(bytes.byteLength));
+  res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+  res.end(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+}
+
 /** Reads at least `n` bytes (or all, if shorter) from `src`; `all` replays them and the rest. */
 export async function peek(src: Readable, n: number): Promise<{ head: Buffer; all: Readable }> {
   const it = src[Symbol.asyncIterator]() as AsyncIterator<Buffer>;

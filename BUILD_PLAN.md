@@ -20,7 +20,7 @@ Owner decisions, 2026-11-09 (Q&A):
 | D10 | Uploads | Client uploads are fetched by Vibe Files into a Portal inbox and filed through Intake like scans. |
 | D11 | With full TB | The portals run side by side; the firm decides per client which one to use. No migration in v1. |
 | D12 | Not TB "files only" | Considered running TB itself with its portal feature switches (`@vibe/core/portal-features`) set to Documents only. Rejected: Vibe Portal stays a separate, smaller app (no worker, Redis or TB's full staff app) with its own license and releases; copied TB code is tracked in `VENDORED.md`. |
-| D13 | Staff web page | A small staff page in the portal besides Vibe Files (Q&A 2026-11-09, P5): invites, client users, access requests, client uploads, hide/remove shared files. Sharing new files stays in Vibe Files. |
+| D13 | Staff web page | A small staff page in the portal besides Vibe Files (Q&A 2026-11-09, P5): invites, client users, access requests, client uploads, hide/remove shared files. Sharing new files stays in Vibe Files. Sending a file already on the portal to someone outside the client, by a secure link, is done on the staff page (P49). |
 
 ---
 
@@ -37,7 +37,9 @@ Owner decisions, 2026-11-09 (Q&A):
 - **Staff work mainly in Vibe Files**, through the firm API. A **small staff web page** (D13) covers
   the jobs that need no cabinet access, for staff away from a Vibe Files PC: invites, client users,
   access requests, client uploads, and hiding or removing files already shared. Sharing a *new*
-  file is only done from Vibe Files, because only Vibe Files reaches the cabinet.
+  file is only done from Vibe Files, because only Vibe Files reaches the cabinet. A file already
+  on the portal can be sent from the staff page to **someone outside the client** (a lender, a
+  lawyer) by a secure link, as Time & Billing's secure share (P49).
 - **The cabinet is the source of truth.** The portal holds a *copy* of each shared file. The
   original never leaves the cabinet and is never changed by the portal.
 - **Only staff decide visibility.** New files come only from Vibe Files; the staff page can hide or
@@ -66,7 +68,7 @@ Owner decisions, 2026-11-09 (Q&A):
 | `apps/api/src/auth/portal-*`, `step-up*`, `session-*`, `cookies`, `request-ip` | yes | Client identities |
 | `apps/api/src/auth/password`, `totp-secret`, `sso/vibe-auth-adapter` | yes | Staff sign-in for the staff page (D13, P9); no RBAC: every staff user can do everything on the page |
 | `apps/api/src/portal-invites/grant.ts`, `portal-access-requests` | yes | Called from the firm API instead of the staff app |
-| `apps/api/src/portal/files.ts`, `file-shares.ts` | partly | Files list/download kept; client-made share links (TB CP11) **out** of v1 |
+| `apps/api/src/portal/files.ts`, `file-shares.ts` | partly | Files list/download kept; client-made share links (TB CP11) **out** of v1. Staff-made links to someone outside the client: `firm/shares.ts`, `portal/shared.ts` (P49), written for Vibe Portal |
 | `apps/api/src/files/visibility.ts` | rework | TB shows a file to the whole client; Vibe Portal shows it **per user** (D8) |
 | `packages/crypto`, `packages/ui`, `packages/types` | yes | |
 | `packages/storage` (B2) | no | Local volume only in v1 |
@@ -93,6 +95,7 @@ copy log lives in `VENDORED.md`, as Vibe Files does for Filer.
 | `uploads` | `id`, `client_id`, `identity_id`, `name`, `size`, `sha256`, `blob_key`, `dek_wrapped`, `note`, `uploaded_at`, `fetched_at`, `fetched_by`, `purged_at` |
 | `events` | Append-only: share, unshare, remove, view, download, upload, fetch, invite, approve, sign-in. Exposed to Vibe Files for its audit trail |
 | `sessions` | Client sessions (Postgres) |
+| `file_share`, `file_share_item`, `file_share_code`, `file_share_grant` | Secure links to someone outside the client (P49): the link (secret hash, recipient, view only or download, watermark, expiry, revoked, wrong tries, opens), its files, the emailed 6-digit codes, and the browsers that gave one (30 minutes) |
 
 ---
 
@@ -231,6 +234,11 @@ Each phase ends with its tests green and a ship gate.
 - [x] Every action in `events` with the staff user's name, shown on the History page (P43)
 - [x] Admins and per-client access (P48): admins alone use Settings; an admin can limit a staff
   member to some clients (`staff_users.admin`, `all_clients`; `staff_client`)
+- [x] Secure links to someone outside the client (P49), as Time & Billing's secure share: staff
+  pick files already on the portal and a recipient; the recipient opens `/shared` from the email,
+  proves the mailbox with a 6-digit code, and views (or also downloads) for 30 minutes at a time
+  until the link expires or is revoked. View only, optional PDF watermark, lockout after 15 wrong
+  codes, all of it in `events`
 - **Gate:** a request approved on the page shows the client as active in Vibe Files' Share window;
   a file removed on the page shows as not on the portal in Vibe Files
 

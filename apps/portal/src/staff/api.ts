@@ -48,6 +48,18 @@ export function staffSay(err: unknown): string {
     admin_sees_all: 'An admin sees every client. Untick Admin to choose clients.',
     already_has_access: 'That person already has access to this client.',
     client_inactive: 'This client is switched off.',
+    file_not_found: 'One of those files is no longer on the portal.',
+    view_only_needs_preview:
+      'View only works for PDFs and pictures (PNG, JPEG). Choose View & download, or leave the other files out.',
+    too_large_to_watermark:
+      'A PDF over 30 MB cannot be watermarked. Send it without the watermark.',
+    cannot_watermark:
+      'One of those PDFs cannot be watermarked (it may be locked with a password or damaged). Send it without the watermark.',
+    recipient_has_too_many:
+      'That person already has 5 secure links that still work. Revoke one first.',
+    too_many_shares: 'You have sent 50 secure links today. Try again tomorrow.',
+    email_failed:
+      'The email could not be sent, so no link was made. Check the address and try again.',
     png_or_jpeg: 'The logo must be a PNG or JPEG file of at most 512 KB.',
     too_large: 'That file is too large (a logo can be at most 512 KB).',
     too_many_requests: 'Too many tries. Wait a few minutes.',
@@ -130,6 +142,24 @@ export interface SharedFile {
   sharedBy: string;
   contentUpdatedAt: string | null;
   users: { identityId: string; visible: boolean; viewedAt: string | null }[];
+}
+
+/** A secure link sent to someone outside the client (P49). */
+export interface OutsideShare {
+  id: string;
+  email: string;
+  name: string;
+  organization: string;
+  canDownload: boolean;
+  watermark: boolean;
+  createdAt: string;
+  createdBy: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  opens: number;
+  lastOpenedAt: string | null;
+  status: 'locked' | 'revoked' | 'expired' | 'opened' | 'sent';
+  files: { fileId: string; name: string; removed: boolean }[];
 }
 
 export const when = (iso: string | null): string =>
