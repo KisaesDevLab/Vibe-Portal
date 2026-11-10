@@ -5,6 +5,7 @@
 
 import {
   bigint,
+  bigserial,
   boolean,
   customType,
   integer,
@@ -473,4 +474,29 @@ export const notifyQueue = pgTable('notify_queue', {
   createdAt: ts('created_at').notNull().defaultNow(),
   sentAt: ts('sent_at'),
   droppedAt: ts('dropped_at'),
+});
+
+// Vibe Auth's own tables (P44), as @kisaesdevlab/vibe-auth's sql/auth_identities.sql defines
+// them; the package reads and writes them itself (staff/sso.ts).
+export const authIdentities = pgTable('auth_identities', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  userId: text('user_id').notNull(),
+  issuer: text('issuer').notNull(),
+  subject: text('subject').notNull(),
+  email: text('email'),
+  emailVerified: boolean('email_verified').notNull().default(false),
+  lastLoginAt: ts('last_login_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+});
+
+export const authSettings = pgTable('auth_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
+export const authRevocations = pgTable('auth_revocations', {
+  subjectKey: text('subject_key').primaryKey(),
+  revokedAt: ts('revoked_at').notNull().defaultNow(),
+  revokedUntil: ts('revoked_until').notNull(),
 });
