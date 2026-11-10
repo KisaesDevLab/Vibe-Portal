@@ -46,16 +46,38 @@ export async function sendStored(
   res.setHeader('Content-Length', String(f.size));
   res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
   await beforeBody();
-  if (!first.done) res.write(first.value);
   try {
+    if (!first.done && !(await sent(res, first.value))) return;
     for (let next = await it.next(); !next.done; next = await it.next()) {
-      if (!res.write(next.value)) await new Promise((ok) => res.once('drain', ok));
+      // The reader went away (a download cancelled): stop, and close the source below.
+      if (!(await sent(res, next.value))) return;
     }
     res.end();
   } catch (err) {
     ctx.log.error({ err, id: f.id }, 'stored file failed to decrypt part-way');
     res.destroy(err as Error);
+  } finally {
+    // Closes the file or the B2 download if it was not read to the end (P51).
+    await it.return?.();
   }
+}
+
+/** Writes a chunk, waiting while the reader is behind; false once the reader has gone. */
+async function sent(res: Response, chunk: Buffer): Promise<boolean> {
+  if (res.destroyed || res.writableEnded) return false;
+  if (res.write(chunk)) return true;
+  return new Promise<boolean>((ok) => {
+    const drained = (): void => {
+      res.off('close', closed);
+      ok(true);
+    };
+    const closed = (): void => {
+      res.off('drain', drained);
+      ok(false);
+    };
+    res.once('drain', drained);
+    res.once('close', closed);
+  });
 }
 
 /** The whole plaintext of a stored file, in memory (for a PDF to check or mark); 500 when it

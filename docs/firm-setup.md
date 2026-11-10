@@ -180,12 +180,14 @@ They are encrypted on the appliance first, so B2 only ever holds files it cannot
    test file first. The application key is not shown again.
 3. Press **Move files to B2**. The portal keeps working while it runs; the page shows how far it
    is. Files are deleted from the appliance only once every one is in the bucket. If the move stops
-   (the connection, a restart), every file still opens: press it again to finish.
+   (the connection, a restart), nothing is lost: each file is in the bucket or still on the
+   appliance, and opens from there while the appliance can reach the bucket. Press it again to
+   finish.
 
 **Move files back to the appliance** does the reverse; check the appliance has room first. While
 files are in the bucket it cannot be changed or removed; a new application key for it can be
-saved at any time. From the appliance, `sudo vibe portal storage-move status` shows where files
-are, and `storage-move b2` or `storage-move local` asks the portal to move them.
+saved at any time. The portal also has a `storage-move` command (`status`, `b2`, `local`) for the
+appliance; it is not yet offered as `vibe portal storage-move` by the installer.
 
 A file removed from the portal is deleted from the bucket with all its versions.
 
@@ -197,9 +199,12 @@ keep the seal file with it: it unlocks every stored file, and without it they ca
 original of everything you share, so the portal's files can always be shared again; client
 uploads not yet collected by Vibe Files exist only on the portal.
 
-With files in B2, the snapshot holds the database and the seal file, and the bucket holds the
-files: the seal file is still what unlocks them. Losing the appliance then loses no file, as long
-as the snapshot (with the seal file) is kept somewhere else.
+With files in B2, the bucket holds the files and the snapshot holds what opens them: each file's
+own key is in the database, wrapped by the firm key that the seal file unlocks. To get files back
+after losing the appliance you need the bucket **and** a recent snapshot with its seal file; a
+file added after the last snapshot cannot be opened from the bucket alone. Take snapshots as often
+as before, and restore a snapshot made after the last move (an older one may name the other
+place).
 
 ## When something is wrong
 

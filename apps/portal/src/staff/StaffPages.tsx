@@ -1289,9 +1289,9 @@ function Storage(): JSX.Element {
               {d.move.state === 'done' &&
                 `Moved ${PLACE[d.move.to]} ${when(d.move.finishedAt ?? null)} (${d.move.total ?? 0} files), asked by ${d.move.by}.`}
               {d.move.state === 'failed' &&
-                `The move ${PLACE[d.move.to]} stopped: ${d.move.error ?? 'unknown'}. Every file still opens; move again to finish.`}
+                `The move ${PLACE[d.move.to]} stopped: ${d.move.error ?? 'unknown'}. Nothing is lost; move again to finish.`}
               {d.move.state === 'interrupted' &&
-                `The move ${PLACE[d.move.to]} was cut off by a restart. Every file still opens; move again to finish.`}
+                `The move ${PLACE[d.move.to]} was cut off by a restart. Nothing is lost; move again to finish.`}
             </p>
           )}
           <form

@@ -21,7 +21,7 @@ import { schema } from '@vibe-portal/db';
 import type { Ctx } from '../context';
 import { record } from '../lib/events';
 import { B2Objects, type B2Settings } from './b2';
-import type { ObjectStore } from './objects';
+import { NotFound, type ObjectStore } from './objects';
 
 type FirmRow = typeof schema.firm.$inferSelect;
 type StorageMove = schema.StorageMove;
@@ -132,10 +132,18 @@ async function saveMove(ctx: Ctx, m: StorageMove): Promise<void> {
 /** Runs the move the database asks for, if any and none is running. */
 export async function runMove(ctx: Ctx): Promise<void> {
   if (moving) return;
-  const start = await firmRow(ctx);
-  const asked = start.storageMove;
-  if (asked?.state !== 'requested') return;
+  // Set before the first wait, so the timer and a Settings click cannot both start one.
   moving = true;
+  try {
+    const start = await firmRow(ctx);
+    const asked = start.storageMove;
+    if (asked?.state === 'requested') await move(ctx, start, asked);
+  } finally {
+    moving = false;
+  }
+}
+
+async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void> {
   const to = asked.to;
   const from = other(to);
   const m: StorageMove = { ...asked, state: 'running', startedAt: ctx.now().toISOString() };
@@ -149,6 +157,9 @@ export async function runMove(ctx: Ctx): Promise<void> {
     await ctx.db.update(schema.firm).set({ storage: to, storageOther: true, storageMove: m });
     ctx.blobs.use(dst, src);
     ctx.log.info({ to }, 'stored files: move started');
+    // A file that began to be written before the switch is still going to the old place: wait
+    // for it, so the list below has it.
+    await ctx.blobs.settled();
 
     // 2. Copy what is still in use.
     const keys: string[] = [];
@@ -156,11 +167,19 @@ export async function runMove(ctx: Ctx): Promise<void> {
     m.total = keys.length;
     m.copied = 0;
     await saveMove(ctx, m);
+    // In use: named in the database, or written moments ago (the database is told just after).
+    const needed = async (k: string): Promise<boolean> =>
+      ctx.blobs.isRecent(k) || (await inUse(ctx, k));
     for (const k of keys) {
-      if ((await inUse(ctx, k)) && !(await dst.exists(k))) {
-        await copyOne(src, dst, k);
+      if ((await needed(k)) && !(await dst.exists(k))) {
+        try {
+          await copyOne(src, dst, k);
+        } catch (err) {
+          // Removed from both places while waiting its turn: nothing to copy.
+          if (!(err instanceof NotFound) || (await needed(k))) throw err;
+        }
         // Removed while it was copied: the copy must not outlive it (D9).
-        if (!(await inUse(ctx, k))) await dst.remove(k);
+        if (!(await needed(k))) await dst.remove(k);
       }
       m.copied += 1;
       if (m.copied % 25 === 0) await saveMove(ctx, m);
@@ -171,8 +190,14 @@ export async function runMove(ctx: Ctx): Promise<void> {
     for (const k of await allInUse(ctx)) if (!(await dst.exists(k))) missing += 1;
     if (missing > 0) throw new Error(`${missing} stored files are not in the new place`);
 
-    // 4. Only now are the old copies deleted.
-    for await (const k of src.list()) await src.remove(k);
+    // 4. Only now are the old copies deleted: those that are in the new place, and those no
+    // longer in use. One in use and not in the new place stops the move (both stay in use).
+    let left = 0;
+    for await (const k of src.list()) {
+      if ((await dst.exists(k)) || !(await needed(k))) await src.remove(k);
+      else left += 1;
+    }
+    if (left > 0) throw new Error(`${left} stored files are only in the old place; move again`);
     m.state = 'done';
     m.finishedAt = ctx.now().toISOString();
     await ctx.db.update(schema.firm).set({ storageOther: false, storageMove: m });
@@ -200,8 +225,6 @@ export async function runMove(ctx: Ctx): Promise<void> {
         detail: { to, ok: false, error: m.error },
       },
     ).catch(() => undefined);
-  } finally {
-    moving = false;
   }
 }
 

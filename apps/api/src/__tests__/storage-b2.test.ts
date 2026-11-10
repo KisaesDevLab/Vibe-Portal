@@ -6,8 +6,12 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
+import { get as httpGet } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
+import { PassThrough, Readable } from 'node:stream';
 
+import { generateKey } from '@vibe/crypto';
 import { eq } from 'drizzle-orm';
 import { schema } from '@vibe-portal/db';
 import request from 'supertest';
@@ -15,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MemoryObjects, NotFound } from '../files/objects';
 import { noteInterrupted, runMove } from '../files/storage';
+import { createFirmKey } from '../firm/keys';
 import { createSetupLink } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
 import { CLIENT, world, type World } from './harness';
@@ -270,20 +275,99 @@ describe('moving stored files (P51)', () => {
     for (let i = 1; i < 4; i++) expect(await readFile(ids[i] as string)).toBe(`%PDF ${i}`);
   });
 
-  it('a file missing from the bucket is looked for on the appliance; a bucket that is down is not looked past', async () => {
+  it('while both places are in use, a file the bucket cannot give is read from the appliance', async () => {
     const boss = await admin();
     await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
     const a = await shared('a.pdf', Buffer.from('%PDF a'));
-    const [row] = await w.t.db.select().from(schema.files);
     // As during a move: new files to the bucket, the rest still on the appliance.
     w.ctx.blobs.use(bucket, w.ctx.blobs.local);
     expect(await readFile(a)).toBe('%PDF a');
+    // The bucket is down: the appliance still has it.
     bucket.down = true;
+    expect(await readFile(a)).toBe('%PDF a');
+    // Once the move is over, only the bucket is asked: down is an error, not a fallback.
+    w.ctx.blobs.use(bucket, null);
     await expect(readFile(a)).rejects.toThrow('network down');
     bucket.down = false;
-    w.ctx.blobs.use(bucket, null);
     await expect(readFile(a)).rejects.toBeInstanceOf(NotFound);
-    expect(row?.blobKey).toBeTruthy();
+    // In neither place while the bucket is down: the bucket's error is the answer.
+    const [row] = await w.t.db.select().from(schema.files);
+    await w.ctx.blobs.local.remove(row?.blobKey as string);
+    w.ctx.blobs.use(bucket, w.ctx.blobs.local);
+    bucket.down = true;
+    await expect(readFile(a)).rejects.toThrow('network down');
+  });
+
+  it('a file still being written when the move starts is waited for and moved', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    const source = new PassThrough();
+    const dek = generateKey();
+    const writing = w.ctx.blobs.put(source, dek, 10_000_000);
+    source.write(Buffer.alloc(3_000_000, 7));
+    await w.t.db.update(schema.firm).set({
+      storageMove: { to: 'b2', state: 'requested', by: 'kurt', requestedAt: 'x' },
+    });
+    const moving = runMove(w.ctx);
+    await new Promise((ok) => setTimeout(ok, 50));
+    source.end(Buffer.alloc(1_000, 8));
+    const stored = await writing;
+    await moving;
+    // The database is told only now, after the move has finished with it.
+    const s = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect([s.body.move.state, s.body.bothInUse]).toEqual(['done', false]);
+    expect(await onDisk()).toEqual([]);
+    expect(bucket.items.has(stored.blobKey)).toBe(true);
+    const back = await w.ctx.blobs.read(stored.blobKey, dek);
+    expect(back.length).toBe(3_001_000);
+  });
+
+  it('a download given up part-way closes the stored file it was reading', async () => {
+    let closed = false;
+    const big = Buffer.alloc(8 * 1024 * 1024, 1);
+    const pat = await w.member('pat@example.test');
+    const up = await upload(pat.agent, PDF, 'W-2.pdf').expect(201);
+    await w.t.db.update(schema.uploads).set({ size: 64 * 128 * 1024 });
+    // The stored file stands in for a long one, read slowly.
+    w.ctx.blobs.get = () => {
+      async function* slow(): AsyncGenerator<Buffer> {
+        try {
+          for (let i = 0; i < 64; i++) {
+            yield big.subarray(0, 128 * 1024);
+            await new Promise((ok) => setTimeout(ok, 5));
+          }
+        } finally {
+          closed = true;
+        }
+      }
+      return Readable.from(slow(), { objectMode: false });
+    };
+    const server = w.app.listen(0);
+    try {
+      const port = (server.address() as AddressInfo).port;
+      const key = (await createFirmKey(w.t.db, 'Test')).key;
+      await new Promise<void>((ok, fail) => {
+        const req = httpGet(
+          {
+            port,
+            path: `/api/firm/v1/uploads/${up.body.uploadId as string}/content`,
+            headers: { Authorization: `Bearer ${key}`, 'X-Vibe-PC': 'PC1', 'X-Vibe-User': 'kurt' },
+          },
+          (res) => {
+            res.once('data', () => {
+              req.destroy();
+              ok();
+            });
+          },
+        );
+        req.on('error', () => undefined);
+        setTimeout(() => fail(new Error('no data')), 5000);
+      });
+      for (let i = 0; i < 200 && !closed; i++) await new Promise((ok) => setTimeout(ok, 10));
+      expect(closed).toBe(true);
+    } finally {
+      server.close();
+    }
   });
 
   it('the appliance command asks; the server moves; a restart mid-move says so', async () => {

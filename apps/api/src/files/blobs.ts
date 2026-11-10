@@ -179,16 +179,55 @@ export class BlobStore {
     return { primary: this.primary, other: this.other };
   }
 
+  /** Writes under way, so a move can wait for those that began before it switched places. */
+  private readonly writing = new Set<Promise<unknown>>();
+
+  /** Files written in the last few minutes: the database may not name them yet (it is told
+   *  just after the write), so a move must not take them for unused (P51). */
+  private readonly recent = new Map<string, number>();
+  private static readonly RECENT_MS = 10 * 60_000;
+
+  /** Waits for every write that has begun so far (P51: after a move switches places). */
+  async settled(): Promise<void> {
+    await Promise.allSettled([...this.writing]);
+  }
+
+  /** Written by this server in the last ten minutes. */
+  isRecent(blobKey: string): boolean {
+    const at = this.recent.get(blobKey);
+    return at !== undefined && Date.now() - at < BlobStore.RECENT_MS;
+  }
+
+  private noteWritten(blobKey: string): void {
+    const now = Date.now();
+    for (const [k, at] of this.recent) {
+      if (now - at < BlobStore.RECENT_MS) break;
+      this.recent.delete(k);
+    }
+    this.recent.set(blobKey, now);
+  }
+
   /** Encrypts `source` into a new blob; TooLarge past `maxBytes` (nothing is kept). */
   async put(source: Readable, key: Uint8Array, maxBytes: number): Promise<Stored> {
+    const job = this.write(source, key, maxBytes);
+    this.writing.add(job);
+    try {
+      return await job;
+    } finally {
+      this.writing.delete(job);
+    }
+  }
+
+  private async write(source: Readable, key: Uint8Array, maxBytes: number): Promise<Stored> {
     const blobKey = randomUUID();
+    const store = this.primary;
     const enc = new Encrypt(key, maxBytes);
     let tooLarge = false;
     enc.on('error', (err) => {
       if (err instanceof TooLarge) tooLarge = true;
     });
     try {
-      await this.primary.put(
+      await store.put(
         blobKey,
         pipe(source, enc, () => undefined),
       );
@@ -197,29 +236,47 @@ export class BlobStore {
       throw err;
     }
     if (tooLarge) {
-      await this.primary.remove(blobKey);
+      await store.remove(blobKey);
       throw new TooLarge();
     }
+    this.noteWritten(blobKey);
     return { blobKey, size: enc.size, sha256: enc.hash.digest('hex') };
   }
 
-  /** The stored (encrypted) bytes, from wherever the file is now. NotFound at the first read
-   *  when it is in neither place; any other failure is not looked past. */
+  /** The stored (encrypted) bytes, from wherever the file is now. While a move is under way, a
+   *  file the first place cannot give (not there, or that place is unreachable) is read from the
+   *  other; if the other does not have it either, the first place's error is the answer. */
   raw(blobKey: string): Readable {
     const first = this.primary;
     const second = this.other;
     async function* read(): AsyncGenerator<Buffer> {
       const it = first.get(blobKey)[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
-      let head: IteratorResult<Buffer>;
       try {
-        head = await it.next();
-      } catch (err) {
-        if (!(err instanceof NotFound) || !second) throw err;
-        for await (const c of second.get(blobKey)) yield c as Buffer;
-        return;
+        let head: IteratorResult<Buffer>;
+        try {
+          head = await it.next();
+        } catch (err) {
+          if (!second) throw err;
+          const alt = second.get(blobKey)[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
+          try {
+            let r: IteratorResult<Buffer>;
+            try {
+              r = await alt.next();
+            } catch (err2) {
+              throw err2 instanceof NotFound ? err : err2;
+            }
+            for (; !r.done; r = await alt.next()) yield r.value;
+          } finally {
+            await alt.return?.();
+          }
+          return;
+        }
+        if (!head.done) yield head.value;
+        for (let r = await it.next(); !r.done; r = await it.next()) yield r.value;
+      } finally {
+        // A reader that stops early (a download cancelled) closes the source too.
+        await it.return?.();
       }
-      if (!head.done) yield head.value;
-      for (let r = await it.next(); !r.done; r = await it.next()) yield r.value;
     }
     return Readable.from(read(), { objectMode: false });
   }
