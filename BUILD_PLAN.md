@@ -178,9 +178,10 @@ Each phase ends with its tests green and a ship gate.
 - **Gate:** `pnpm gate` passes; dev stack starts; empty portal page loads
 
 ### Phase 2 — Client sign-in and accounts
-- [ ] Portal identities, magic link + SMS code, new-device challenge, sessions (from TB)
-- [ ] Invitations and accept flow; public access request
-- [ ] Firm key auth, key table, rate limits; `/status`, `/clients`, invites, users, access requests
+- [x] Portal identities, magic link + SMS code, sessions (TB's flow, Postgres-backed). No separate
+  new-device challenge: every sign-in already needs a link or code sent to the person
+- [x] Invitations and accept flow; public access request
+- [x] Firm key auth, key table, rate limits; `/status`, `/clients`, invites, users, access requests
 - **Gate:** invite → accept → sign in → sign out, by email and by SMS (mock providers); request →
   approve → sign in; revoked firm key refused
 
@@ -199,6 +200,8 @@ Each phase ends with its tests green and a ship gate.
 
 ### Phase 5 — Appliance app
 - [ ] `vibe-installer/apps/portal`, Caddy fragment, admin config, firm key creation
+- [ ] Real email and SMS from the appliance's Email & SMS settings. The console notifier logs
+  sign-in links and codes, so the API must refuse it when `NODE_ENV=production`
 - [ ] Cloudflare Tunnel path verified; Vibe Vault discovery
 - **Gate:** clean install on the appliance test VM, reached over the tunnel from a phone
 

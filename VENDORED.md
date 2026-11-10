@@ -25,9 +25,12 @@ Each copied file's second line names its source path and TB commit. This file is
 | `apps/portal/src/main.tsx` | `apps/portal/src/main.tsx` | No service worker |
 | `tsconfig.base.json` | `tsconfig.base.json` | Paths for this repo's packages |
 | `packages/db/src/migrations.ts` | `packages/db/src/scripts/migrate.ts` | Runner split from the connection so tests use pglite |
+| `apps/api/src/lib/contact.ts` | `packages/core/src/auth/{sms-otp,email}.ts` | Same normalisation; adds `maskContact` |
+| `apps/api/src/auth/*`, `portal/*` | `apps/api/src/auth/portal-routes.ts`, `portal-invites/grant.ts`, `portal-access-requests/` | Same flow and endpoint shapes, rewritten for Postgres sessions and limits (no Redis, no JWT) |
 
 ## Log
 
 | Date | TB commit | What |
 |---|---|---|
 | 2026-11-09 | `4b14d2f5` | Phase 1: ui, crypto, tooling, portal shell |
+| 2026-11-09 | `4b14d2f5` | Phase 2: contact helpers; sign-in, invitations and access requests modelled on TB |

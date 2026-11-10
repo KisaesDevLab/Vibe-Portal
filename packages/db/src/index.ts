@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 import postgres from 'postgres';
-import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import type { PgDatabase, PgQueryResultHKT } from 'drizzle-orm/pg-core';
 
 import * as schema from './schema';
 
 export * as schema from './schema';
 export { listMigrations, migrate, type Migration, type MigrationTarget } from './migrations';
 
-export type Database = PostgresJsDatabase<typeof schema>;
+/** Any Drizzle Postgres database over this schema: postgres.js in production, pglite in tests. */
+export type Database = PgDatabase<PgQueryResultHKT, typeof schema>;
 
 export interface CreateDbOptions {
   connectionString: string;

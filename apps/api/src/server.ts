@@ -8,6 +8,7 @@ import pino from 'pino';
 
 import { createApp } from './app';
 import { loadConfig } from './config';
+import { consoleNotifier } from './lib/notify';
 import { VERSION } from './version';
 
 async function main(): Promise<void> {
@@ -38,8 +39,20 @@ async function main(): Promise<void> {
     await sql.end({ timeout: 5 });
   }
 
-  const { ping } = createDb({ connectionString: config.DATABASE_URL });
-  const app = createApp({ pingDb: ping });
+  const { db, ping } = createDb({ connectionString: config.DATABASE_URL });
+  const portalUrl = config.PORTAL_URL.replace(/\/+$/, '');
+  const app = createApp({
+    pingDb: ping,
+    ctx: {
+      db,
+      log,
+      // Real email and SMS come from the appliance's Email & SMS settings (Phase 5).
+      notifier: consoleNotifier(log),
+      now: () => new Date(),
+      portalUrl,
+      cookie: { secure: portalUrl.startsWith('https://') },
+    },
+  });
   app.listen(config.PORT, () => {
     log.info({ port: config.PORT, version: VERSION }, 'vibe-portal api listening');
   });

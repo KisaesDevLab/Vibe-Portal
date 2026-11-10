@@ -129,6 +129,7 @@ export const accessRequest = pgTable('access_request', {
   decidedBy: text('decided_by'),
   decidedAt: ts('decided_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
+  confirmedAt: ts('confirmed_at'),
 });
 
 export const files = pgTable('files', {
@@ -210,4 +211,29 @@ export const sessions = pgTable('sessions', {
   createdAt: ts('created_at').notNull().defaultNow(),
   lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
   expiresAt: ts('expires_at').notNull(),
+  keepSignedIn: boolean('keep_signed_in').notNull().default(false),
 });
+
+export const signInChallenge = pgTable('sign_in_challenge', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  kind: text('kind', { enum: ['magic_link', 'sms_code', 'request_confirm'] }).notNull(),
+  identityId: uuid('identity_id').references(() => portalIdentity.id),
+  accessRequestId: uuid('access_request_id').references(() => accessRequest.id),
+  contact: text('contact').notNull(),
+  secretHash: text('secret_hash').notNull(),
+  keepSignedIn: boolean('keep_signed_in').notNull().default(false),
+  attempts: integer('attempts').notNull().default(0),
+  expiresAt: ts('expires_at').notNull(),
+  usedAt: ts('used_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+});
+
+export const rateLimit = pgTable(
+  'rate_limit',
+  {
+    bucket: text('bucket').notNull(),
+    windowStart: ts('window_start').notNull(),
+    hits: integer('hits').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.bucket, t.windowStart] })],
+);

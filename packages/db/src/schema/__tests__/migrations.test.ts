@@ -8,28 +8,9 @@ import { is } from 'drizzle-orm';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
 import { describe, expect, it } from 'vitest';
 
-import { listMigrations, migrate, type MigrationTarget } from '../../migrations';
+import { listMigrations, migrate } from '../../migrations';
+import { pgliteTarget as target } from '../../testing';
 import * as schema from '../index';
-
-function target(db: PGlite): MigrationTarget {
-  return {
-    exec: async (q) => {
-      await db.exec(q);
-    },
-    applied: async () =>
-      new Set(
-        (await db.query<{ filename: string }>('SELECT filename FROM schema_migrations')).rows.map(
-          (r) => r.filename,
-        ),
-      ),
-    applyOne: async (name, body) => {
-      await db.transaction(async (tx) => {
-        await tx.exec(body);
-        await tx.query('INSERT INTO schema_migrations (filename) VALUES ($1)', [name]);
-      });
-    },
-  };
-}
 
 async function fresh(): Promise<PGlite> {
   const db = new PGlite();

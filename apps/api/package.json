@@ -10,21 +10,25 @@
     "start": "tsx src/server.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "firm-key": "tsx --env-file-if-exists=../../.env src/scripts/firm-key.ts"
   },
   "dependencies": {
     "@vibe-portal/db": "workspace:*",
     "@vibe-portal/types": "workspace:*",
     "@vibe/crypto": "workspace:*",
+    "cookie": "^0.7.2",
     "drizzle-orm": "^0.45.2",
     "express": "^4.19.2",
     "pino": "^9.1.0",
-    "postgres": "^3.4.4",
     "pino-http": "^10.1.0",
+    "postgres": "^3.4.4",
     "tsx": "^4.7.0",
     "zod": "^3.25.28"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "@types/cookie": "^0.6.0",
     "@types/express": "^4.17.21",
     "@types/node": "^24.0.0",
     "@types/supertest": "^6.0.2",
