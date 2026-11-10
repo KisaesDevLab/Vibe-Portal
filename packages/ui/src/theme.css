@@ -1,0 +1,165 @@
+/* SPDX-License-Identifier: PolyForm-Small-Business-1.0.0 */
+/* Dark palette is the default. [data-theme="light"] on <html> swaps. */
+
+:root,
+[data-theme='dark'] {
+  --vibe-color-bg: #0b0d10;
+  --vibe-color-surface: #11151b;
+  --vibe-color-border: #1f2630;
+  --vibe-color-text: #e6edf3;
+  --vibe-color-text-muted: #8b97a6;
+  /* Accent + danger darkened from #3b82f6 / #ef4444 so white text on
+     button fills hits WCAG AA (4.5:1). See ops/docs/progress/
+     a11y-lighthouse-audit.md for the contrast table. */
+  --vibe-color-accent: #2563eb;
+  --vibe-color-accent-muted: #1e3a8a;
+  --vibe-color-success: #22c55e;
+  --vibe-color-warning: #f59e0b;
+  --vibe-color-danger: #dc2626;
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  --vibe-color-bg: #ffffff;
+  --vibe-color-surface: #f6f8fa;
+  --vibe-color-border: #d0d7de;
+  --vibe-color-text: #0f1419;
+  --vibe-color-text-muted: #57606a;
+  --vibe-color-accent: #2563eb;
+  --vibe-color-accent-muted: #dbeafe;
+  --vibe-color-success: #16a34a;
+  --vibe-color-warning: #b45309;
+  --vibe-color-danger: #b91c1c;
+  color-scheme: light;
+}
+
+html,
+body {
+  background: var(--vibe-color-bg);
+  color: var(--vibe-color-text);
+  /* Global body font. Inline component styles still set
+     fontFamily: tokens.font.body explicitly for cards/buttons/etc,
+     but this is the fallback for stray text. The stack matches
+     tokens.font.body in packages/ui/src/tokens.ts. */
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+}
+
+/* Form controls don't inherit font-family from their parent by
+   default — Chrome/Safari/Firefox all fall back to system fonts on
+   <input>, <select>, <textarea>, <button>. That's why dropdowns and
+   text inputs look like a different typeface from the rest of the
+   page. Force inheritance so every control matches the body stack. */
+input,
+select,
+textarea,
+button,
+optgroup,
+option {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+/* Monospace surfaces — file paths, code samples, tokens, IDs —
+   pick up the tokens.font.mono stack via these element selectors so
+   inline `<code>` and `<pre>` are consistent across the app. */
+code,
+kbd,
+samp,
+pre {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Phase 26 #5 — visible keyboard focus indicators. Browsers strip the
+   default outline on styled buttons; this restores it for keyboard
+   users only (focus-visible). Mouse clicks don't trigger it. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--vibe-color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* CP-mobile — touch ergonomics (phones + tablets; desktop unaffected). */
+@media (pointer: coarse) {
+  /* iOS Safari auto-zooms the whole page when a focused input's font is
+     under 16px — and never zooms back out. Inline styles set 13-14px, so
+     this needs !important. */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+  /* Row-action buttons ("sm" = ~27px) are well under the ~44px touch
+     minimum. Floor their hit area without exploding dense layouts. */
+  button {
+    min-height: 38px;
+    min-width: 32px;
+  }
+  input[type='checkbox'],
+  input[type='radio'] {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+/* Long unbroken strings (filenames, emails) must wrap instead of
+   horizontal-scrolling the page. */
+h1,
+h2,
+h3 {
+  overflow-wrap: anywhere;
+}
+
+/* Installed-PWA (Add to Home Screen): keep content out from under the
+   iPhone notch / home indicator. */
+@media (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ---- M0 · narrow-viewport (phone) rules -------------------------------
+   `html[data-narrow="1"]` is mirrored by useIsNarrow at the effective
+   breakpoint (720px ÷ zoom), so these rules agree exactly with the JS
+   layout branches — a plain media query would not (body zoom). */
+
+/* Tab strips scroll horizontally; hide the scrollbar (the right-edge
+   fade below signals more content). */
+.vibe-tabs {
+  scrollbar-width: none; /* Firefox */
+}
+.vibe-tabs::-webkit-scrollbar {
+  display: none; /* WebKit */
+}
+html[data-narrow='1'] .vibe-tabs {
+  /* Fade the right edge as an affordance that the strip scrolls. */
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+
+/* Grid/flex items default to min-width:auto, which lets a Card grow to
+   its content's min-content width (a kanban board, a wide toolbar) and
+   drag the whole page wider than the viewport. On phones, zero that out —
+   inline `minWidth` styles still win where a component needs one, and
+   overflow then stays inside the ScrollX / overflow-x containers. */
+html[data-narrow='1'] #main-content div,
+html[data-narrow='1'] #main-content section,
+html[data-narrow='1'] #main-content form {
+  min-width: 0;
+}
+
+/* Media never forces sideways page scroll on phones. */
+html[data-narrow='1'] img,
+html[data-narrow='1'] video,
+html[data-narrow='1'] canvas {
+  max-width: 100%;
+  height: auto;
+}

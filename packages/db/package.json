@@ -1,0 +1,32 @@
+{
+  "name": "@vibe-portal/db",
+  "version": "0.1.0",
+  "private": true,
+  "license": "PolyForm-Small-Business-1.0.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts",
+    "./migrations": "./src/migrations.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "test": "vitest run",
+    "migrate": "tsx src/scripts/migrate.ts"
+  },
+  "dependencies": {
+    "@vibe-portal/types": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.4"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

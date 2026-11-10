@@ -1,0 +1,35 @@
+{
+  "name": "@vibe-portal/api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "PolyForm-Small-Business-1.0.0",
+  "type": "module",
+  "main": "./src/server.ts",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/server.ts",
+    "start": "tsx src/server.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@vibe-portal/db": "workspace:*",
+    "@vibe-portal/types": "workspace:*",
+    "@vibe/crypto": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "express": "^4.19.2",
+    "pino": "^9.1.0",
+    "postgres": "^3.4.4",
+    "pino-http": "^10.1.0",
+    "tsx": "^4.7.0",
+    "zod": "^3.25.28"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^24.0.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

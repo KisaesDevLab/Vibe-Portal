@@ -1,0 +1,65 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+
+# Test outputs
+coverage/
+.vitest-cache/
+test-results/
+playwright-report/
+
+# Env files
+.env
+.env.local
+.env.*.local
+.env.appliance
+!.env.example
+
+# Local-only scratch / scripts (never tracked)
+.tmp/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+
+# Runtime
+backups/
+*.sqlite
+*.db
+ollama-models/
+
+# Husky temp
+.husky/_/
+
+# Claude Code agent state (per-session, not for source control)
+.claude/
+
+# Stop-state markers (these belong at repo root when present, gitignored otherwise)
+STOPPED_BECAUSE.md
+.eslintcache
+ops/docker/opensign/.env.prod
+
+# design-sync artifacts
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

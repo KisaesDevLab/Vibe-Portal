@@ -171,10 +171,10 @@ Intake inbox registration through Filer's existing shared-inbox setting.
 Each phase ends with its tests green and a ship gate.
 
 ### Phase 1 — Repo and skeleton
-- [ ] pnpm workspace: `apps/api`, `apps/portal`, `packages/{db,crypto,ui,types}`
-- [ ] Copy TB packages and portal shell; `VENDORED.md`; PolyForm headers
-- [ ] Postgres schema + migrations (§2); Docker compose for dev
-- [ ] `GET /health`
+- [x] pnpm workspace: `apps/api`, `apps/portal`, `packages/{db,crypto,ui,types}`
+- [x] Copy TB packages and portal shell; `VENDORED.md`; PolyForm headers
+- [x] Postgres schema + migrations (§2); Docker compose for dev
+- [x] `GET /health`
 - **Gate:** `pnpm gate` passes; dev stack starts; empty portal page loads
 
 ### Phase 2 — Client sign-in and accounts

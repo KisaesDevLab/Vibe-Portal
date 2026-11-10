@@ -1,0 +1,38 @@
+{
+  "name": "vibe-portal",
+  "version": "0.1.0",
+  "private": true,
+  "license": "PolyForm-Small-Business-1.0.0",
+  "description": "Client file portal for Vibe Files firms without Vibe Practice Management",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter=\"./apps/**\" dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint . --ext .ts,.tsx --cache",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json,yml,yaml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,yml,yaml}\"",
+    "test": "pnpm -r test",
+    "headers:check": "node ./scripts/check-headers.mjs",
+    "gate": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm headers:check && pnpm test && pnpm build",
+    "db:migrate": "pnpm --filter @vibe-portal/db migrate",
+    "docker:up": "docker compose -f ops/docker/docker-compose.dev.yml up -d",
+    "docker:down": "docker compose -f ops/docker/docker-compose.dev.yml down"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-jsx-a11y": "^6.10.0",
+    "eslint-plugin-react": "^7.34.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.4.0"
+  }
+}
