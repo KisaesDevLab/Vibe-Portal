@@ -34,6 +34,17 @@ function useSignedOut(): (err: unknown) => boolean {
   }, []);
 }
 
+/** Settings tells the header to read the firm name again. */
+const ME_CHANGED = 'vibe-staff-me-changed';
+
+/** An admin changed what this person may do while the page was open: the header reads it
+ *  again, so the links match (the server refused the call either way). */
+function rightsChanged(err: unknown): void {
+  if (err instanceof ApiError && (err.code === 'admins_only' || err.code === 'all_clients_only')) {
+    window.dispatchEvent(new Event(ME_CHANGED));
+  }
+}
+
 interface Load<T> {
   data: T | null;
   error: string;
@@ -50,6 +61,7 @@ function useLoad<T>(path: string): Load<T> {
     staffApi<T>(path)
       .then(setData)
       .catch((err: unknown) => {
+        rightsChanged(err);
         if (!signedOut(err)) setError(staffSay(err));
       });
   }, [path, signedOut]);
@@ -74,6 +86,7 @@ function useAct(reload: () => void): {
       reload();
       return r;
     } catch (err) {
+      rightsChanged(err);
       if (!signedOut(err)) setError(staffSay(err));
       return null;
     } finally {
@@ -103,9 +116,6 @@ function Status({ load, what }: { load: Load<unknown>; what: string }): JSX.Elem
   }
   return load.data === null ? <p role="status">Loading {what}…</p> : null;
 }
-
-/** Settings tells the header to read the firm name again. */
-const ME_CHANGED = 'vibe-staff-me-changed';
 
 export function StaffHome(): JSX.Element {
   const me = useLoad<StaffMe>('/auth/me');
@@ -804,6 +814,8 @@ function Settings(): JSX.Element {
         <Table head={['Name', 'Email', 'State', 'Sees', 'Last sign-in', 'Actions']}>
           {(staff.data?.staff ?? []).map((u) => {
             const self = u.email === me.data?.email;
+            // No buttons until it is known which row is yours.
+            const other = me.data !== null && !self;
             return (
               <tr key={u.id}>
                 <td style={td}>{u.name}</td>
@@ -820,18 +832,22 @@ function Settings(): JSX.Element {
                 </td>
                 <td style={td}>{when(u.lastSignInAt)}</td>
                 <td style={td}>
-                  {!self && (
+                  {other && (
                     <Button
                       size="sm"
                       variant="secondary"
                       disabled={busy}
                       aria-label={`Access for ${u.name}`}
-                      onClick={() => setAccess(u)}
+                      onClick={() => {
+                        // A client added since the page opened can be ticked.
+                        clients.reload();
+                        setAccess(u);
+                      }}
                     >
                       Access
                     </Button>
                   )}{' '}
-                  {!self && (
+                  {other && (
                     <Button
                       size="sm"
                       variant="secondary"
@@ -847,7 +863,7 @@ function Settings(): JSX.Element {
                       {u.active ? 'Turn off' : 'Turn on'}
                     </Button>
                   )}{' '}
-                  {!self && u.active && (
+                  {other && u.active && (
                     <Button
                       size="sm"
                       variant="secondary"
@@ -881,6 +897,7 @@ function Settings(): JSX.Element {
             who={access}
             clients={clients}
             busy={busy}
+            error={error}
             onCancel={() => setAccess(null)}
             onSave={(change) =>
               void act(`/v1/staff/${access.id}`, { method: 'PATCH', body: change }).then((r) => {
@@ -942,12 +959,15 @@ function StaffAccess({
   who,
   clients,
   busy,
+  error,
   onSave,
   onCancel,
 }: {
   who: StaffRow;
   clients: Load<{ clients: ClientRow[] }>;
   busy: boolean;
+  /** Why the last save did not work: shown here, by the button, as well as at the top. */
+  error: string;
   onSave: (change: { admin: boolean; clientIds: string[] | null }) => void;
   onCancel: () => void;
 }): JSX.Element {
@@ -1046,6 +1066,7 @@ function StaffAccess({
           </span>
         </>
       )}
+      {error && <span>{error}</span>}
       <div style={{ display: 'flex', gap: 8 }}>
         <Button type="submit" disabled={busy}>
           Save access

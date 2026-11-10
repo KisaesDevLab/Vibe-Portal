@@ -399,6 +399,35 @@ describe('staff page', () => {
     );
   });
 
+  it('settings: a refused change says why by the button, and reads who you are again', async () => {
+    const bob = { ...ANN, id: 's2', email: 'bob@firm.test', name: 'Bob', admin: false };
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/settings': SETTINGS,
+      '/v1/keys': { body: { keys: [] } },
+      '/v1/clients': { body: { clients: [CLIENT] } },
+      '/v1/staff': { body: { staff: [ANN, bob] } },
+      'PATCH /v1/staff/s2': { status: 403, body: { error: 'admins_only' } },
+    });
+    at('/staff/settings');
+    await screen.findByText('bob@firm.test');
+    // Your own row has no buttons.
+    expect(screen.queryByRole('button', { name: 'Access for Ann Staff' })).toBeNull();
+    const before = calls.filter((c) => c.path === '/v1/clients').length;
+    const me = calls.filter((c) => c.path === '/auth/me').length;
+    fireEvent.click(screen.getByRole('button', { name: 'Access for Bob' }));
+    // The clients are read again, so one added since can be ticked.
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === '/v1/clients').length).toBeGreaterThan(before),
+    );
+    const form = screen.getByRole('form', { name: 'Access for Bob' });
+    fireEvent.click(within(form).getByRole('button', { name: 'Save access' }));
+    expect(await within(form).findByText('Only an admin can do that.')).toBeTruthy();
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === '/auth/me').length).toBeGreaterThan(me),
+    );
+  });
+
   it('staff who are not admins have no Settings; limited staff no Requests (P48)', async () => {
     serve({
       '/auth/me': { body: { ...(ME.body as object), admin: false, allClients: false } },

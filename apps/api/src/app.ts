@@ -53,6 +53,8 @@ export function createApp(deps: AppDeps): Express {
 
   if (deps.ctx) {
     const ctx = deps.ctx;
+    // A staff member's client list can be long (up to 20,000 ids): that route takes more.
+    app.use('/api/staff/v1/staff', express.json({ limit: '1mb' }));
     // JSON bodies only; file uploads (application/octet-stream) are streamed by their route.
     app.use('/api', express.json({ limit: '64kb' }));
     // Cookie-signed client calls must be JSON (no cross-site form posts). The firm API is

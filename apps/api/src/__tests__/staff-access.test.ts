@@ -171,11 +171,71 @@ describe('admins (P48)', () => {
     expect([limit.status, limit.body]).toEqual([409, { error: 'cannot_change_yourself' }]);
     await boss.patch(`/api/staff/v1/staff/${me}`).send({ active: false }).expect(409);
     await boss.patch(`/api/staff/v1/staff/${me}`).send({}).expect(400);
+    // The same id in capitals is still your own.
+    const caps = await boss.patch(`/api/staff/v1/staff/${me.toUpperCase()}`).send({ admin: false });
+    expect([caps.status, caps.body]).toEqual([409, { error: 'cannot_change_yourself' }]);
+    const reset = await boss.post(`/api/staff/v1/staff/${me.toUpperCase()}/reset`);
+    expect([reset.status, reset.body]).toEqual([409, { error: 'cannot_reset_yourself' }]);
+    await boss.get('/api/staff/v1/settings').expect(200);
     // Two admins: the one demoted first cannot then demote the other.
     const ann = await added(boss, 'ann@example-cpa.test', { admin: true });
     await boss.patch(`/api/staff/v1/staff/${ann.id}`).send({ admin: false }).expect(200);
     await ann.agent.patch(`/api/staff/v1/staff/${me}`).send({ admin: false }).expect(403);
+    await ann.agent.post(`/api/staff/v1/staff/${me}/reset`).expect(403);
     await boss.get('/api/staff/v1/settings').expect(200);
+  });
+
+  it('a new setup link for someone else ends their sessions; an unknown id is not found', async () => {
+    const boss = await admin();
+    const mary = await added(boss, 'mary@example-cpa.test');
+    const res = await boss.post(`/api/staff/v1/staff/${mary.id.toUpperCase()}/reset`).expect(200);
+    expect(res.body.setupLink).toMatch(/#t=/);
+    await mary.agent.get('/api/staff/auth/me').expect(401);
+    await boss.post(`/api/staff/v1/staff/${randomUUID()}/reset`).expect(404);
+    await boss.patch(`/api/staff/v1/staff/${mary.id}`).send({ active: false }).expect(200);
+    const off = await boss.post(`/api/staff/v1/staff/${mary.id}/reset`);
+    expect([off.status, off.body]).toEqual([409, { error: 'staff_off' }]);
+  });
+
+  it('a long list of clients is read, not refused as too large', async () => {
+    const boss = await admin();
+    const mary = await added(boss, 'mary@example-cpa.test');
+    const many = Array.from({ length: 2000 }, () => randomUUID());
+    const res = await boss.patch(`/api/staff/v1/staff/${mary.id}`).send({ clientIds: many });
+    expect([res.status, res.body]).toEqual([400, { error: 'client_not_found' }]);
+  });
+
+  it('what admins do in Settings is not in the history of staff who are not admins', async () => {
+    const boss = await admin();
+    const mary = await added(boss, 'mary@example-cpa.test');
+    await boss.post('/api/staff/v1/keys').send({ label: 'Front desk PC' }).expect(201);
+    await w.member('a@example.test', CLIENT);
+    const kinds = async (a: Agent): Promise<Set<string>> =>
+      new Set(
+        (
+          (await a.get('/api/staff/v1/events?since=0').expect(200)).body.events as {
+            kind: string;
+          }[]
+        ).map((e) => e.kind),
+      );
+    const hers = await kinds(mary.agent);
+    for (const k of ['staff_added', 'staff_sign_in', 'firm_key_created', 'staff_access']) {
+      expect(hers.has(k), k).toBe(false);
+    }
+    expect(hers.size).toBeGreaterThan(0);
+    const newest = await mary.agent.get('/api/staff/v1/events?latest=1&limit=50').expect(200);
+    expect(
+      newest.body.events.some((e: { kind: string }) => e.kind.startsWith('staff_')),
+      'newest',
+    ).toBe(false);
+    const his = await kinds(boss);
+    expect(his.has('staff_added')).toBe(true);
+    expect(his.has('firm_key_created')).toBe(true);
+    // Vibe Files' audit trail is whole.
+    const firm = (await w.firm('get', '/events?since=0').expect(200)).body.events as {
+      kind: string;
+    }[];
+    expect(firm.some((e) => e.kind === 'staff_added')).toBe(true);
   });
 });
 
@@ -230,6 +290,11 @@ describe('staff limited to some clients (P48)', () => {
     expect(files.body.files.map((f: { fileId: string }) => f.fileId)).toEqual([myFile]);
     const asked = await a.get(`/api/staff/v1/files?clientId=${OTHER}`).expect(200);
     expect(asked.body.files).toEqual([]);
+    // Another client's person named under a client she does see.
+    await a
+      .patch(`/api/staff/v1/clients/${CLIENT}/users/${theirs.id}`)
+      .send({ active: false })
+      .expect(404);
     await a
       .put(`/api/staff/v1/files/${theirFile}/visibility`)
       .send({ users: { [theirs.id]: false } })
@@ -395,6 +460,26 @@ describe('the appliance reset (P48)', () => {
     await now.get('/api/staff/v1/staff').expect(200);
     expect(await w.t.db.select().from(schema.staffClient)).toEqual([]);
     expect(await applianceReset(w.ctx, 'nobody@example-cpa.test')).toBeNull();
+  });
+
+  it('with --admin makes an admin though another admin has a working account', async () => {
+    // The admin left the firm: their account still works, so the portal cannot tell.
+    const boss = await admin();
+    const mary = await added(boss, 'mary@example-cpa.test', { clientIds: [CLIENT] });
+    const done = await applianceReset(w.ctx, 'mary@example-cpa.test', { admin: true });
+    expect(done?.madeAdmin).toBe(true);
+    await mary.agent.get('/api/staff/auth/me').expect(401);
+    w.later(1);
+    const now = await finish(done?.link ?? '');
+    expect((await now.get('/api/staff/auth/me').expect(200)).body).toMatchObject({
+      admin: true,
+      allClients: true,
+    });
+    expect(await w.t.db.select().from(schema.staffClient)).toEqual([]);
+    // Already an admin: nothing to make.
+    const again = await applianceReset(w.ctx, 'mary@example-cpa.test', { admin: true });
+    expect(again?.madeAdmin).toBe(false);
+    await boss.get('/api/staff/v1/settings').expect(200);
   });
 });
 

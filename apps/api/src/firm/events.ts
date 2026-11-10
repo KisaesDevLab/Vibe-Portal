@@ -7,9 +7,10 @@
 //   GET /api/firm/v1/events?since=<id>&limit=<n>[&latest=1]
 
 import express, { type Router } from 'express';
-import { and, asc, desc, eq, gt } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, notInArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
+import type { EventKind } from '@vibe-portal/types';
 
 import type { Ctx } from '../context';
 import { h } from '../lib/http';
@@ -22,6 +23,20 @@ const Query = z.object({
   latest: z.literal('1').optional(),
 });
 
+/** What admins do in Settings, and who signs in: the staff list and the portal keys could be
+ *  read back from these, so staff who are not admins do not get them (QA 2026-11-10). */
+const ADMIN_KINDS: EventKind[] = [
+  'staff_sign_in',
+  'settings_updated',
+  'staff_added',
+  'staff_on',
+  'staff_off',
+  'staff_reset',
+  'staff_access',
+  'firm_key_created',
+  'firm_key_revoked',
+];
+
 export function firmEventsRouter(ctx: Ctx): Router {
   const r = express.Router();
   r.get(
@@ -33,7 +48,13 @@ export function firmEventsRouter(ctx: Ctx): Router {
         .from(schema.events)
         .leftJoin(schema.files, eq(schema.files.id, schema.events.fileId))
         // P48: limited staff see their clients' events only (none of the firm-wide ones).
-        .where(and(gt(schema.events.id, q.since), inScope(req, schema.events.clientId)))
+        .where(
+          and(
+            gt(schema.events.id, q.since),
+            inScope(req, schema.events.clientId),
+            req.staff && !req.staff.admin ? notInArray(schema.events.kind, ADMIN_KINDS) : undefined,
+          ),
+        )
         .orderBy(q.latest ? desc(schema.events.id) : asc(schema.events.id))
         .limit(q.limit);
       res.json({

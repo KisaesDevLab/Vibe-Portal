@@ -232,13 +232,16 @@ export async function createSetupLink(
   return `${ctx.portalUrl}/staff/setup#t=${token}`;
 }
 
-/** The appliance's `staff-setup reset <email>`: the account is turned on, its password and
- *  authenticator are set again from a new link, and its sessions end. When no other admin can
- *  sign in it also becomes an admin who sees every client (P48), so the firm is never locked
- *  out of Settings. Null when no account has that email. */
+/** The appliance's `staff-setup reset <email> [--admin]`: the account is turned on, its
+ *  password and authenticator are set again from a new link, and its sessions end. It also
+ *  becomes an admin who sees every client (P48) when asked (`--admin`: the admin left the firm
+ *  or lost their phone, which the portal cannot tell from an admin who is only away), or when
+ *  no other admin has a finished account at all, so the firm is never locked out of Settings.
+ *  Null when no account has that email. */
 export async function applianceReset(
   ctx: Pick<Ctx, 'db' | 'now' | 'portalUrl'>,
   email: string,
+  opts: { admin?: boolean } = {},
 ): Promise<{ email: string; link: string; madeAdmin: boolean } | null> {
   const [u] = await ctx.db
     .select()
@@ -256,7 +259,7 @@ export async function applianceReset(
         ne(schema.staffUsers.id, u.id),
       ),
     );
-  const madeAdmin = Number(admins?.n ?? 0) === 0 && !u.admin;
+  const madeAdmin = !u.admin && (opts.admin === true || Number(admins?.n ?? 0) === 0);
   await ctx.db
     .update(schema.staffUsers)
     .set({

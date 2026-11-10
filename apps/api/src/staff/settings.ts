@@ -85,7 +85,8 @@ function actor(req: Request): Actor {
 function idParam(req: Request): string {
   const v = z.string().uuid().safeParse(req.params['id']);
   if (!v.success) throw new HttpError(404, 'not_found');
-  return v.data;
+  // As the database writes it: the checks against the caller's own id compare text.
+  return v.data.toLowerCase();
 }
 
 /** PNG or JPEG by its first bytes. */
@@ -345,26 +346,41 @@ export function staffSettingsRouter(ctx: Ctx): Router {
     '/staff/:id/reset',
     h(async (req, res) => {
       const id = idParam(req);
+      const me = (req.staff as StaffSession).staffId;
       // Resetting yourself would sign you out with the link only on a screen that is gone.
-      if (id === (req.staff as StaffSession).staffId) {
-        throw new HttpError(409, 'cannot_reset_yourself');
-      }
-      const [u] = await ctx.db.select().from(schema.staffUsers).where(eq(schema.staffUsers.id, id));
-      if (!u) throw new HttpError(404, 'not_found');
-      if (!u.active) throw new HttpError(409, 'staff_off');
+      if (id === me) throw new HttpError(409, 'cannot_reset_yourself');
       const a = actor(req);
-      // Their old password and authenticator stop working; sessions end.
-      await ctx.db
-        .update(schema.staffUsers)
-        .set({
-          passwordHash: null,
-          totpSecretEnc: null,
-          totpConfirmedAt: null,
-          failedLogins: 0,
-          lockedUntil: null,
-        })
-        .where(eq(schema.staffUsers.id, id));
-      await ctx.db.delete(schema.sessions).where(eq(schema.sessions.subjectId, id));
+      const u = await ctx.db.transaction(async (tx) => {
+        // As the change above: both accounts are held, and the caller must still be a working
+        // admin, so two admins resetting each other at the same moment do not both succeed
+        // (the second has just been reset, or demoted).
+        const held = await tx
+          .select()
+          .from(schema.staffUsers)
+          .where(inArray(schema.staffUsers.id, [id, me]))
+          .orderBy(asc(schema.staffUsers.id))
+          .for('update');
+        const self = held.find((x) => x.id === me);
+        if (!self?.admin || !self.active || !self.totpConfirmedAt) {
+          throw new HttpError(403, 'admins_only');
+        }
+        const who = held.find((x) => x.id === id);
+        if (!who) throw new HttpError(404, 'not_found');
+        if (!who.active) throw new HttpError(409, 'staff_off');
+        // Their old password and authenticator stop working; sessions end.
+        await tx
+          .update(schema.staffUsers)
+          .set({
+            passwordHash: null,
+            totpSecretEnc: null,
+            totpConfirmedAt: null,
+            failedLogins: 0,
+            lockedUntil: null,
+          })
+          .where(eq(schema.staffUsers.id, id));
+        await tx.delete(schema.sessions).where(eq(schema.sessions.subjectId, id));
+        return who;
+      });
       const link = await createSetupLink(ctx, id, a.name);
       await sendSetup(u.email, link);
       await record(ctx.db, 'staff_reset', a, { detail: { staffId: id } });
