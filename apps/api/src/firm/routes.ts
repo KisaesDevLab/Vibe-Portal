@@ -4,6 +4,7 @@
 // invitations and access requests. Every call needs the firm key; every change is recorded.
 //
 //   GET    /api/firm/v1/status
+//   GET    /api/firm/v1/clients/:id                        one client, with its counts (P54)
 //   PUT    /api/firm/v1/clients/:id                        { clientCode, displayName, active? }
 //   GET    /api/firm/v1/clients/:id/users
 //   POST   /api/firm/v1/clients/:id/invites                { email?, phone?, name, roleLabel? }
@@ -170,6 +171,33 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           files: Number(c.files),
           waiting: Number(c.waiting),
         })),
+      });
+    }),
+  );
+
+  // P54: one client, for the heading of its page on the staff page.
+  r.get(
+    '/clients/:id',
+    h(async (req, res) => {
+      const id = param(req, 'id');
+      const [c] = await ctx.db
+        .select({
+          id: schema.clients.id,
+          clientCode: schema.clients.clientCode,
+          displayName: schema.clients.displayName,
+          active: schema.clients.active,
+          users: sql<number>`(SELECT count(*) FROM client_access a WHERE a.client_id = clients.id AND a.active)`,
+          files: sql<number>`(SELECT count(*) FROM files f WHERE f.client_id = clients.id AND f.removed_at IS NULL)`,
+          waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = clients.id AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
+        })
+        .from(schema.clients)
+        .where(eq(schema.clients.id, id));
+      if (!c) throw new HttpError(404, 'client_not_found');
+      res.json({
+        ...c,
+        users: Number(c.users),
+        files: Number(c.files),
+        waiting: Number(c.waiting),
       });
     }),
   );

@@ -23,7 +23,12 @@ function serve(routes: Record<string, Reply>): Calls {
         method,
         body: typeof raw === 'string' ? JSON.parse(raw) : raw,
       });
-      const r = routes[`${method} ${path}`] ?? routes[path];
+      const r =
+        routes[`${method} ${path}`] ??
+        routes[path] ??
+        // A client page's heading and its uploads (P54), unless a test says otherwise.
+        (/^\/v1\/clients\/[^/?]+$/.test(path) ? { body: CLIENT } : undefined) ??
+        (path.startsWith('/v1/uploads?clientId=') ? { body: { uploads: [] } } : undefined);
       if (!r) return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 });
       return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
     }),
@@ -284,7 +289,13 @@ describe('staff page', () => {
     at('/staff');
     fireEvent.click(await screen.findByRole('link', { name: 'Smith, John' }));
     expect(await screen.findByText(/John Smith \(not opened\)/)).toBeTruthy();
+    // Whose page it is, at the top (P54).
+    expect(await screen.findByRole('heading', { name: 'Smith, John' })).toBeTruthy();
+    expect(screen.getByText(/Client 1001/)).toBeTruthy();
 
+    // The invite form only after "Invite someone" (P54).
+    expect(screen.queryByLabelText('Email')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Invite someone' }));
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'jane@example.test' } });
     fireEvent.change(screen.getByLabelText('Role (e.g. Spouse)'), { target: { value: 'Spouse' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));

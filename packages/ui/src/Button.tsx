@@ -49,6 +49,15 @@ export function Button({
         cursor: rest.disabled ? 'not-allowed' : 'pointer',
         opacity: rest.disabled ? 0.5 : 1,
         ...variantStyle(variant),
+        // Vibe Portal (P54): a filled button that cannot be used yet is plain grey, so a faded
+        // firm colour is never mistaken for a ready one.
+        ...(rest.disabled && (variant === 'primary' || variant === 'danger')
+          ? {
+              background: tokens.color.border,
+              color: tokens.color.textMuted,
+              opacity: 1,
+            }
+          : {}),
         ...style,
       }}
       {...rest}

@@ -258,17 +258,24 @@ function ClientDetail(): JSX.Element {
   const [sentNote, setSentNote] = useState('');
   const { act, busy, error } = useAct(reload);
   const [inv, setInv] = useState({ email: '', phone: '', name: '', roleLabel: '' });
+  /** The invite form, shown only after "Invite someone" is pressed (P54). */
+  const [inviting, setInviting] = useState(false);
   const label = (u: PortalUser): string => u.name || u.email || u.phone || '?';
+  const head = useLoad<ClientRow>(`/v1/clients/${id}`);
+  const uploads = useLoad<{ uploads: UploadRow[] }>(`/v1/uploads?clientId=${id}`);
   const invite = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
     const body = Object.fromEntries(Object.entries(inv).filter(([, v]) => v.trim() !== ''));
     if (await act(`/v1/clients/${id}/invites`, { body })) {
       setInv({ email: '', phone: '', name: '', roleLabel: '' });
+      setInviting(false);
+      head.reload();
     }
   };
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <Link to="/staff">← All clients</Link>
+      <ClientHead load={head} />
       <Problem text={error} />
       <Card title="People with access">
         <Status load={people} what="the people" />
@@ -326,117 +333,74 @@ function ClientDetail(): JSX.Element {
             </tr>
           ))}
         </Table>
-        <form onSubmit={invite} style={{ display: 'grid', gap: 8, maxWidth: 420, marginTop: 12 }}>
-          <strong>Invite someone</strong>
-          <Input
-            label="Email"
-            name="email"
-            value={inv.email}
-            onChange={(e) => setInv({ ...inv, email: e.target.value })}
-          />
-          <Input
-            label="Mobile number"
-            name="phone"
-            value={inv.phone}
-            onChange={(e) => setInv({ ...inv, phone: e.target.value })}
-          />
-          <Input
-            label="Name"
-            name="name"
-            value={inv.name}
-            onChange={(e) => setInv({ ...inv, name: e.target.value })}
-          />
-          <Input
-            label="Role (e.g. Spouse)"
-            name="role"
-            value={inv.roleLabel}
-            onChange={(e) => setInv({ ...inv, roleLabel: e.target.value })}
-          />
-          <Button type="submit" disabled={busy || !(inv.email.trim() || inv.phone.trim())}>
-            Send invitation
-          </Button>
-        </form>
+        {!inviting && (
+          <div style={{ marginTop: 12 }}>
+            <Button variant="secondary" onClick={() => setInviting(true)}>
+              Invite someone
+            </Button>
+          </div>
+        )}
+        {inviting && (
+          <form onSubmit={invite} style={{ display: 'grid', gap: 8, maxWidth: 420, marginTop: 12 }}>
+            <strong>Invite someone</strong>
+            <Input
+              label="Email"
+              name="email"
+              value={inv.email}
+              onChange={(e) => setInv({ ...inv, email: e.target.value })}
+            />
+            <Input
+              label="Mobile number"
+              name="phone"
+              value={inv.phone}
+              onChange={(e) => setInv({ ...inv, phone: e.target.value })}
+            />
+            <Input
+              label="Name"
+              name="name"
+              value={inv.name}
+              onChange={(e) => setInv({ ...inv, name: e.target.value })}
+            />
+            <Input
+              label="Role (e.g. Spouse)"
+              name="role"
+              value={inv.roleLabel}
+              onChange={(e) => setInv({ ...inv, roleLabel: e.target.value })}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button type="submit" disabled={busy || !(inv.email.trim() || inv.phone.trim())}>
+                Send invitation
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  setInviting(false);
+                  setInv({ email: '', phone: '', name: '', roleLabel: '' });
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
       </Card>
-      <Card title="Files on the portal">
-        <Status load={files} what="the files" />
-        {files.data?.files.length === 0 && <p>No files on the portal for this client.</p>}
-        <Table head={['File', 'Shared', 'Who sees it', 'Actions']}>
-          {(files.data?.files ?? []).map((f) => (
-            <tr key={f.fileId}>
-              <td style={td}>
-                {f.name}
-                {f.contentUpdatedAt && ` (updated ${when(f.contentUpdatedAt)})`}
-              </td>
-              <td style={td}>
-                {when(f.sharedAt)} by {f.sharedBy}
-              </td>
-              <td style={td}>
-                {f.users.filter((x) => x.visible).length === 0 && 'nobody'}
-                {f.users
-                  .filter((x) => x.visible)
-                  .map((x) => {
-                    const u = people.data?.users.find((p) => p.identityId === x.identityId);
-                    return (
-                      <span
-                        key={x.identityId}
-                        style={{ display: 'inline-flex', gap: 4, marginRight: 8 }}
-                      >
-                        {u ? label(u) : 'someone'} (
-                        {x.viewedAt ? `opened ${when(x.viewedAt)}` : 'not opened'})
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          disabled={busy}
-                          aria-label={`Hide ${f.name} from ${u ? label(u) : 'this person'}`}
-                          onClick={() =>
-                            void act(`/v1/files/${f.fileId}/visibility`, {
-                              method: 'PUT',
-                              body: { users: { [x.identityId]: false } },
-                            })
-                          }
-                        >
-                          Hide
-                        </Button>
-                      </span>
-                    );
-                  })}
-              </td>
-              <td style={td}>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  aria-label={`Send ${f.name} securely`}
-                  style={{ marginRight: 6 }}
-                  onClick={() => {
-                    setSentNote('');
-                    setSending(f.fileId);
-                  }}
-                >
-                  Send securely…
-                </Button>
-                <Button
-                  size="sm"
-                  variant="danger"
-                  disabled={busy}
-                  aria-label={`Remove ${f.name}`}
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        `Remove ${f.name} from the portal for everyone? The cabinet keeps it.`,
-                      )
-                    ) {
-                      void act(`/v1/files/${f.fileId}`, { method: 'DELETE' });
-                    }
-                  }}
-                >
-                  Remove
-                </Button>
-              </td>
-            </tr>
-          ))}
-        </Table>
-      </Card>
+      <ClientFiles
+        load={files}
+        people={people.data?.users ?? []}
+        label={label}
+        busy={busy}
+        act={act}
+        onChanged={() => {
+          files.reload();
+          head.reload();
+        }}
+        onSend={(fileId) => {
+          setSentNote('');
+          setSending(fileId);
+        }}
+      />
+      <ClientUploads load={uploads} />
       {sentNote && <p role="status">{sentNote}</p>}
       {sending && files.data && (
         <SendSecurely
@@ -466,6 +430,363 @@ function ClientDetail(): JSX.Element {
         }}
       />
     </div>
+  );
+}
+
+/** The top of a client's page (P54): whose page this is, at a glance. */
+function ClientHead({ load }: { load: Load<ClientRow> }): JSX.Element {
+  const c = load.data;
+  if (!c) return <Status load={load} what="the client" />;
+  const n = (k: number, one: string, many: string): string => `${k} ${k === 1 ? one : many}`;
+  return (
+    <header style={{ display: 'grid', gap: 4 }}>
+      <h1 style={{ margin: 0, fontSize: 24, display: 'flex', gap: 10, alignItems: 'center' }}>
+        {c.displayName}
+        {!c.active && (
+          <span
+            style={{
+              fontSize: 12,
+              padding: '2px 8px',
+              borderRadius: 999,
+              border: '1px solid currentColor',
+              opacity: 0.8,
+            }}
+          >
+            Off
+          </span>
+        )}
+      </h1>
+      <p style={{ margin: 0, opacity: 0.8 }}>
+        {c.clientCode ? `Client ${c.clientCode} · ` : ''}
+        {n(c.users, 'person', 'people')} with access · {n(c.files, 'file', 'files')} on the portal ·{' '}
+        {n(c.waiting, 'upload', 'uploads')} waiting for Vibe Files
+        {!c.active && ' · switched off in Vibe Files: nobody can sign in for this client'}
+      </p>
+    </header>
+  );
+}
+
+type FileSort = 'newest' | 'name' | 'year';
+
+/** A client's files on the portal (P54): find, filter, sort, in tax-year folders, and show,
+ *  hide or remove several at once. Files still come only from Vibe Files. */
+function ClientFiles({
+  load,
+  people,
+  label,
+  busy,
+  act,
+  onChanged,
+  onSend,
+}: {
+  load: Load<{ files: SharedFile[] }>;
+  people: PortalUser[];
+  label: (u: PortalUser) => string;
+  busy: boolean;
+  act: (path: string, init: { method?: string; body?: unknown }) => Promise<unknown>;
+  onChanged: () => void;
+  onSend: (fileId: string) => void;
+}): JSX.Element {
+  const [q, setQ] = useState('');
+  const [year, setYear] = useState('all');
+  const [sort, setSort] = useState<FileSort>('newest');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [who, setWho] = useState<Set<string> | null>(null);
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState('');
+  const all = load.data?.files ?? [];
+  const activePeople = people.filter((p) => p.active);
+  // Everyone with access, until the staff member narrows it.
+  const chosen = who ?? new Set(activePeople.map((p) => p.identityId));
+  const years = [...new Set(all.map((f) => f.taxYear))].sort((a, b) => (b ?? 0) - (a ?? 0));
+  const shown = all
+    .filter((f) => f.name.toLowerCase().includes(q.trim().toLowerCase()))
+    .filter((f) => year === 'all' || String(f.taxYear ?? 'none') === year)
+    .sort((a, b) =>
+      sort === 'name'
+        ? a.name.localeCompare(b.name)
+        : sort === 'year'
+          ? (b.taxYear ?? 0) - (a.taxYear ?? 0) || a.name.localeCompare(b.name)
+          : b.sharedAt.localeCompare(a.sharedAt),
+    );
+  const folders = years
+    .map((y) => ({ year: y, files: shown.filter((f) => f.taxYear === y) }))
+    .filter((g) => g.files.length > 0);
+  const toggle = (ids: string[], on: boolean): void => {
+    const next = new Set(picked);
+    for (const i of ids) {
+      if (on) next.add(i);
+      else next.delete(i);
+    }
+    setPicked(next);
+  };
+  const pickedFiles = all.filter((f) => picked.has(f.fileId));
+
+  /** One call per file; the list is read again once at the end. */
+  const many = async (what: (f: SharedFile) => Promise<unknown>): Promise<void> => {
+    setWorking(true);
+    setProblem('');
+    try {
+      for (const f of pickedFiles) await what(f);
+      setPicked(new Set());
+    } catch (err) {
+      setProblem(staffSay(err));
+    } finally {
+      setWorking(false);
+      onChanged();
+    }
+  };
+  const visibility = (visible: boolean): Promise<void> =>
+    many((f) =>
+      staffApi(`/v1/files/${f.fileId}/visibility`, {
+        method: 'PUT',
+        body: { users: Object.fromEntries([...chosen].map((i) => [i, visible])) },
+      }),
+    );
+  const off = busy || working;
+
+  const row = (f: SharedFile): JSX.Element => (
+    <tr key={f.fileId}>
+      <td style={{ ...td, width: 28 }}>
+        <input
+          type="checkbox"
+          aria-label={`Select ${f.name}`}
+          checked={picked.has(f.fileId)}
+          onChange={(e) => toggle([f.fileId], e.target.checked)}
+        />
+      </td>
+      <td style={td}>
+        {f.name}
+        {f.contentUpdatedAt && ` (updated ${when(f.contentUpdatedAt)})`}
+      </td>
+      <td style={td}>
+        {when(f.sharedAt)} by {f.sharedBy}
+      </td>
+      <td style={td}>
+        {f.users.filter((x) => x.visible).length === 0 && 'nobody'}
+        {f.users
+          .filter((x) => x.visible)
+          .map((x) => {
+            const u = people.find((p) => p.identityId === x.identityId);
+            return (
+              <span key={x.identityId} style={{ display: 'inline-flex', gap: 4, marginRight: 8 }}>
+                {u ? label(u) : 'someone'} (
+                {x.viewedAt ? `opened ${when(x.viewedAt)}` : 'not opened'})
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={off}
+                  aria-label={`Hide ${f.name} from ${u ? label(u) : 'this person'}`}
+                  onClick={() =>
+                    void act(`/v1/files/${f.fileId}/visibility`, {
+                      method: 'PUT',
+                      body: { users: { [x.identityId]: false } },
+                    })
+                  }
+                >
+                  Hide
+                </Button>
+              </span>
+            );
+          })}
+      </td>
+      <td style={td}>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={off}
+          aria-label={`Send ${f.name} securely`}
+          style={{ marginRight: 6 }}
+          onClick={() => onSend(f.fileId)}
+        >
+          Send securely…
+        </Button>
+        <Button
+          size="sm"
+          variant="danger"
+          disabled={off}
+          aria-label={`Remove ${f.name}`}
+          onClick={() => {
+            if (
+              window.confirm(`Remove ${f.name} from the portal for everyone? The cabinet keeps it.`)
+            ) {
+              void act(`/v1/files/${f.fileId}`, { method: 'DELETE' });
+            }
+          }}
+        >
+          Remove
+        </Button>
+      </td>
+    </tr>
+  );
+
+  return (
+    <Card title="Files on the portal">
+      <Status load={load} what="the files" />
+      <Problem text={problem} />
+      {load.data && all.length === 0 && (
+        <p>No files on the portal for this client. Files are shared from Vibe Files.</p>
+      )}
+      {all.length > 0 && (
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'end' }}>
+          <div style={{ minWidth: 220, flex: 1 }}>
+            <Input
+              label="Find a file"
+              name="fileSearch"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+          </div>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 13 }}>Tax year</span>
+            <select value={year} onChange={(e) => setYear(e.target.value)}>
+              <option value="all">All years</option>
+              {years.map((y) => (
+                <option key={y ?? 'none'} value={String(y ?? 'none')}>
+                  {y ?? 'No tax year'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span style={{ fontSize: 13 }}>Sort</span>
+            <select value={sort} onChange={(e) => setSort(e.target.value as FileSort)}>
+              <option value="newest">Newest first</option>
+              <option value="name">Name</option>
+              <option value="year">Tax year</option>
+            </select>
+          </label>
+        </div>
+      )}
+      {picked.size > 0 && (
+        <div
+          role="region"
+          aria-label="Selected files"
+          style={{
+            display: 'grid',
+            gap: 8,
+            padding: 12,
+            margin: '12px 0',
+            border: '1px solid var(--vibe-color-border)',
+            borderRadius: 8,
+          }}
+        >
+          <strong>
+            {picked.size} {picked.size === 1 ? 'file' : 'files'} selected
+          </strong>
+          {activePeople.length > 0 && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <span>For:</span>
+              {activePeople.map((p) => (
+                <label key={p.identityId} style={{ display: 'inline-flex', gap: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={chosen.has(p.identityId)}
+                    onChange={(e) => {
+                      const next = new Set(chosen);
+                      if (e.target.checked) next.add(p.identityId);
+                      else next.delete(p.identityId);
+                      setWho(next);
+                    }}
+                  />
+                  {label(p)}
+                </label>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Button
+              size="sm"
+              disabled={off || chosen.size === 0}
+              onClick={() => void visibility(true)}
+            >
+              Show to them
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={off || chosen.size === 0}
+              onClick={() => void visibility(false)}
+            >
+              Hide from them
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={off}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Remove ${picked.size} ${picked.size === 1 ? 'file' : 'files'} from the portal for everyone? The cabinet keeps them.`,
+                  )
+                ) {
+                  void many((f) => staffApi(`/v1/files/${f.fileId}`, { method: 'DELETE' }));
+                }
+              }}
+            >
+              Remove from portal
+            </Button>
+            <Button size="sm" variant="ghost" disabled={off} onClick={() => setPicked(new Set())}>
+              Clear selection
+            </Button>
+          </div>
+        </div>
+      )}
+      {all.length > 0 && shown.length === 0 && <p>No file matches.</p>}
+      {folders.map((g) => {
+        const ids = g.files.map((f) => f.fileId);
+        const allPicked = ids.every((i) => picked.has(i));
+        return (
+          <details key={g.year ?? 'none'} open style={{ marginTop: 12 }}>
+            <summary style={{ cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                type="checkbox"
+                aria-label={`Select every file in ${g.year ?? 'No tax year'}`}
+                checked={allPicked}
+                onClick={(e) => e.stopPropagation()}
+                onChange={(e) => toggle(ids, e.target.checked)}
+              />
+              <strong>{g.year ?? 'No tax year'}</strong>
+              <span style={{ opacity: 0.7 }}>
+                {g.files.length} {g.files.length === 1 ? 'file' : 'files'}
+              </span>
+            </summary>
+            <Table head={['', 'File', 'Shared', 'Who sees it', 'Actions']}>
+              {g.files.map(row)}
+            </Table>
+          </details>
+        );
+      })}
+    </Card>
+  );
+}
+
+/** What this client sent that Vibe Files has not collected yet (P54). */
+function ClientUploads({ load }: { load: Load<{ uploads: UploadRow[] }> }): JSX.Element {
+  const list = load.data?.uploads ?? [];
+  return (
+    <Card title="Uploads waiting for Vibe Files">
+      <Status load={load} what="the uploads" />
+      {load.data && list.length === 0 && (
+        <p>Nothing waiting from this client: Vibe Files has collected everything.</p>
+      )}
+      {list.length > 0 && (
+        <Table head={['Received', 'File', 'From', 'Note']}>
+          {list.map((u) => (
+            <tr key={u.uploadId}>
+              <td style={td}>{when(u.uploadedAt)}</td>
+              <td style={td}>
+                <a href={`/api/staff/v1/uploads/${u.uploadId}/content`} download={u.name}>
+                  {u.name}
+                </a>
+              </td>
+              <td style={td}>{u.from.name || u.from.email || u.from.phone}</td>
+              <td style={td}>{u.note}</td>
+            </tr>
+          ))}
+        </Table>
+      )}
+    </Card>
   );
 }
 

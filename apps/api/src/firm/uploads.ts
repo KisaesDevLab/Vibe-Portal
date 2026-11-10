@@ -38,6 +38,9 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
   r.get(
     '/',
     h(async (req, res) => {
+      const q = z.object({ clientId: z.string().uuid().optional() }).safeParse(req.query);
+      if (!q.success) throw new HttpError(400, 'bad_query');
+      const clientId = q.data.clientId;
       const rows = await ctx.db
         .select({
           u: schema.uploads,
@@ -55,6 +58,8 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
             isNull(schema.uploads.fetchedAt),
             isNull(schema.uploads.removedAt),
             inScope(req, schema.uploads.clientId),
+            // P54: one client's, for its page on the staff page.
+            clientId ? eq(schema.uploads.clientId, clientId) : undefined,
           ),
         )
         .orderBy(asc(schema.uploads.uploadedAt))
