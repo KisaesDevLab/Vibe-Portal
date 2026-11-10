@@ -10,8 +10,8 @@
 export const MARK_ANGLE = 35;
 /** Share of the visible width and height the mark may take. */
 const FILL = 0.85;
-/** Largest letters, in points, on a big page. */
-const MAX_SIZE = 40;
+/** Largest letters: a thirtieth of the page's shorter side (about 20 points on Letter). */
+const MAX_SHARE = 1 / 30;
 /** The text box in units of the font size: Helvetica's descender and cap height. */
 const BELOW = 0.22;
 const ABOVE = 0.72;
@@ -30,7 +30,7 @@ export function markLayout(box, rotation, widthAtOne) {
   const tall = BELOW + ABOVE;
   // The rotated box of text `size` points high is size*(k|c| + t|s|) wide, size*(k|s| + t|c|) high.
   const size = Math.min(
-    MAX_SIZE,
+    Math.min(box.width, box.height) * MAX_SHARE,
     (FILL * box.width) / (widthAtOne * Math.abs(c) + tall * Math.abs(s)),
     (FILL * box.height) / (widthAtOne * Math.abs(s) + tall * Math.abs(c)),
   );

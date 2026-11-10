@@ -31,6 +31,10 @@ export function watermarkText(
   return text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 3)}...` : text;
 }
 
+/** The worker read the file and found it is not a PDF it can mark (damaged, or a password).
+ *  A timeout or a worker that died is not this: the same file may well work next time. */
+export class NotMarkable extends Error {}
+
 type Job = { op: 'check'; bytes: Uint8Array } | { op: 'mark'; bytes: Uint8Array; text: string };
 type Reply = { ok: true; bytes?: Uint8Array } | { ok: false; error: string };
 
@@ -68,7 +72,7 @@ async function run(job: Job): Promise<Uint8Array | undefined> {
       w.once('message', (r: Reply) => {
         done();
         if (r.ok) resolve(r.bytes);
-        else reject(new Error(r.error));
+        else reject(new NotMarkable(r.error));
       });
       w.once('error', (err) => {
         done();

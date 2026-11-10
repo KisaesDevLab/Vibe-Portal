@@ -189,6 +189,48 @@ describe('marked copies (P49 review)', () => {
     expect(await w.ctx.blobs.exists(yesterday?.blobKey ?? '')).toBe(false);
   });
 
+  it('a new version that cannot be marked is refused, then listed as not available', async () => {
+    const boss = await admin();
+    const fileId = await onPortal(CLIENT, 'a.pdf', await realPdf());
+    const s = await send(boss, [fileId], { watermark: true });
+    const pat = await unlock(s);
+    await pat.get(`${s.path}/files/${fileId}/content?mode=view`).expect(200);
+    await replace(fileId, Buffer.from('%PDF-1.7 damaged'));
+    const refused = await pat.get(`${s.path}/files/${fileId}/content?mode=view`);
+    expect([refused.status, refused.body]).toEqual([422, { error: 'watermark_failed' }]);
+    const open = await pat.post(`${s.path}/open`).send({ key: s.key }).expect(200);
+    expect(open.body.files[0].available).toBe(false);
+    // A version that can be marked opens again.
+    await replace(fileId, await realPdf(1));
+    const again = await pat.post(`${s.path}/open`).send({ key: s.key }).expect(200);
+    expect(again.body.files[0].available).toBe(true);
+    await pat.get(`${s.path}/files/${fileId}/content?mode=view`).expect(200);
+  });
+
+  it('wrong codes lock the link: nothing marked stays on disk', async () => {
+    const boss = await admin();
+    const fileId = await onPortal(CLIENT, 'a.pdf', await realPdf());
+    const s = await send(boss, [fileId], { watermark: true });
+    const pat = await unlock(s);
+    await pat.get(`${s.path}/files/${fileId}/content?mode=view`).expect(200);
+    const [m] = await marks();
+    expect(m).toBeDefined();
+    const guesser = request.agent(w.app);
+    let last = 0;
+    for (let i = 0; i < 3 && last !== 410; i++) {
+      w.later(2);
+      await guesser.post(`${s.path}/code`).send({ key: s.key }).expect(200);
+      const right = w.code(LENDER);
+      const wrong = right === '000000' ? '111111' : '000000';
+      for (let t = 0; t < 5 && last !== 410; t++) {
+        last = (await guesser.post(`${s.path}/verify`).send({ key: s.key, code: wrong })).status;
+      }
+    }
+    expect(last).toBe(410);
+    expect(await marks()).toEqual([]);
+    expect(await w.ctx.blobs.exists(m?.blobKey ?? '')).toBe(false);
+  });
+
   it('staff end the link: nothing marked stays on disk', async () => {
     const boss = await admin();
     const fileId = await onPortal(CLIENT, 'a.pdf', await realPdf());

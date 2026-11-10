@@ -15,7 +15,7 @@ import { schema } from '@vibe-portal/db';
 import type { Ctx } from '../context';
 import { HttpError } from '../lib/http';
 import { readPlain } from './send';
-import { WATERMARK_MAX_BYTES, watermarkPdf, watermarkText } from './watermark';
+import { NotMarkable, WATERMARK_MAX_BYTES, watermarkPdf, watermarkText } from './watermark';
 
 type Share = typeof schema.fileShare.$inferSelect;
 
@@ -28,6 +28,16 @@ export interface Marked {
 /** Copies being made now, so views at once wait for the one job instead of each starting one. */
 const making = new Map<string, Promise<Marked>>();
 
+/** Stored contents (by blob key) found not to be PDFs that can be marked: listed as Not
+ *  available, and not read again on every click. Held in memory, at most 1,000; after a restart
+ *  the first view finds out again. A new version of the file is a new blob key. */
+const unmarkable = new Set<string>();
+const UNMARKABLE_MAX = 1000;
+
+export function cannotMark(blobKey: string | null): boolean {
+  return blobKey !== null && unmarkable.has(blobKey);
+}
+
 const dayOf = (now: Date): string => now.toISOString().slice(0, 10);
 
 async function make(
@@ -37,7 +47,9 @@ async function make(
   day: string,
 ): Promise<Marked> {
   // Marked or not sent: an unmarked copy never goes out in place of a marked one.
-  if (f.size > WATERMARK_MAX_BYTES) throw new HttpError(422, 'watermark_failed');
+  if (f.size > WATERMARK_MAX_BYTES || unmarkable.has(f.blobKey)) {
+    throw new HttpError(422, 'watermark_failed');
+  }
   const plain = await readPlain(ctx, f);
   let marked: Uint8Array;
   try {
@@ -50,6 +62,13 @@ async function make(
     );
   } catch (err) {
     ctx.log.warn({ err, id: f.id }, 'file could not be watermarked');
+    if (err instanceof NotMarkable) {
+      if (unmarkable.size >= UNMARKABLE_MAX) {
+        const oldest = unmarkable.values().next().value;
+        if (oldest !== undefined) unmarkable.delete(oldest);
+      }
+      unmarkable.add(f.blobKey);
+    }
     throw new HttpError(422, 'watermark_failed');
   }
   const dek = generateKey();

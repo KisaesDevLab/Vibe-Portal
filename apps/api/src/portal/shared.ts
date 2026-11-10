@@ -20,7 +20,7 @@ import { schema } from '@vibe-portal/db';
 
 import { firmName, type Ctx } from '../context';
 import { wontFit } from '../firm/shares';
-import { dropMarksOfShare, markedCopy } from '../files/marks';
+import { cannotMark, dropMarksOfShare, markedCopy } from '../files/marks';
 import { sendStored } from '../files/send';
 import { previewOf } from '../files/types';
 import { maskContact } from '../lib/contact';
@@ -114,6 +114,7 @@ export function sharedRouter(ctx: Ctx): Router {
         name: schema.files.name,
         size: schema.files.size,
         contentType: schema.files.contentType,
+        blobKey: schema.files.blobKey,
       })
       .from(schema.fileShareItem)
       .innerJoin(schema.files, eq(schema.files.id, schema.fileShareItem.fileId))
@@ -147,7 +148,10 @@ export function sharedRouter(ctx: Ctx): Router {
         preview: previewOf(f.contentType),
         // False when the file has since changed into something this link does not allow
         // (Vibe Files replaced its content): listed, but it does not open.
-        available: wontFit(s, f) === null,
+        // Or a marked link's PDF found not to be markable (a locked or damaged new version).
+        available:
+          wontFit(s, f) === null &&
+          !(s.watermark && previewOf(f.contentType) === 'pdf' && cannotMark(f.blobKey)),
       })),
     };
   };
