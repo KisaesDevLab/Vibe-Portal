@@ -103,10 +103,47 @@ describe('staff page', () => {
     await screen.findByRole('heading', { name: 'Staff sign in' });
   });
 
-  it('before any account, sign-in says to make a setup link on the appliance', async () => {
-    serve({ '/auth/status': { body: { setupNeeded: true } } });
+  it('before any account, with no first admin set, sign-in points to the appliance console', async () => {
+    serve({ '/auth/status': { body: { setupNeeded: true, firstAdmin: null } } });
     at('/staff/login');
-    expect(await screen.findByText(/sudo vibe portal setup-link/)).toBeTruthy();
+    expect(await screen.findByText(/no staff account yet/)).toBeTruthy();
+    expect(screen.getByText(/enter the first admin/)).toBeTruthy();
+    // No command line for the firm to type.
+    expect(document.body.textContent).not.toMatch(/sudo|docker/);
+  });
+
+  it('before any account, sign-in says where the setup link went, and sends it again', async () => {
+    const calls = serve({
+      '/auth/status': {
+        body: {
+          setupNeeded: true,
+          firstAdmin: { to: 'k•••@firm.test', at: '2026-11-10T15:00:00Z', ok: true },
+        },
+      },
+      'POST /auth/setup/resend': {
+        body: { firstAdmin: { to: 'k•••@firm.test', at: '2026-11-10T16:00:00Z', ok: true } },
+      },
+    });
+    at('/staff/login');
+    expect(await screen.findByText('k•••@firm.test')).toBeTruthy();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Send again' }));
+    expect(await screen.findByText(/A new link was/)).toBeTruthy();
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/auth/setup/resend')).toBe(true);
+  });
+
+  it('a setup email that failed points to the email settings', async () => {
+    serve({
+      '/auth/status': {
+        body: {
+          setupNeeded: true,
+          firstAdmin: { to: 'k•••@firm.test', at: '2026-11-10T15:00:00Z', ok: false },
+        },
+      },
+    });
+    at('/staff/login');
+    expect(await screen.findByText(/could not be sent/)).toBeTruthy();
+    expect(screen.getByText(/Email & SMS/)).toBeTruthy();
   });
 
   it('signs in with email, password and authenticator code', async () => {

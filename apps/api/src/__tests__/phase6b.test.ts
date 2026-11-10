@@ -62,6 +62,7 @@ describe('setting up staff accounts (P36)', () => {
   it('the first account comes from the appliance link, once', async () => {
     expect((await request(w.app).get('/api/staff/auth/status')).body).toEqual({
       setupNeeded: true,
+      firstAdmin: null,
     });
     const { agent } = await staff();
     expect((await agent.get('/api/staff/auth/me').expect(200)).body).toMatchObject({

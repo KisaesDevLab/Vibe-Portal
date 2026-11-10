@@ -74,6 +74,7 @@ export function staffSay(err: unknown): string {
     png_or_jpeg: 'The logo must be a PNG or JPEG file of at most 512 KB.',
     too_large: 'That file is too large (a logo can be at most 512 KB).',
     too_many_requests: 'Too many tries. Wait a few minutes.',
+    no_first_admin: 'A staff account exists now: sign in, or ask an admin to add you.',
     signed_out: 'You were signed out. Sign in again.',
     invalid_phone: 'That mobile number does not look right.',
     contact_required: 'Enter an email or a mobile number.',

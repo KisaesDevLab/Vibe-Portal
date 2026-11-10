@@ -40,6 +40,8 @@ const Schema = z
     PORTAL_URL: z.string().url().default('http://localhost:5197'),
     /** The built client portal (apps/portal/dist), served by the API in the container. */
     STATIC_DIR: opt(),
+    /** The first admin's email (P52): emailed a setup link while no staff account exists. */
+    FIRST_ADMIN_EMAIL: opt(),
     /**
      * Count rate limits by the CF-Connecting-IP header. Only behind a proxy that always sets it
      * (the appliance's Caddy does, and its env file turns this on); elsewhere a client could

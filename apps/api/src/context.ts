@@ -37,6 +37,8 @@ export interface Ctx {
   /** No text messages are set up (SMS_PROVIDER=none): nobody is offered signing in by text
    *  with a number added later (P50). Unset means texts can be sent. */
   textsOff?: boolean;
+  /** Emailed the first staff account's setup link while there is none (P52). */
+  firstAdminEmail?: string;
 }
 
 /**

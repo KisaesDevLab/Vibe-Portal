@@ -31,6 +31,7 @@ import { normalizeEmail } from '../lib/contact';
 import { record } from '../lib/events';
 import { body, clientIp, h, HttpError } from '../lib/http';
 import { hit, LIMITS } from '../lib/rate-limit';
+import { BY_EMAIL, firstAdminResend, firstAdminStatus } from './first-admin';
 import { randomToken, sha256 } from '../lib/secrets';
 import {
   dummyHash,
@@ -177,7 +178,7 @@ export function requireStaff(ctx: Ctx): RequestHandler {
   });
 }
 
-async function finishedCount(db: Database): Promise<number> {
+export async function finishedCount(db: Database): Promise<number> {
   const [r] = await db
     .select({ n: count() })
     .from(schema.staffUsers)
@@ -339,7 +340,21 @@ export function staffAuthRouter(ctx: Ctx): Router {
   r.get(
     '/status',
     h(async (_req, res) => {
-      res.json({ setupNeeded: (await finishedCount(ctx.db)) === 0 });
+      const setupNeeded = (await finishedCount(ctx.db)) === 0;
+      // P52: where the first setup link was emailed (masked), only while it is needed.
+      res.json({ setupNeeded, firstAdmin: setupNeeded ? await firstAdminStatus(ctx) : null });
+    }),
+  );
+
+  // P52: the sign-in page's "Send again". Only to the address the appliance set.
+  r.post(
+    '/setup/resend',
+    h(async (req, res) => {
+      await limit(req, 'firstadmin');
+      const r2 = await firstAdminResend(ctx);
+      if (r2 === 'limited') throw new HttpError(429, 'too_many_requests');
+      if (!r2) throw new HttpError(409, 'no_first_admin');
+      res.json({ firstAdmin: await firstAdminStatus(ctx) });
     }),
   );
 
@@ -353,7 +368,8 @@ export function staffAuthRouter(ctx: Ctx): Router {
         : [];
       res.json({
         first: !t.staffId,
-        email: u?.email ?? '',
+        // The link emailed to the first admin (P52) knows whose it is.
+        email: u?.email ?? (t.createdBy === BY_EMAIL ? (ctx.firstAdminEmail ?? '') : ''),
         name: u?.name ?? '',
         firmName: await firmName(ctx),
       });

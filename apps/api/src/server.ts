@@ -19,7 +19,9 @@ import { purgeUploads } from './firm/uploads';
 import { purgeMarks } from './files/marks';
 import { snapshotIfDue } from './files/snapshot';
 import { applyStorage, resumeInterrupted, runMove, sweep } from './files/storage';
+import { normalizeEmail } from './lib/contact';
 import { purgeStale } from './lib/housekeeping';
+import { firstAdminOnStart } from './staff/first-admin';
 import { consoleNotifier, type Notifier } from './lib/notify';
 import {
   checkSmtp,
@@ -100,6 +102,11 @@ async function main(): Promise<void> {
   const keyring = await openKeyring(db, config.DATA_DIR);
   const blobs = new BlobStore(join(config.DATA_DIR, 'blobs'));
   const portalUrl = config.PORTAL_URL.replace(/\/+$/, '');
+  // P52: a mistyped address is said in the log, not a portal that will not start.
+  const firstAdminEmail = normalizeEmail(config.FIRST_ADMIN_EMAIL);
+  if (config.FIRST_ADMIN_EMAIL && !firstAdminEmail) {
+    log.warn('FIRST_ADMIN_EMAIL is not an email address: no setup link is emailed');
+  }
   const ctx: Ctx = {
     db,
     log,
@@ -111,6 +118,7 @@ async function main(): Promise<void> {
     keyring,
     blobs,
     textsOff: config.SMS_PROVIDER === 'none',
+    ...(firstAdminEmail ? { firstAdminEmail } : {}),
   };
   // P51: stored files on the data volume or in B2, as Settings > Storage says. A move the last
   // run did not finish starts again; one the appliance command asked for starts.
@@ -143,6 +151,12 @@ async function main(): Promise<void> {
     // P51: with files in B2, a database snapshot to the bucket every hour.
     snapshotIfDue(ctx).catch(() => undefined);
   }, 3_600_000).unref();
+  // P52: the first admin's setup link, by email, while there is no staff account.
+  firstAdminOnStart(ctx)
+    .then((m) => {
+      if (m) log.info({ ok: m.ok }, 'first admin setup link emailed');
+    })
+    .catch((err: unknown) => log.error({ err }, 'first admin setup email failed'));
   if (config.EMAIL_PROVIDER === 'smtp') {
     // Said at startup, not discovered when a client cannot sign in (QA 2026-11-09).
     void checkSmtp(smtpSettings(config)).then((why) => {

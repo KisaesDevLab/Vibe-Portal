@@ -56,6 +56,14 @@ export interface StorageNote {
   snapshotFailedAt?: string;
 }
 
+/** The last setup link emailed to the first admin (P52). */
+export interface FirstAdminMail {
+  email: string;
+  at: string;
+  /** The email was accepted by the mail server. */
+  ok: boolean;
+}
+
 export const firm = pgTable('firm', {
   id: smallint('id').primaryKey().default(1),
   name: text('name').notNull().default(''),
@@ -80,6 +88,7 @@ export const firm = pgTable('firm', {
   /** This installation; written into the bucket it uses (P51). */
   installId: uuid('install_id').notNull().defaultRandom(),
   storageNote: jsonb('storage_note').$type<StorageNote>(),
+  firstAdminMail: jsonb('first_admin_mail').$type<FirstAdminMail>(),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
