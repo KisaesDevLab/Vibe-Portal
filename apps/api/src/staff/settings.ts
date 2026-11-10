@@ -48,6 +48,8 @@ const SettingsSchema = z.object({
   uploadKeepDays: z.number().int().min(0).max(3650),
   /** Clients may send secure links to files shared with them (P55). Left out: unchanged. */
   clientLinks: z.boolean().optional(),
+  /** Downloads each new secure link allows, 0 for no limit (P58). Left out: unchanged. */
+  shareDownloadLimit: z.number().int().min(0).max(1000).optional(),
 });
 const KeySchema = z.object({ label: z.string().trim().min(1).max(60) });
 /** The only clients a staff member sees, or null for every client. */
@@ -120,6 +122,7 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         hasLogo: Boolean(f?.logo),
         portalUrl: ctx.portalUrl,
         clientLinks: Boolean(f?.clientLinks),
+        shareDownloadLimit: f?.shareDownloadLimit ?? 5,
       });
     }),
   );
@@ -134,6 +137,7 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         uploadLimitBytes: s.uploadLimitMb * MB,
         uploadKeepDays: s.uploadKeepDays,
         ...(s.clientLinks !== undefined ? { clientLinks: s.clientLinks } : {}),
+        ...(s.shareDownloadLimit !== undefined ? { shareDownloadLimit: s.shareDownloadLimit } : {}),
         updatedAt: ctx.now(),
       });
       await record(ctx.db, 'settings_updated', actor(req), { detail: s });

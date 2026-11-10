@@ -26,6 +26,8 @@ interface Info {
   emailMasked: string;
   expiresAt: string;
   canDownload: boolean;
+  /** Downloads left on this link; null when there is no limit (P58). */
+  downloadsLeft?: number | null;
   count: number;
   verified: boolean;
   recipientName?: string;
@@ -96,6 +98,8 @@ export function Shared(): JSX.Element {
   const [sent, setSent] = useState(false);
   const [code, setCode] = useState('');
   const [viewing, setViewing] = useState<string | null>(null);
+  /** Downloads started on this page since it loaded (P58). */
+  const [took, setTook] = useState(0);
 
   const failed = useCallback((err: unknown): void => {
     const end = endedBy(err);
@@ -266,6 +270,12 @@ export function Shared(): JSX.Element {
   }
 
   const list = info.files ?? [];
+  // P58: downloads left on this link (null: no limit), less those started on this page.
+  const left =
+    info.downloadsLeft === undefined || info.downloadsLeft === null
+      ? null
+      : Math.max(0, info.downloadsLeft - took);
+  const canDl = info.canDownload && (left === null || left > 0);
   const shown = list.find((f) => f.id === viewing && f.available !== false);
   const url = (f: OutsideFile, mode: 'view' | 'download'): string =>
     `/api/portal/shared/${id}/files/${f.id}/content?mode=${mode}`;
@@ -281,9 +291,13 @@ export function Shared(): JSX.Element {
         <h1 style={{ fontSize: 20, margin: '4px 0' }}>Shared documents ({list.length})</h1>
         <p style={{ margin: 0, fontSize: 13 }}>
           {who ? `Shared with ${who}. ` : ''}
-          {info.canDownload
-            ? 'You can view and download these documents.'
-            : 'These documents are shared to view only.'}{' '}
+          {!info.canDownload
+            ? 'These documents are shared to view only.'
+            : left === null
+              ? 'You can view and download these documents.'
+              : left > 0
+                ? `You can view these documents, and download ${left === 1 ? 'one more time' : `${left} more times`} in all.`
+                : 'You can view these documents. This link has been downloaded as many times as it allows.'}{' '}
           For your security this page locks at {timeText(info.verifiedUntil ?? '')}; the link itself
           works until {dayText(info.expiresAt)}.
         </p>
@@ -317,8 +331,13 @@ export function Shared(): JSX.Element {
                 View
               </Button>
             )}
-            {f.available !== false && info.canDownload && (
-              <a href={url(f, 'download')} download={f.name} aria-label={`Download ${f.name}`}>
+            {f.available !== false && canDl && (
+              <a
+                href={url(f, 'download')}
+                download={f.name}
+                aria-label={`Download ${f.name}`}
+                onClick={() => setTook((t) => t + 1)}
+              >
                 Download
               </a>
             )}
@@ -330,7 +349,7 @@ export function Shared(): JSX.Element {
           key={shown.id}
           url={url(shown, 'view')}
           downloadUrl={url(shown, 'download')}
-          canDownload={info.canDownload}
+          canDownload={canDl}
           filename={shown.name}
         />
       )}

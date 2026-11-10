@@ -99,6 +99,7 @@ export function staffSay(err: unknown): string {
     move_running: 'A move is already under way.',
     already_there: 'The files are already there.',
     snapshot_not_b2: 'Database snapshots go to the bucket once files are stored there.',
+    download_limit: 'This link has been downloaded as many times as it allows.',
     snapshot_busy: 'A database copy is being sent right now. Try again in a minute.',
   };
   // The portal's own reason (Object Lock, another portal's bucket, no room), in full.
@@ -189,6 +190,9 @@ export interface OutsideShare {
   createdBy: string;
   /** Sent by one of the client's people, not the firm (P55). */
   byClient?: boolean;
+  /** Downloads so far, and the link's limit (0: none) (P58). */
+  downloads: number;
+  downloadLimit: number;
   expiresAt: string;
   revokedAt: string | null;
   opens: number;

@@ -148,6 +148,8 @@ describe('a secure link to someone outside (P49)', () => {
       emailMasked: 'p***@first-bank.test',
       expiresAt: '2026-11-16T15:00:00.000Z',
       canDownload: true,
+      // P58: the firm's limit (5 unless changed) when the link was made.
+      downloadsLeft: 5,
       count: 1,
       verified: false,
     });
@@ -215,6 +217,8 @@ describe('a secure link to someone outside (P49)', () => {
         createdAt: '2026-11-09T15:00:00.000Z',
         createdBy: 'kurt@example-cpa.test',
         byClient: false,
+        downloads: 1,
+        downloadLimit: 5,
         expiresAt: '2026-11-16T15:00:00.000Z',
         revokedAt: null,
         opens: 1,
@@ -238,6 +242,45 @@ describe('a secure link to someone outside (P49)', () => {
       ['outside_download', 'recipient', LENDER],
     ]);
     expect(outside.every((e) => e.clientId === CLIENT)).toBe(true);
+  });
+
+  it('a link may be downloaded as many times as the firm allows, then not (P58)', async () => {
+    const boss = await admin();
+    // The firm allows 2; a link made now keeps 2 even if the setting changes later.
+    const settings = (await boss.get('/api/staff/v1/settings').expect(200)).body;
+    expect(settings.shareDownloadLimit).toBe(5);
+    await boss
+      .put('/api/staff/v1/settings')
+      .send({ ...settings, shareDownloadLimit: 2 })
+      .expect(200);
+    const fileId = await onPortal(CLIENT, 'Return-2025.pdf', await realPdf());
+    const s = await send(boss, [fileId], { canDownload: true });
+    await boss
+      .put('/api/staff/v1/settings')
+      .send({ ...settings, shareDownloadLimit: 50 })
+      .expect(200);
+    const pat = await unlock(s);
+    const dl = () => pat.get(`${s.path}/files/${fileId}/content?mode=download`);
+    expect((await dl()).status).toBe(200);
+    expect((await dl()).status).toBe(200);
+    const third = await dl();
+    expect([third.status, third.body]).toEqual([403, { error: 'download_limit' }]);
+    // Viewing on the page is not a download.
+    expect((await pat.get(`${s.path}/files/${fileId}/content?mode=view`)).status).toBe(200);
+    const list = await boss.get(`/api/staff/v1/shares?clientId=${CLIENT}`).expect(200);
+    expect(list.body.shares[0]).toEqual(
+      expect.objectContaining({ downloads: 2, downloadLimit: 2 }),
+    );
+    // 0: no limit, for links made from then on.
+    await boss
+      .put('/api/staff/v1/settings')
+      .send({ ...settings, shareDownloadLimit: 0 })
+      .expect(200);
+    const t = await send(boss, [fileId], { canDownload: true, email: 'lee@other-bank.test' });
+    const lee = await unlock(t, 'lee@other-bank.test');
+    for (let i = 0; i < 7; i++) {
+      expect((await lee.get(`${t.path}/files/${fileId}/content?mode=download`)).status).toBe(200);
+    }
   });
 
   it('a wrong link is not found, whatever is asked of it', async () => {

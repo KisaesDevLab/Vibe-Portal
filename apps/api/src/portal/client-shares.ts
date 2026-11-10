@@ -111,6 +111,8 @@ export function clientSharesRouter(ctx: Ctx): Router {
           createdAt: x.createdAt,
           expiresAt: x.expiresAt,
           opens: x.opens,
+          downloads: x.downloads,
+          downloadLimit: x.downloadLimit,
           status: shareStatus(x, now),
           files: items.filter((i) => i.shareId === x.id).map((i) => i.name),
         })),

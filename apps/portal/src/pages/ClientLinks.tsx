@@ -19,6 +19,8 @@ export interface ClientLink {
   createdAt: string;
   expiresAt: string;
   opens: number;
+  downloads: number;
+  downloadLimit: number;
   status: 'locked' | 'revoked' | 'expired' | 'opened' | 'sent';
   files: string[];
 }
@@ -222,7 +224,11 @@ export function ClientLinksList({
                 {l.status === 'opened' || l.status === 'sent'
                   ? ` · works until ${day(l.expiresAt)}`
                   : ''}
-                {l.canDownload ? ' · view and download' : ' · view only'}
+                {l.canDownload
+                  ? l.downloadLimit > 0
+                    ? ` · downloaded ${l.downloads} of ${l.downloadLimit} times`
+                    : ' · view and download'
+                  : ' · view only'}
               </small>
             </div>
             {(l.status === 'sent' || l.status === 'opened') && (

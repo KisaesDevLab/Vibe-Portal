@@ -91,6 +91,8 @@ export const firm = pgTable('firm', {
   firstAdminMail: jsonb('first_admin_mail').$type<FirstAdminMail>(),
   /** The client's people may send secure links to files shared with them (P55). */
   clientLinks: boolean('client_links').notNull().default(false),
+  /** Downloads each new secure link allows; 0 for no limit (P58). */
+  shareDownloadLimit: integer('share_download_limit').notNull().default(5),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
@@ -344,6 +346,9 @@ export const fileShare = pgTable('file_share', {
   revokedBy: text('revoked_by'),
   wrongTries: integer('wrong_tries').notNull().default(0),
   opens: integer('opens').notNull().default(0),
+  /** Downloads this link allows (the firm's limit when it was made); 0 for no limit (P58). */
+  downloadLimit: integer('download_limit').notNull().default(0),
+  downloads: integer('downloads').notNull().default(0),
   firstOpenedAt: ts('first_opened_at'),
   lastOpenedAt: ts('last_opened_at'),
 });

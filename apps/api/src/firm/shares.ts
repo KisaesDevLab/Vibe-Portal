@@ -188,6 +188,9 @@ export async function createOutsideShare(
 
   const id = randomUUID();
   const secret = randomToken();
+  // P58: the firm's download limit as it is now; later changes leave this link alone.
+  const [firmRow] = await ctx.db.select({ n: schema.firm.shareDownloadLimit }).from(schema.firm);
+  const limitNow = firmRow?.n ?? 5;
   const expiresAt = new Date(now.getTime() + input.days * 86_400_000);
   const made = await ctx.db.transaction(async (tx) => {
     // The client's row is held until the link is in, so two staff sending to the same
@@ -221,6 +224,7 @@ export async function createOutsideShare(
       watermark: input.watermark,
       createdBy: o.from ? o.from.name : actor.name,
       sentByIdentityId: o.from?.identityId ?? null,
+      downloadLimit: limitNow,
       createdAt: now,
       expiresAt,
     });
@@ -353,6 +357,8 @@ export function firmSharesRouter(ctx: Ctx): Router {
           createdBy: s.createdBy,
           // P55: sent by one of the client's people, not by the firm.
           byClient: s.sentByIdentityId !== null,
+          downloads: s.downloads,
+          downloadLimit: s.downloadLimit,
           expiresAt: s.expiresAt,
           revokedAt: s.revokedAt,
           opens: s.opens,

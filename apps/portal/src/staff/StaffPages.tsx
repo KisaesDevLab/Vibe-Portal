@@ -996,6 +996,14 @@ function SecureLinks({
                 {s.opens === 0
                   ? '—'
                   : `${s.opens} ${s.opens === 1 ? 'time' : 'times'}, last ${when(s.lastOpenedAt)}`}
+                {s.canDownload && (
+                  <>
+                    <br />
+                    {s.downloadLimit > 0
+                      ? `${s.downloads} of ${s.downloadLimit} downloads`
+                      : `${s.downloads} ${s.downloads === 1 ? 'download' : 'downloads'}`}
+                  </>
+                )}
               </td>
               <td style={td}>
                 {(s.status === 'sent' || s.status === 'opened') && (
@@ -1238,6 +1246,8 @@ interface SettingsData {
   portalUrl: string;
   /** Clients may send secure links to files shared with them (P55). */
   clientLinks: boolean;
+  /** Downloads each new secure link allows; 0 for no limit (P58). */
+  shareDownloadLimit: number;
 }
 
 function Settings(): JSX.Element {
@@ -1296,6 +1306,7 @@ function Settings(): JSX.Element {
                   uploadLimitMb: Number(form.uploadLimitMb),
                   uploadKeepDays: Number(form.uploadKeepDays),
                   clientLinks: form.clientLinks,
+                  shareDownloadLimit: Number(form.shareDownloadLimit),
                 },
               }).then((r) => {
                 if (r) {
@@ -1337,6 +1348,15 @@ function Settings(): JSX.Element {
               min={0}
               value={form.uploadKeepDays}
               onChange={(e) => setForm({ ...form, uploadKeepDays: Number(e.target.value) })}
+            />
+            <Input
+              label="Downloads allowed per secure link sent outside (0 for no limit)"
+              name="shareDownloads"
+              type="number"
+              min={0}
+              max={1000}
+              value={form.shareDownloadLimit}
+              onChange={(e) => setForm({ ...form, shareDownloadLimit: Number(e.target.value) })}
             />
             <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <input

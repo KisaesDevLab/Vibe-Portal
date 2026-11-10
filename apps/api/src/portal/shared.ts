@@ -13,7 +13,7 @@
 // A wrong id or key is "not found", whatever else is wrong with the request.
 
 import express, { type Request, type Response, type Router } from 'express';
-import { and, asc, desc, eq, gt, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { parse, serialize } from 'cookie';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
@@ -131,6 +131,8 @@ export function sharedRouter(ctx: Ctx): Router {
       emailMasked: maskContact(s.recipientEmail),
       expiresAt: s.expiresAt,
       canDownload: s.canDownload,
+      // P58: downloads left on this link; null when there is no limit.
+      downloadsLeft: s.downloadLimit > 0 ? Math.max(0, s.downloadLimit - s.downloads) : null,
       count: files.length,
       verified: false,
     };
@@ -393,6 +395,24 @@ export function sharedRouter(ctx: Ctx): Router {
       const inline = mode === 'view' && preview !== null;
       // View only: nothing is sent as a file to keep.
       if (!inline && !s.canDownload) throw new HttpError(403, 'view_only');
+      if (!inline) {
+        // P58: one download counted, in the database, so downloads at the same moment are each
+        // counted; past the link's limit nothing is sent.
+        const [counted] = await ctx.db
+          .update(schema.fileShare)
+          .set({ downloads: sql`${schema.fileShare.downloads} + 1` })
+          .where(
+            and(
+              eq(schema.fileShare.id, s.id),
+              or(
+                eq(schema.fileShare.downloadLimit, 0),
+                lt(schema.fileShare.downloads, schema.fileShare.downloadLimit),
+              ),
+            ),
+          )
+          .returning({ n: schema.fileShare.downloads });
+        if (!counted) throw new HttpError(403, 'download_limit');
+      }
 
       const blobKey = f.blobKey;
       const dekWrapped = f.dekWrapped;
