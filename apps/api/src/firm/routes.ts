@@ -30,6 +30,7 @@ import { randomToken, sha256 } from '../lib/secrets';
 import { VERSION } from '../version';
 import { firmFilesRouter } from './files';
 import { requireFirmKey } from './keys';
+import { firmUploadsRouter } from './uploads';
 
 export const INVITE_DAYS = 7;
 
@@ -65,6 +66,7 @@ export function firmRouter(ctx: Ctx): Router {
   const r = express.Router();
   r.use(requireFirmKey(ctx));
   r.use('/files', firmFilesRouter(ctx));
+  r.use('/uploads', firmUploadsRouter(ctx));
 
   const clientExists = async (id: string): Promise<boolean> =>
     (

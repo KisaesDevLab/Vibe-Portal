@@ -18,7 +18,8 @@ import { requireClient } from '../auth/client-auth';
 import { activeClientsOf } from '../auth/grant';
 import type { ClientSession } from '../auth/sessions';
 import type { Ctx } from '../context';
-import { disposition, previewOf } from '../files/types';
+import { sendStored } from '../files/send';
+import { previewOf } from '../files/types';
 import { record } from '../lib/events';
 import { h, HttpError } from '../lib/http';
 
@@ -113,55 +114,42 @@ export function clientFilesRouter(ctx: Ctx): Router {
         throw new HttpError(404, 'not_found');
       }
 
-      const dek = ctx.keyring.unwrap(new Uint8Array(f.dekWrapped));
-      const stream = ctx.blobs.get(f.blobKey, dek);
-      const it = stream[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
-      // Read the first chunk before answering: a damaged file is an error, not half a file.
-      let first: IteratorResult<Buffer>;
-      try {
-        first = await it.next();
-      } catch (err) {
-        ctx.log.error({ err, fileId: f.id }, 'stored file failed to decrypt');
-        throw new HttpError(500, 'file_unreadable');
-      }
-
+      const blobKey = f.blobKey;
+      const dekWrapped = f.dekWrapped;
       const inline = mode === 'view' && previewOf(f.contentType) !== null;
-      res.setHeader('Content-Type', inline ? f.contentType : 'application/octet-stream');
-      res.setHeader('Content-Disposition', disposition(inline ? 'inline' : 'attachment', f.name));
-      res.setHeader('Content-Length', String(f.size));
-      res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
-
-      const now = ctx.now();
-      await ctx.db
-        .update(schema.fileVisibility)
-        .set({
-          viewedAt: now,
-          firstViewedAt: sql`coalesce(${schema.fileVisibility.firstViewedAt}, ${now.toISOString()}::timestamptz)`,
-        })
-        .where(
-          and(
-            eq(schema.fileVisibility.fileId, f.id),
-            eq(schema.fileVisibility.identityId, s.identityId),
-          ),
-        );
-      await record(
-        ctx.db,
-        mode === 'view' ? 'view' : 'download',
-        { kind: 'client', name: s.identityId },
-        { clientId: f.clientId, fileId: f.id, identityId: s.identityId },
+      await sendStored(
+        ctx,
+        res,
+        {
+          id: f.id,
+          blobKey,
+          dekWrapped,
+          size: f.size,
+          name: f.name,
+          inlineType: inline ? f.contentType : null,
+        },
+        async () => {
+          const now = ctx.now();
+          await ctx.db
+            .update(schema.fileVisibility)
+            .set({
+              viewedAt: now,
+              firstViewedAt: sql`coalesce(${schema.fileVisibility.firstViewedAt}, ${now.toISOString()}::timestamptz)`,
+            })
+            .where(
+              and(
+                eq(schema.fileVisibility.fileId, f.id),
+                eq(schema.fileVisibility.identityId, s.identityId),
+              ),
+            );
+          await record(
+            ctx.db,
+            mode === 'view' ? 'view' : 'download',
+            { kind: 'client', name: s.identityId },
+            { clientId: f.clientId, fileId: f.id, identityId: s.identityId },
+          );
+        },
       );
-
-      if (!first.done) res.write(first.value);
-      try {
-        for (let next = await it.next(); !next.done; next = await it.next()) {
-          if (!res.write(next.value)) await new Promise((ok) => res.once('drain', ok));
-        }
-        res.end();
-      } catch (err) {
-        // Damaged later in the file: the client gets a broken download, never wrong bytes.
-        ctx.log.error({ err, fileId: f.id }, 'stored file failed to decrypt part-way');
-        res.destroy(err as Error);
-      }
     }),
   );
 

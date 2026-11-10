@@ -8,6 +8,7 @@ import { Button, Card } from '@vibe/ui';
 
 import { api, ApiError, say, type Me } from '../api';
 import { Files } from './Files';
+import { Uploads } from './Uploads';
 
 type State = 'loading' | 'ready' | 'signed_out' | 'error';
 
@@ -96,6 +97,9 @@ export function Home(): JSX.Element {
           </label>
         )}
         <Files clientId={me.activeClientId} />
+      </Card>
+      <Card>
+        <Uploads clientId={me.activeClientId} />
       </Card>
     </main>
   );

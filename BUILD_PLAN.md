@@ -194,8 +194,9 @@ Each phase ends with its tests green and a ship gate.
   removed file is gone from disk and listing; tampered blob fails to decrypt
 
 ### Phase 4 — Files from clients
-- [ ] Client upload page, limits, types, progress; "Your uploads"
-- [ ] `/uploads` list, content, `fetched` (first wins)
+- [x] Client upload page, limits, types (by content, P29), progress; "Your uploads"; HEIC to JPG
+  (P33); remove before fetch (P32); batches of 20 (P34)
+- [x] `/uploads` list, content, `fetched` (first wins); purge 30 days after fetch (P8)
 - **Gate:** two concurrent fetchers → one 200, one 409; over-size and wrong-type uploads refused
 
 ### Phase 5 — Appliance app

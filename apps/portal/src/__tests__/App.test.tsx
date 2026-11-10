@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 
 type Reply = { status?: number; body: unknown };
-type Calls = { path: string; body: unknown }[];
+type Calls = { path: string; method?: string; body: unknown }[];
 
 const NO_FILES: Reply = { body: { files: [], years: [] } };
+const NO_UPLOADS: Reply = { body: { uploads: [] } };
 
 /** Fakes the API: each path answers with the given reply. */
 function serve(routes: Record<string, Reply>): Calls {
@@ -17,9 +18,15 @@ function serve(routes: Record<string, Reply>): Calls {
     'fetch',
     vi.fn(async (url: string, init?: RequestInit) => {
       const path = url.replace('/api/portal', '');
-      calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      calls.push({
+        path,
+        method: init?.method ?? 'GET',
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
       const r =
-        routes[path] ?? (path.startsWith('/files') ? (routes['/files'] ?? NO_FILES) : undefined);
+        routes[path] ??
+        (path.startsWith('/files') ? (routes['/files'] ?? NO_FILES) : undefined) ??
+        (path === '/uploads' ? NO_UPLOADS : undefined);
       if (!r) return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 });
       return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
     }),
@@ -158,7 +165,7 @@ describe('portal', () => {
     expect(window.location.hash).toBe('');
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await screen.findByText('Signed in as John Smith.');
-    expect(calls[0]).toEqual({
+    expect(calls[0]).toMatchObject({
       path: '/auth/verify-link',
       body: { token: 'abcdefghijklmnopqrstuvwxyz' },
     });
@@ -273,5 +280,109 @@ describe('portal', () => {
     at('/files/p1');
     const img = await screen.findByRole('img', { name: 'Receipt.jpg' });
     expect(img.getAttribute('src')).toBe('/api/portal/files/p1/content?mode=view');
+  });
+
+  it('lists my uploads: Remove until the firm has it, then "Received by the firm"', async () => {
+    const calls = serve({
+      '/auth/me': { body: ME },
+      '/uploads': {
+        body: {
+          uploads: [
+            {
+              id: 'u1',
+              name: 'W-2.pdf',
+              size: 10,
+              note: '',
+              uploadedAt: '2026-11-09T15:00:00Z',
+              received: false,
+            },
+            {
+              id: 'u2',
+              name: '1099.pdf',
+              size: 10,
+              note: '',
+              uploadedAt: '2026-11-08T15:00:00Z',
+              received: true,
+            },
+          ],
+        },
+      },
+      '/uploads/u1': { body: { ok: true } },
+    });
+    at('/');
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove W-2.pdf' }));
+    expect(screen.queryByRole('button', { name: 'Remove 1099.pdf' })).toBeNull();
+    expect(screen.getByText('Received by the firm')).toBeTruthy();
+    await waitFor(() => expect(calls.find((c) => c.path === '/uploads/u1')?.method).toBe('DELETE'));
+  });
+
+  it('sends chosen files one after another with one batch and note, and shows each result', async () => {
+    const sent: { url: string; type: string | null }[] = [];
+    class FakeXhr {
+      upload: {
+        onprogress:
+          ((e: { lengthComputable: boolean; loaded: number; total: number }) => void) | null;
+      } = {
+        onprogress: null,
+      };
+      status = 0;
+      responseText = '';
+      withCredentials = false;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      private url = '';
+      private type: string | null = null;
+      open(_m: string, url: string): void {
+        this.url = url;
+      }
+      setRequestHeader(_k: string, v: string): void {
+        this.type = v;
+      }
+      send(): void {
+        sent.push({ url: this.url, type: this.type });
+        const bad = this.url.includes('name=setup.exe');
+        this.status = bad ? 415 : 201;
+        this.responseText = JSON.stringify(
+          bad ? { error: 'type_not_allowed' } : { uploadId: `u${sent.length}`, name: 'x' },
+        );
+        setTimeout(() => this.onload?.(), 0);
+      }
+    }
+    vi.stubGlobal('XMLHttpRequest', FakeXhr);
+    serve({ '/auth/me': { body: ME } });
+    at('/');
+    const input = await screen.findByLabelText(/^Files \(up to 20/);
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(['%PDF'], 'W-2.pdf', { type: 'application/pdf' }),
+          new File(['MZ'], 'setup.exe'),
+        ],
+      },
+    });
+    fireEvent.change(screen.getByLabelText('Note for the firm (optional)'), {
+      target: { value: 'Second job' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send 2 files' }));
+    await screen.findByText(/cannot be sent/);
+    expect(screen.getByText(/W-2.pdf: sent/)).toBeTruthy();
+    expect(sent).toHaveLength(2);
+    const q = sent.map((x) => new URL(x.url, 'http://h').searchParams);
+    expect(q[0]?.get('batchId')).toBe(q[1]?.get('batchId'));
+    expect(q.map((p) => p.get('note'))).toEqual(['Second job', 'Second job']);
+    expect(q.map((p) => p.get('clientId'))).toEqual(['c1', 'c1']);
+    expect(sent[0]?.type).toBe('application/octet-stream');
+  });
+
+  it('will not send more than 20 files at once', async () => {
+    serve({ '/auth/me': { body: ME } });
+    at('/');
+    const input = await screen.findByLabelText(/^Files \(up to 20/);
+    const files = Array.from({ length: 21 }, (_, i) => new File(['x'], `f${i}.txt`));
+    fireEvent.change(input, { target: { files } });
+    expect(screen.getByText('Choose at most 20 files at a time.')).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: 'Send 21 files' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
   });
 });

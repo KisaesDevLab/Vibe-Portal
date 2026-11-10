@@ -27,6 +27,8 @@ Each copied file's second line names its source path and TB commit. This file is
 | `tsconfig.base.json` | `tsconfig.base.json` | Paths for this repo's packages |
 | `packages/db/src/migrations.ts` | `packages/db/src/scripts/migrate.ts` | Runner split from the connection so tests use pglite |
 | `apps/api/src/files/keyring.ts` | `apps/api/src/crypto/store.ts` (pattern) | `FirmKeyManager` store over `firm_key_envelope`, sealed-on-disk mode |
+| `apps/api/src/files/heic.ts` | `apps/api/src/files/extract-for-naming.ts` | `convertHeicOffThread`, `looksLikeHeic` (worker thread) |
+| `apps/api/src/__tests__/fixtures/sample.heic` | `apps/api/src/files/__fixtures__/sample.heic` | Test photo |
 | `apps/api/src/lib/contact.ts` | `packages/core/src/auth/{sms-otp,email}.ts` | Same normalisation; adds `maskContact` |
 | `apps/api/src/auth/*`, `portal/*` | `apps/api/src/auth/portal-routes.ts`, `portal-invites/grant.ts`, `portal-access-requests/` | Same flow and endpoint shapes, rewritten for Postgres sessions and limits (no Redis, no JWT) |
 
@@ -37,3 +39,4 @@ Each copied file's second line names its source path and TB commit. This file is
 | 2026-11-09 | `4b14d2f5` | Phase 1: ui, crypto, tooling, portal shell |
 | 2026-11-09 | `4b14d2f5` | Phase 2: contact helpers; sign-in, invitations and access requests modelled on TB |
 | 2026-11-09 | `4b14d2f5` | Phase 3: PDF viewer; firm key store pattern |
+| 2026-11-09 | `4b14d2f5` | Phase 4: HEIC conversion and its test photo |

@@ -23,6 +23,8 @@ export const LIMITS = {
   requestPerIp: { max: 5, windowSeconds: 60 * 60 },
   /** Access requests and new confirmation codes for one email or phone. */
   requestPerContact: { max: 3, windowSeconds: 60 * 60 },
+  /** Files one person uploads (P34: batches of up to 20). */
+  uploadPerIdentity: { max: 100, windowSeconds: 60 * 60 },
   /** Wrong firm keys from one address. */
   badKeyPerIp: { max: 20, windowSeconds: 15 * 60 },
 } satisfies Record<string, Limit>;

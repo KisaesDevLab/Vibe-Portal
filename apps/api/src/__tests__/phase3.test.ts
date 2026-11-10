@@ -429,3 +429,12 @@ describe('gathered notifications (P18)', () => {
     expect(pending[0]?.droppedAt).not.toBeNull();
   });
 });
+
+describe('the key file (P28)', () => {
+  it('a missing key file stops the portal with a clear message, never a new key', async () => {
+    const { openKeyring } = await import('../files/keyring');
+    await rm(join(w.dir, '.firm-key.seal'));
+    await expect(openKeyring(w.t.db, w.dir)).rejects.toThrow(/key file .* is missing/);
+    expect(await w.t.db.select().from(schema.firmKeyEnvelope)).toHaveLength(1);
+  });
+});

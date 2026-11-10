@@ -48,6 +48,12 @@ export function say(err: unknown): string {
     no_access: 'Your access to the portal has ended. Contact the firm.',
     too_many_requests: 'Too many tries. Wait a few minutes and try again.',
     invalid: 'Check the fields and try again.',
+    type_not_allowed:
+      'This kind of file cannot be sent. Send PDF, photos, Word, Excel, CSV or text.',
+    too_large: 'This file is too large to send.',
+    batch_full: 'At most 20 files at a time.',
+    photo_unreadable: 'This photo could not be read. Try taking it again or saving it as JPG.',
+    already_received: 'The firm has already received this file.',
     network: 'The portal cannot be reached right now. Try again later.',
   };
   return words[code] ?? 'Something went wrong. Try again.';

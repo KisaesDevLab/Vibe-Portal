@@ -191,6 +191,9 @@ export const uploads = pgTable('uploads', {
   fetchedAt: ts('fetched_at'),
   fetchedBy: text('fetched_by'),
   purgedAt: ts('purged_at'),
+  batchId: uuid('batch_id'),
+  removedAt: ts('removed_at'),
+  originalName: text('original_name'),
 });
 
 export const events = pgTable('events', {

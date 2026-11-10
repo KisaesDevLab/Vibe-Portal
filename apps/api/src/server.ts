@@ -15,6 +15,7 @@ import type { Ctx } from './context';
 import { BlobStore } from './files/blobs';
 import { openKeyring } from './files/keyring';
 import { flush } from './files/notify-queue';
+import { purgeUploads } from './firm/uploads';
 import { consoleNotifier } from './lib/notify';
 import { VERSION } from './version';
 
@@ -70,6 +71,10 @@ async function main(): Promise<void> {
   setInterval(() => {
     flush(ctx).catch((err: unknown) => log.error({ err }, 'notification flush failed'));
   }, 60_000).unref();
+  // P8: fetched client uploads leave the portal after the keep period.
+  setInterval(() => {
+    purgeUploads(ctx).catch((err: unknown) => log.error({ err }, 'upload purge failed'));
+  }, 3_600_000).unref();
   app.listen(config.PORT, () => {
     log.info({ port: config.PORT, version: VERSION }, 'vibe-portal api listening');
   });

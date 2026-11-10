@@ -36,3 +36,4 @@
 | P32 | 2026-11-09 | Can a client delete their own upload | Only before Vibe Files fetches it; afterwards it shows "Received by the firm" | Owner 2026-11-09: as assumed |
 | P33 | 2026-11-09 | iPhone HEIC photos | Kept as uploaded | Owner 2026-11-09: **converted to JPG** on the portal before Vibe Files fetches them |
 | P34 | 2026-11-09 | How many files per upload | Up to 20 per batch, each within the firm's size limit; one note covers the batch | Owner 2026-11-09: as assumed |
+| P35 | 2026-11-09 | HEIC conversion library licence | `heic-convert` (ISC) uses `libheif-js` (LGPL-3.0), unmodified, as Vibe Time & Billing already does; same licence position as TB | |

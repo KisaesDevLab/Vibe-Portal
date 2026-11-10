@@ -11,6 +11,7 @@ import { firmRouter } from './firm/routes';
 import { errorHandler, requireJson, TRUST_CF_IP } from './lib/http';
 import { accessRequestsRouter } from './portal/access-requests';
 import { clientFilesRouter } from './portal/files';
+import { clientUploadsRouter, type HeicConverter } from './portal/uploads';
 import { invitationsRouter } from './portal/invitations';
 import { VERSION } from './version';
 
@@ -19,6 +20,8 @@ export interface AppDeps {
   pingDb: () => Promise<boolean>;
   /** Absent only in tests of /health alone. */
   ctx?: Ctx;
+  /** HEIC to JPG (P33); tests may pass their own. */
+  convertHeic?: HeicConverter;
 }
 
 export function createApp(deps: AppDeps): Express {
@@ -58,6 +61,7 @@ export function createApp(deps: AppDeps): Express {
     app.use('/api/portal/invitations', invitationsRouter(ctx));
     app.use('/api/portal/access-requests', accessRequestsRouter(ctx));
     app.use('/api/portal/files', clientFilesRouter(ctx));
+    app.use('/api/portal/uploads', clientUploadsRouter(ctx, deps.convertHeic));
     app.use('/api/firm/v1', firmRouter(ctx));
   }
 

@@ -48,15 +48,16 @@ export function errorHandler(log: { error: (o: object, m: string) => void }): Er
 }
 
 /**
- * State-changing requests must be JSON or have no body and no content type: a cross-site HTML
- * form always sends a form content type, and cannot send JSON without CORS.
+ * State-changing requests must be JSON (or a file upload as application/octet-stream), or have
+ * no body and no content type: a cross-site HTML form always sends a form content type, and
+ * cannot send JSON or octet-stream without CORS.
  */
 export const requireJson: RequestHandler = (req, res, next) => {
   const changes = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
   // The header itself, not req.is(): req.is() says "no" for a JSON-typed request with no body.
   const type = (req.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
   const hasBody = type !== '' || Number(req.headers['content-length'] ?? 0) > 0;
-  if (changes && hasBody && type !== 'application/json') {
+  if (changes && hasBody && type !== 'application/json' && type !== 'application/octet-stream') {
     res.status(415).json({ error: 'json_required' });
     return;
   }

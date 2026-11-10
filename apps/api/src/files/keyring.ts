@@ -61,8 +61,23 @@ function store(db: Database): FirmKeyStore {
 export async function openKeyring(db: Database, dataDir: string): Promise<Keyring> {
   const s = store(db);
   const manager = new FirmKeyManager({ store: s, sealedKeyPath: join(dataDir, '.firm-key.seal') });
-  if (await s.get(FIRM_ID)) await manager.unseal({ firmId: FIRM_ID });
-  else await manager.bootstrap({ firmId: FIRM_ID, mode: 'sealed-on-disk' });
+  const sealPath = join(dataDir, '.firm-key.seal');
+  if (await s.get(FIRM_ID)) {
+    try {
+      await manager.unseal({ firmId: FIRM_ID });
+    } catch (err) {
+      // P28: the database's master key is useless without the seal file. Never make a new one
+      // silently: every stored file would become unreadable.
+      const missing = (err as { code?: string }).code === 'ENOENT';
+      throw new Error(
+        missing
+          ? `The key file ${sealPath} is missing. Stored files cannot be read without it. ` +
+              'Restore it from the backup taken with this database, then start again.'
+          : `The key file ${sealPath} does not match this database (${String(err)}). ` +
+              'Restore the key file from the backup taken with this database.',
+      );
+    }
+  } else await manager.bootstrap({ firmId: FIRM_ID, mode: 'sealed-on-disk' });
   return {
     wrap: (dek) => manager.wrapTDek(FIRM_ID, dek),
     unwrap: (wrapped) => manager.unwrapTDek(FIRM_ID, wrapped),
