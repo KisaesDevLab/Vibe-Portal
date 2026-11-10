@@ -186,10 +186,10 @@ Each phase ends with its tests green and a ship gate.
   approve → sign in; revoked firm key refused
 
 ### Phase 3 — Files to clients
-- [ ] `/files` upload (streamed, hashed, encrypted at rest), content replace, per-user visibility,
+- [x] `/files` upload (streamed, hashed, encrypted at rest), content replace, per-user visibility,
   delete
-- [ ] Client Files page, preview, download, "New" badge; notifications on share
-- [ ] Events for every action
+- [x] Client Files page, preview, download, "New" badge; notifications on share (gathered, P18)
+- [x] Events for every action
 - **Gate:** a file shown to user A only is listed for A and returns 404 for B (API and UI);
   removed file is gone from disk and listing; tampered blob fails to decrypt
 
@@ -202,7 +202,8 @@ Each phase ends with its tests green and a ship gate.
 - [ ] `vibe-installer/apps/portal`, Caddy fragment, admin config, firm key creation
 - [ ] Real email and SMS from the appliance's Email & SMS settings. The console notifier logs
   sign-in links and codes, so the API must refuse it when `NODE_ENV=production`
-- [ ] Cloudflare Tunnel path verified; Vibe Vault discovery
+- [ ] Cloudflare Tunnel path verified; Vibe Vault discovery. Backups must include
+  `DATA_DIR/.firm-key.seal`: without it no stored file can be read (QUESTIONS P28)
 - **Gate:** clean install on the appliance test VM, reached over the tunnel from a phone
 
 ### Phase 6 — Vibe Files integration

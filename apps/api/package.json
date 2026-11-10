@@ -14,6 +14,7 @@
     "firm-key": "tsx --env-file-if-exists=../../.env src/scripts/firm-key.ts"
   },
   "dependencies": {
+    "@noble/ciphers": "^1.0.0",
     "@vibe-portal/db": "workspace:*",
     "@vibe-portal/types": "workspace:*",
     "@vibe/crypto": "workspace:*",

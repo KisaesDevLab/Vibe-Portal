@@ -11,10 +11,13 @@ import pino from 'pino';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { rm } from 'node:fs/promises';
+
 import { createApp } from '../app';
 import type { Ctx } from '../context';
 import { createFirmKey, revokeFirmKey } from '../firm/keys';
 import { recordingNotifier } from '../lib/notify';
+import { fileServices } from './harness';
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -25,6 +28,7 @@ let clock: Date;
 let notes: ReturnType<typeof recordingNotifier>;
 let app: ReturnType<typeof createApp>;
 let key: string;
+let files: Awaited<ReturnType<typeof fileServices>>;
 
 function later(minutes: number): void {
   clock = new Date(clock.getTime() + minutes * 60_000);
@@ -64,6 +68,7 @@ beforeEach(async () => {
   t = await createTestDb();
   clock = T0;
   notes = recordingNotifier();
+  files = await fileServices(t.db);
   const ctx: Ctx = {
     db: t.db,
     notifier: notes,
@@ -72,6 +77,8 @@ beforeEach(async () => {
     portalUrl: 'https://files.example-cpa.test',
     cookie: { secure: false },
     trustCfIp: false,
+    keyring: files.keyring,
+    blobs: files.blobs,
   };
   app = createApp({ pingDb: async () => true, ctx });
   await t.db.update(schema.firm).set({ name: 'Example CPA' });
@@ -87,6 +94,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await t.close();
+  await rm(files.dir, { recursive: true, force: true });
 });
 
 describe('firm key', () => {

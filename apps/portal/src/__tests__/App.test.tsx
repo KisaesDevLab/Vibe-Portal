@@ -8,6 +8,8 @@ import { App } from '../App';
 type Reply = { status?: number; body: unknown };
 type Calls = { path: string; body: unknown }[];
 
+const NO_FILES: Reply = { body: { files: [], years: [] } };
+
 /** Fakes the API: each path answers with the given reply. */
 function serve(routes: Record<string, Reply>): Calls {
   const calls: Calls = [];
@@ -16,7 +18,8 @@ function serve(routes: Record<string, Reply>): Calls {
     vi.fn(async (url: string, init?: RequestInit) => {
       const path = url.replace('/api/portal', '');
       calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
-      const r = routes[path];
+      const r =
+        routes[path] ?? (path.startsWith('/files') ? (routes['/files'] ?? NO_FILES) : undefined);
       if (!r) return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 });
       return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
     }),
@@ -192,5 +195,83 @@ describe('portal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Send a new code' }));
     await waitFor(() => expect(calls.map((c) => c.path)).toContain('/access-requests/r1/resend'));
+  });
+
+  it('lists shared files with New and Updated, and filters by year', async () => {
+    const calls = serve({
+      '/auth/me': { body: ME },
+      '/files': {
+        body: {
+          files: [
+            {
+              id: 'f1',
+              name: '2025 Form 1040.pdf',
+              size: 2_400_000,
+              contentType: 'application/pdf',
+              taxYear: 2025,
+              sharedAt: '2026-11-09T15:00:00Z',
+              updatedAt: '2026-11-12T15:00:00Z',
+              isNew: true,
+              preview: 'pdf',
+            },
+            {
+              id: 'f2',
+              name: 'Organizer.xlsx',
+              size: 5000,
+              contentType: 'application/octet-stream',
+              taxYear: 2024,
+              sharedAt: '2026-10-01T15:00:00Z',
+              updatedAt: null,
+              isNew: false,
+              preview: null,
+            },
+          ],
+          years: [2025, 2024],
+        },
+      },
+    });
+    at('/');
+    await screen.findByText('2025 Form 1040.pdf');
+    expect(screen.getByText('New')).toBeTruthy();
+    expect(screen.getByText(/^Updated /)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Open 2025 Form 1040.pdf' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Open Organizer.xlsx' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Download Organizer.xlsx' }).getAttribute('href')).toBe(
+      '/api/portal/files/f2/content?mode=download',
+    );
+    fireEvent.change(screen.getByLabelText('Year'), { target: { value: '2024' } });
+    await waitFor(() => expect(calls.map((c) => c.path)).toContain('/files?year=2024'));
+  });
+
+  it('says when there are no files yet', async () => {
+    serve({ '/auth/me': { body: ME } });
+    at('/');
+    await screen.findByText('No files yet');
+  });
+
+  it('opens a picture in the portal', async () => {
+    serve({
+      '/files': {
+        body: {
+          files: [
+            {
+              id: 'p1',
+              name: 'Receipt.jpg',
+              size: 100,
+              contentType: 'image/jpeg',
+              taxYear: null,
+              sharedAt: '2026-11-09T15:00:00Z',
+              updatedAt: null,
+              isNew: true,
+              preview: 'image',
+            },
+          ],
+          years: [],
+        },
+      },
+    });
+    at('/files/p1');
+    const img = await screen.findByRole('img', { name: 'Receipt.jpg' });
+    expect(img.getAttribute('src')).toBe('/api/portal/files/p1/content?mode=view');
   });
 });

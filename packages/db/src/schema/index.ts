@@ -150,6 +150,8 @@ export const files = pgTable('files', {
   updatedAt: ts('updated_at').notNull().defaultNow(),
   removedAt: ts('removed_at'),
   removedBy: text('removed_by'),
+  taxYear: smallint('tax_year'),
+  contentUpdatedAt: ts('content_updated_at'),
 });
 
 export const fileVisibility = pgTable(
@@ -165,6 +167,7 @@ export const fileVisibility = pgTable(
     firstViewedAt: ts('first_viewed_at'),
     changedAt: ts('changed_at').notNull().defaultNow(),
     changedBy: text('changed_by').notNull().default(''),
+    viewedAt: ts('viewed_at'),
   },
   (t) => [primaryKey({ columns: [t.fileId, t.identityId] })],
 );
@@ -238,3 +241,27 @@ export const rateLimit = pgTable(
   },
   (t) => [primaryKey({ columns: [t.bucket, t.windowStart] })],
 );
+
+export const firmKeyEnvelope = pgTable('firm_key_envelope', {
+  firmId: text('firm_id').primaryKey(),
+  wrappedMfk: bytea('wrapped_mfk').notNull(),
+  kekMetadata: jsonb('kek_metadata').notNull(),
+  sentinelCiphertext: bytea('sentinel_ciphertext').notNull(),
+  rotationVersion: integer('rotation_version').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+});
+
+export const notifyQueue = pgTable('notify_queue', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  identityId: uuid('identity_id')
+    .notNull()
+    .references(() => portalIdentity.id),
+  fileId: uuid('file_id')
+    .notNull()
+    .references(() => files.id),
+  kind: text('kind', { enum: ['shared', 'updated'] }).notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  sentAt: ts('sent_at'),
+  droppedAt: ts('dropped_at'),
+});

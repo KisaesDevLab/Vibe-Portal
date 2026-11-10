@@ -14,6 +14,7 @@
   "dependencies": {
     "@vibe-portal/types": "workspace:*",
     "@vibe/ui": "workspace:*",
+    "pdfjs-dist": "^4.10.38",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.30.4"

@@ -35,6 +35,7 @@ export const EVENT_KINDS = [
   'sign_out',
   'staff_sign_in',
   'client_updated',
+  'file_added',
   'firm_key_created',
   'firm_key_revoked',
 ] as const;

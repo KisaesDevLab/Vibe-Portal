@@ -28,6 +28,7 @@ import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { randomToken, sha256 } from '../lib/secrets';
 import { VERSION } from '../version';
+import { firmFilesRouter } from './files';
 import { requireFirmKey } from './keys';
 
 export const INVITE_DAYS = 7;
@@ -63,6 +64,7 @@ function actorOf(req: Request): Actor {
 export function firmRouter(ctx: Ctx): Router {
   const r = express.Router();
   r.use(requireFirmKey(ctx));
+  r.use('/files', firmFilesRouter(ctx));
 
   const clientExists = async (id: string): Promise<boolean> =>
     (

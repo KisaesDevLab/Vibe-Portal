@@ -10,6 +10,7 @@ import type { Ctx } from './context';
 import { firmRouter } from './firm/routes';
 import { errorHandler, requireJson, TRUST_CF_IP } from './lib/http';
 import { accessRequestsRouter } from './portal/access-requests';
+import { clientFilesRouter } from './portal/files';
 import { invitationsRouter } from './portal/invitations';
 import { VERSION } from './version';
 
@@ -44,7 +45,11 @@ export function createApp(deps: AppDeps): Express {
 
   if (deps.ctx) {
     const ctx = deps.ctx;
-    app.use('/api', express.json({ limit: '64kb' }), requireJson);
+    // JSON bodies only; file uploads (application/octet-stream) are streamed by their route.
+    app.use('/api', express.json({ limit: '64kb' }));
+    // Cookie-signed client calls must be JSON (no cross-site form posts). The firm API is
+    // authorised by a bearer key, which a cross-site form cannot send.
+    app.use('/api/portal', requireJson);
     app.use('/api', (_req, res, next) => {
       res.setHeader('Cache-Control', 'no-store');
       next();
@@ -52,6 +57,7 @@ export function createApp(deps: AppDeps): Express {
     app.use('/api/portal/auth', clientAuthRouter(ctx));
     app.use('/api/portal/invitations', invitationsRouter(ctx));
     app.use('/api/portal/access-requests', accessRequestsRouter(ctx));
+    app.use('/api/portal/files', clientFilesRouter(ctx));
     app.use('/api/firm/v1', firmRouter(ctx));
   }
 

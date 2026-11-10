@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
-// Signed-in home. Files arrive in Phase 3; for now: who is signed in, which client, sign out.
+// Signed-in home: which client, its files, sign out.
 
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { Button, Card } from '@vibe/ui';
 
 import { api, ApiError, say, type Me } from '../api';
+import { Files } from './Files';
 
 type State = 'loading' | 'ready' | 'signed_out' | 'error';
 
@@ -94,7 +95,7 @@ export function Home(): JSX.Element {
             </select>
           </label>
         )}
-        <p>Files the firm shares with you will appear here.</p>
+        <Files clientId={me.activeClientId} />
       </Card>
     </main>
   );

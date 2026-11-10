@@ -6,8 +6,15 @@ import postgres from 'postgres';
 import { createDb, migrate } from '@vibe-portal/db';
 import pino from 'pino';
 
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { createApp } from './app';
 import { loadConfig } from './config';
+import type { Ctx } from './context';
+import { BlobStore } from './files/blobs';
+import { openKeyring } from './files/keyring';
+import { flush } from './files/notify-queue';
 import { consoleNotifier } from './lib/notify';
 import { VERSION } from './version';
 
@@ -40,22 +47,29 @@ async function main(): Promise<void> {
   }
 
   const { db, ping } = createDb({ connectionString: config.DATABASE_URL });
+  await mkdir(config.DATA_DIR, { recursive: true, mode: 0o700 });
+  const keyring = await openKeyring(db, config.DATA_DIR);
+  const blobs = new BlobStore(join(config.DATA_DIR, 'blobs'));
   const portalUrl = config.PORTAL_URL.replace(/\/+$/, '');
-  const app = createApp({
-    pingDb: ping,
-    ctx: {
-      db,
-      log,
-      // Real email and SMS come from the appliance's Email & SMS settings (Phase 5). Until then
-      // the console notifier; in production it leaves out the message text, which holds
-      // sign-in links and codes.
-      notifier: consoleNotifier(log, { redact: config.NODE_ENV === 'production' }),
-      now: () => new Date(),
-      portalUrl,
-      cookie: { secure: portalUrl.startsWith('https://') },
-      trustCfIp: config.TRUST_CF_CONNECTING_IP,
-    },
-  });
+  const ctx: Ctx = {
+    db,
+    log,
+    // Real email and SMS come from the appliance's Email & SMS settings (Phase 5). Until then
+    // the console notifier; in production it leaves out the message text, which holds
+    // sign-in links and codes.
+    notifier: consoleNotifier(log, { redact: config.NODE_ENV === 'production' }),
+    now: () => new Date(),
+    portalUrl,
+    cookie: { secure: portalUrl.startsWith('https://') },
+    trustCfIp: config.TRUST_CF_CONNECTING_IP,
+    keyring,
+    blobs,
+  };
+  const app = createApp({ pingDb: ping, ctx });
+  // P18: send gathered "new files" notices every minute.
+  setInterval(() => {
+    flush(ctx).catch((err: unknown) => log.error({ err }, 'notification flush failed'));
+  }, 60_000).unref();
   app.listen(config.PORT, () => {
     log.info({ port: config.PORT, version: VERSION }, 'vibe-portal api listening');
   });
