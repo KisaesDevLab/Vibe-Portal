@@ -18,7 +18,7 @@ import type { Ctx } from '../context';
 import { sendStored } from '../files/send';
 import { record, type Actor } from '../lib/events';
 import { h, HttpError, notForStaff } from '../lib/http';
-import { inScope, mustSee } from '../staff/scope';
+import { inScope } from '../staff/scope';
 
 function actorOf(req: Request): Actor {
   return req.firmActor ?? { kind: 'firm_key', name: 'Vibe Files' };
@@ -87,9 +87,11 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
     '/:id/content',
     h(async (req, res) => {
       const id = idOf(req);
-      const [u] = await ctx.db.select().from(schema.uploads).where(eq(schema.uploads.id, id));
+      const [u] = await ctx.db
+        .select()
+        .from(schema.uploads)
+        .where(and(eq(schema.uploads.id, id), inScope(req, schema.uploads.clientId)));
       if (!u || !u.blobKey || !u.dekWrapped) throw new HttpError(404, 'not_found');
-      mustSee(req, u.clientId);
       const blobKey = u.blobKey;
       const dekWrapped = u.dekWrapped;
       await sendStored(

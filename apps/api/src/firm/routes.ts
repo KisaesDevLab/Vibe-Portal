@@ -90,10 +90,13 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   // P48: a staff member limited to some clients reaches only those; any other answers as if it
   // were not on the portal. Access requests are not about one client yet, so they are for staff
   // who see every client. (Vibe Files, with the firm key, sees everything.)
-  r.use('/clients/:id', (req, _res, next) => {
-    mustSee(req, req.params['id'] ?? '', 'client_not_found');
-    next();
-  });
+  r.use(
+    '/clients/:id',
+    h(async (req, _res, next) => {
+      await mustSee(ctx.db, req, req.params['id'] ?? '', 'client_not_found');
+      next();
+    }),
+  );
   r.use('/access-requests', requireAllClients);
 
   const clientExists = async (id: string): Promise<boolean> =>

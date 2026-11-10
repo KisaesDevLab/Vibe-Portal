@@ -27,7 +27,7 @@ import { messageTo } from '../lib/notify';
 import { hit, LIMITS } from '../lib/rate-limit';
 import { randomToken, sha256 } from '../lib/secrets';
 import type { StaffSession } from '../staff/auth';
-import { mustSee } from '../staff/scope';
+import { inScope, mustSee } from '../staff/scope';
 
 export const SHARE_MAX_FILES = 20;
 export const SHARE_MAX_DAYS = 90;
@@ -90,7 +90,7 @@ export function firmSharesRouter(ctx: Ctx): Router {
     h(async (req, res) => {
       const staff = req.staff as StaffSession;
       const input = body(CreateSchema, req);
-      mustSee(req, input.clientId, 'client_not_found');
+      await mustSee(ctx.db, req, input.clientId, 'client_not_found');
       const [client] = await ctx.db
         .select()
         .from(schema.clients)
@@ -239,7 +239,7 @@ export function firmSharesRouter(ctx: Ctx): Router {
     '/',
     h(async (req, res) => {
       const q = ListQuery.parse(req.query);
-      mustSee(req, q.clientId, 'client_not_found');
+      await mustSee(ctx.db, req, q.clientId, 'client_not_found');
       const now = ctx.now();
       const shares = await ctx.db
         .select()
@@ -297,9 +297,8 @@ export function firmSharesRouter(ctx: Ctx): Router {
       const [share] = await ctx.db
         .select()
         .from(schema.fileShare)
-        .where(eq(schema.fileShare.id, id.data));
+        .where(and(eq(schema.fileShare.id, id.data), inScope(req, schema.fileShare.clientId)));
       if (!share) throw new HttpError(404, 'not_found');
-      mustSee(req, share.clientId);
       const actor = actorOf(req);
       const ended = await ctx.db
         .update(schema.fileShare)

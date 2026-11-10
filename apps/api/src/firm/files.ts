@@ -24,7 +24,7 @@ import { drop, enqueue } from '../files/notify-queue';
 import { cleanName, contentTypeOf } from '../files/types';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError, notForStaff, queryWithText } from '../lib/http';
-import { inScope, mustSee } from '../staff/scope';
+import { inScope } from '../staff/scope';
 
 const Uuid = z.string().uuid();
 const Sha = z
@@ -83,11 +83,18 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
     return { ...stored, dekWrapped: Buffer.from(ctx.keyring.wrap(dek)) };
   }
 
-  const liveFile = async (id: string) => {
+  /** A file still on the portal, of a client the caller may see (P48): any other is not found. */
+  const liveFile = async (req: Request, id: string) => {
     const [f] = await ctx.db
       .select()
       .from(schema.files)
-      .where(and(eq(schema.files.id, id), isNull(schema.files.removedAt)));
+      .where(
+        and(
+          eq(schema.files.id, id),
+          isNull(schema.files.removedAt),
+          inScope(req, schema.files.clientId),
+        ),
+      );
     if (!f) throw new HttpError(404, 'not_found');
     return f;
   };
@@ -171,7 +178,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
     h(async (req, res) => {
       const id = fileId(req);
       const q = ReplaceQuery.parse(queryWithText(req));
-      const before = await liveFile(id);
+      const before = await liveFile(req, id);
       if (before.sha256 === q.sha256 && (!q.name || cleanName(q.name) === before.name)) {
         res.json({ ok: true, unchanged: true });
         return;
@@ -225,8 +232,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
     h(async (req, res) => {
       const id = fileId(req);
       const { users } = body(VisibilitySchema, req);
-      const file = await liveFile(id);
-      mustSee(req, file.clientId);
+      const file = await liveFile(req, id);
       const ids = Object.keys(users);
       // Only people with access to this file's client.
       const known = ids.length
@@ -288,8 +294,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       const id = fileId(req);
       const now = ctx.now();
       const actor = actorOf(req);
-      const before = await liveFile(id);
-      mustSee(req, before.clientId);
+      const before = await liveFile(req, id);
       const [gone] = await ctx.db
         .update(schema.files)
         .set({ removedAt: now, removedBy: actor.name, blobKey: null, dekWrapped: null })

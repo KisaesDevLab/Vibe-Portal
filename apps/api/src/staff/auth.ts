@@ -57,8 +57,8 @@ export interface StaffSession {
   name: string;
   /** Uses Settings (P48). */
   admin: boolean;
-  /** The only clients this person sees; null for every client (P48). */
-  clientIds: string[] | null;
+  /** Sees only the clients in `staff_client`, not every client (P48). */
+  limited: boolean;
 }
 
 declare global {
@@ -152,23 +152,14 @@ async function resolve(ctx: Ctx, req: Request): Promise<StaffSession | null> {
     .update(schema.sessions)
     .set({ lastSeenAt: now })
     .where(eq(schema.sessions.idHash, idHash));
-  // Read on every call, so a change an admin makes applies at once. An admin sees every client.
-  const clientIds =
-    row.u.admin || row.u.allClients
-      ? null
-      : (
-          await ctx.db
-            .select({ clientId: schema.staffClient.clientId })
-            .from(schema.staffClient)
-            .where(eq(schema.staffClient.staffId, row.u.id))
-        ).map((c) => c.clientId);
   return {
     idHash,
     staffId: row.u.id,
     email: row.u.email,
     name: row.u.name,
     admin: row.u.admin,
-    clientIds,
+    // Read on every call, so a change an admin makes applies at once. An admin sees every client.
+    limited: !row.u.admin && !row.u.allClients,
   };
 }
 
@@ -538,7 +529,7 @@ export function staffAuthRouter(ctx: Ctx): Router {
         name: s.name,
         firmName: await firmName(ctx),
         admin: s.admin,
-        allClients: s.clientIds === null,
+        allClients: !s.limited,
       });
     }),
   );
