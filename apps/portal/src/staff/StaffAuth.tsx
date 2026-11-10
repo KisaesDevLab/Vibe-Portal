@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthLayout, Button, Input } from '@vibe/ui';
+import QRCode from 'qrcode';
 
 import { ApiError, tokenFromHash } from '../api';
 import { staffApi, staffSay } from './api';
@@ -95,6 +96,34 @@ function FirstAccount({ first }: { first: FirstAdmin | null }): JSX.Element {
         </Button>
       </div>
     </div>
+  );
+}
+
+/** The authenticator's otpauth:// link as a QR code (drawn here: the secret never leaves the
+ *  page for a QR service). */
+function TotpQr({ url }: { url: string }): JSX.Element | null {
+  const [svg, setSvg] = useState('');
+  useEffect(() => {
+    let live = true;
+    QRCode.toString(url, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' })
+      .then((s) => {
+        if (live) setSvg(s);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [url]);
+  if (!svg) return null;
+  return (
+    <img
+      src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`}
+      alt="QR code for your authenticator app"
+      width={220}
+      height={220}
+      // White behind the code in dark mode too: phone cameras read dark on light.
+      style={{ background: '#fff', padding: 8, borderRadius: 8, justifySelf: 'center' }}
+    />
   );
 }
 
@@ -268,13 +297,21 @@ export function StaffSetup(): JSX.Element {
     return (
       <AuthLayout brand="Portal staff" title="Add the portal to your authenticator app">
         <form onSubmit={confirm} style={{ display: 'grid', gap: 12 }}>
-          <p>
-            In your authenticator app (Microsoft Authenticator, Google Authenticator, …) add an
-            account with this key, or open this <a href={step.url}>link</a> on your phone:
+          <p style={{ margin: 0 }}>
+            Open your authenticator app (Microsoft Authenticator, Google Authenticator, 1Password,
+            …), choose to add an account, and scan this code:
           </p>
-          <p>
-            <code style={{ fontSize: 18, letterSpacing: 1 }}>{grouped}</code>
-          </p>
+          <TotpQr url={step.url} />
+          <details>
+            <summary>Can&rsquo;t scan it?</summary>
+            <p>
+              Add the account by hand with this key (time-based), or open this{' '}
+              <a href={step.url}>link</a> on the phone that has the app:
+            </p>
+            <p>
+              <code style={{ fontSize: 18, letterSpacing: 1 }}>{grouped}</code>
+            </p>
+          </details>
           <Input
             label="Then enter the 6-digit code it shows"
             name="code"

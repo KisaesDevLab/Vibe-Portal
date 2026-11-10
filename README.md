@@ -50,8 +50,8 @@ to make the first staff account.
 
 1. Open the email **"Set up your firm's client portal"** and its link. It works for 3 days.
 2. Enter your name and choose a password of at least 12 characters.
-3. In your authenticator app, add an account and type in the key the page shows (or open the
-   page's link on your phone). Then type the 6-digit code the app shows.
+3. In your authenticator app, add an account and scan the QR code the page shows (or, under
+   **Can't scan it?**, type in its key). Then type the 6-digit code the app shows.
 
 You are now signed in to the staff page at `https://files.<your domain>/staff`. Bookmark it.
 

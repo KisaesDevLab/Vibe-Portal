@@ -204,7 +204,11 @@ describe('staff page', () => {
       target: { value: 'a long password' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-    expect(await screen.findByText('ABCD EFGH IJKL MNOP')).toBeTruthy();
+    // A QR code to scan, drawn on the page; the key to type is there too, for a phone that cannot scan.
+    const qr = (await screen.findByAltText(/QR code for your authenticator/)) as HTMLImageElement;
+    expect(qr.src).toMatch(/^data:image\/svg\+xml/);
+    expect(decodeURIComponent(qr.src)).toContain('<svg');
+    expect(screen.getByText('ABCD EFGH IJKL MNOP')).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/6-digit code/), { target: { value: '654321' } });
     fireEvent.click(screen.getByRole('button', { name: 'Finish' }));
     await screen.findByRole('heading', { name: 'Clients' });
