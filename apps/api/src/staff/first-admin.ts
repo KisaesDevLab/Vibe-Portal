@@ -13,7 +13,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { schema } from '@vibe-portal/db';
 
-import { firmName, type Ctx } from '../context';
+import type { Ctx } from '../context';
 import { messageTo } from '../lib/notify';
 import { hit } from '../lib/rate-limit';
 import { createSetupLink, finishedCount } from './auth';
@@ -49,7 +49,9 @@ async function send(ctx: Ctx, email: string): Promise<FirstAdminMail> {
       ),
     );
   const link = await createSetupLink(ctx, null, BY_EMAIL);
-  const firm = await firmName(ctx);
+  // A new portal has no firm name yet: "your firm's", not "Your accounting firm's".
+  const [row] = await ctx.db.select({ name: schema.firm.name }).from(schema.firm);
+  const firm = row?.name ? row.name : 'your firm';
   let ok = true;
   try {
     // Awaited, not deliver(): the page says whether it went.
