@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
 // Database snapshots in the B2 bucket (P51, owner 2026-11-10). With files in B2, each file's own
-// key is in the database: the bucket alone opens nothing. So once a day (and after a move to B2)
+// key is in the database: the bucket alone opens nothing. So every hour (owner 2026-11-10; and after a move to B2)
 // the portal sends an encrypted copy of its database to the bucket, under portal/snapshots/.
 // The bucket and the seal file (.firm-key.seal) are then enough to recover everything.
 //
@@ -31,8 +31,9 @@ import type { Bucket } from './objects';
 const MAGIC = Buffer.from('VPS1');
 export const SNAPSHOTS = 'snapshots/';
 /** How many snapshots the bucket keeps (the newest). */
-const KEEP = 14;
-const EVERY_MS = 23 * 3_600_000;
+const KEEP = 48;
+/** Every hour; a little under, so the hourly timer does not skip one by a few seconds. */
+const EVERY_MS = 55 * 60_000;
 const FIRM_ID = 'firm';
 
 /** Short-lived, or of no use after a restore. */

@@ -617,7 +617,7 @@ describe('database snapshots in the bucket (P51)', () => {
     expect(bucket.noteItems.size).toBe(0);
   });
 
-  it('one a day, the newest fourteen kept; a failure is said once', async () => {
+  it('one an hour, the newest 48 kept; a failure is said once', async () => {
     const boss = await admin();
     await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
     // Files on the appliance: no snapshot is sent.
@@ -627,11 +627,13 @@ describe('database snapshots in the bucket (P51)', () => {
       await new Promise((ok) => setTimeout(ok, 10));
     }
     expect(await snapshotIfDue(w.ctx)).toBeNull();
-    for (let day = 0; day < 16; day++) {
-      w.later(24 * 60);
+    w.later(30);
+    expect(await snapshotIfDue(w.ctx)).toBeNull();
+    for (let hour = 0; hour < 50; hour++) {
+      w.later(60);
       expect(await snapshotIfDue(w.ctx)).toMatch(/^snapshots\/\d{8}-\d{6}-\w+\.vps$/);
     }
-    expect(snapshots()).toHaveLength(14);
+    expect(snapshots()).toHaveLength(48);
 
     bucket.down = true;
     w.later(24 * 60);

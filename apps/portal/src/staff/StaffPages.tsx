@@ -1320,8 +1320,8 @@ function Storage(): JSX.Element {
           {d.storage === 'b2' && (
             <div style={{ display: 'grid', gap: 4 }}>
               <span>
-                A copy of the portal&rsquo;s database, encrypted, goes to the bucket every day: with
-                the appliance&rsquo;s firm key file it is enough to get every file back.{' '}
+                A copy of the portal&rsquo;s database, encrypted, goes to the bucket every hour:
+                with the appliance&rsquo;s firm key file it is enough to get every file back.{' '}
                 {d.note?.snapshotAt
                   ? `Last sent ${when(d.note.snapshotAt)}.`
                   : 'None has been sent yet.'}

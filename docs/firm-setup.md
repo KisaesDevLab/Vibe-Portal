@@ -208,12 +208,12 @@ uploads not yet collected by Vibe Files exist only on the portal.
 
 With files in B2, each file's own key is in the database, wrapped by the firm key that the seal
 file unlocks: the bucket alone opens nothing. So the portal also sends an encrypted copy of its
-database to the bucket every day, and as soon as a move to B2 finishes; the bucket keeps the
-newest 14. Settings > Storage shows when the last one went (**Send a database copy now** sends
+database to the bucket every hour, and as soon as a move to B2 finishes; the bucket keeps the
+newest 48 (two days). Settings > Storage shows when the last one went (**Send a database copy now** sends
 one at once), and History records it if one fails. **The bucket and the seal file are then
 enough to get everything back.** Keep a copy of `data/.firm-key.seal` somewhere other than the
 appliance and other than the bucket: without it neither the copies nor the files can be opened.
-What changed after the last daily copy is lost: a file shared since can be shared again from
+What changed after the last copy (at most an hour) is lost: a file shared since can be shared again from
 Vibe Files, but **a client upload that arrived since and was not yet collected by Vibe Files
 cannot be opened**, and is gone. **Remove bucket** deletes these copies from the bucket too.
 

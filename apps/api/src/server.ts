@@ -140,7 +140,7 @@ async function main(): Promise<void> {
     purgeMarks(ctx).catch((err: unknown) => log.error({ err }, 'mark purge failed'));
     // P51: once a day, stored files whose delete failed (D9).
     sweep(ctx).catch((err: unknown) => log.error({ err }, 'stored file sweep failed'));
-    // P51: with files in B2, a database snapshot to the bucket once a day.
+    // P51: with files in B2, a database snapshot to the bucket every hour.
     snapshotIfDue(ctx).catch(() => undefined);
   }, 3_600_000).unref();
   if (config.EMAIL_PROVIDER === 'smtp') {
