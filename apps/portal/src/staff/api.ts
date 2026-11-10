@@ -45,8 +45,21 @@ export function staffSay(err: unknown): string {
     already_has_access: 'That person already has access to this client.',
     client_inactive: 'This client is switched off.',
     png_or_jpeg: 'The logo must be a PNG or JPEG file of at most 512 KB.',
+    too_large: 'That file is too large (a logo can be at most 512 KB).',
     too_many_requests: 'Too many tries. Wait a few minutes.',
     signed_out: 'You were signed out. Sign in again.',
+    invalid_phone: 'That mobile number does not look right.',
+    contact_required: 'Enter an email or a mobile number.',
+    client_not_found: 'That client is no longer on the portal.',
+    not_found: 'It is no longer there; the page now shows what is.',
+    not_a_user_of_this_client: 'That person no longer has access to this client.',
+    setup_not_started: 'Set the password first.',
+    setup_link_missing:
+      'Open the setup link again. If you already added the portal to your authenticator app, remove it there and add it again.',
+    cannot_reset_yourself: 'You cannot send yourself a new setup link; ask another staff member.',
+    staff_off: 'Turn them on first.',
+    invalid_json: 'Something went wrong. Try again.',
+    json_required: 'Something went wrong. Try again.',
     network: 'The portal cannot be reached right now.',
   };
   return words[code] ?? 'Something went wrong. Try again.';

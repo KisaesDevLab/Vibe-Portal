@@ -6,7 +6,7 @@
 // scanners open links (some run the page's script); an automatic sign-in would use the one-time
 // link up before the client gets to it.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthLayout, Button } from '@vibe/ui';
 
@@ -14,12 +14,11 @@ import { api, say, tokenFromHash } from '../api';
 
 export function VerifyLink(): JSX.Element {
   const navigate = useNavigate();
-  const token = useRef<string | null>(null);
-  if (token.current === null) {
-    token.current = tokenFromHash(window.location.hash);
+  const token = useRef(tokenFromHash(window.location.hash));
+  useEffect(() => {
     // Take the token out of the address bar and history.
     window.history.replaceState(null, '', window.location.pathname);
-  }
+  }, []);
   const [error, setError] = useState(token.current ? '' : 'missing');
   const [busy, setBusy] = useState(false);
 

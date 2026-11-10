@@ -3,7 +3,7 @@
 // The staff page (D13): clients and their people and files, access requests, client uploads,
 // the history, and Settings (P36). Sharing new files stays in Vibe Files.
 
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { Button, Card, Input } from '@vibe/ui';
 
@@ -19,27 +19,41 @@ import {
   type StaffMe,
 } from './api';
 
-/** Loads `path`; `reload` reads it again. A 401 sends the person to sign in. */
-function useLoad<T>(path: string): {
+/** Sends the person to sign in when the session has ended (30 minutes idle, 12 hours). */
+function useSignedOut(): (err: unknown) => boolean {
+  const navigate = useNavigate();
+  const nav = useRef(navigate);
+  nav.current = navigate;
+  return useCallback((err: unknown) => {
+    if (err instanceof ApiError && err.status === 401) {
+      nav.current('/staff/login', { replace: true });
+      return true;
+    }
+    return false;
+  }, []);
+}
+
+interface Load<T> {
   data: T | null;
   error: string;
   reload: () => void;
-  signedOut: boolean;
-} {
+}
+
+/** Loads `path`; `reload` reads it again. */
+function useLoad<T>(path: string): Load<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
-  const [signedOut, setSignedOut] = useState(false);
+  const signedOut = useSignedOut();
   const reload = useCallback(() => {
     setError('');
     staffApi<T>(path)
       .then(setData)
       .catch((err: unknown) => {
-        if (err instanceof ApiError && err.status === 401) setSignedOut(true);
-        else setError(staffSay(err));
+        if (!signedOut(err)) setError(staffSay(err));
       });
-  }, [path]);
+  }, [path, signedOut]);
   useEffect(reload, [reload]);
-  return { data, error, reload, signedOut };
+  return { data, error, reload };
 }
 
 /** Runs a change, then reloads; shows what went wrong. */
@@ -47,10 +61,10 @@ function useAct(reload: () => void): {
   act: (path: string, init: { method?: string; body?: unknown; raw?: Blob }) => Promise<unknown>;
   busy: boolean;
   error: string;
-  setError: (e: string) => void;
 } {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const signedOut = useSignedOut();
   const act = async (path: string, init: { method?: string; body?: unknown; raw?: Blob }) => {
     setBusy(true);
     setError('');
@@ -59,24 +73,54 @@ function useAct(reload: () => void): {
       reload();
       return r;
     } catch (err) {
-      setError(staffSay(err));
+      if (!signedOut(err)) setError(staffSay(err));
       return null;
     } finally {
       setBusy(false);
     }
   };
-  return { act, busy, error, setError };
+  return { act, busy, error };
 }
 
 function Problem({ text }: { text: string }): JSX.Element | null {
   return text ? <p role="alert">{text}</p> : null;
 }
 
+/** Loading, or what went wrong with Try again; nothing once loaded. */
+function Status({ load, what }: { load: Load<unknown>; what: string }): JSX.Element | null {
+  if (load.error) {
+    return (
+      <div role="alert" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span>
+          Could not load {what}: {load.error}
+        </span>
+        <Button size="sm" variant="secondary" onClick={load.reload}>
+          Try again
+        </Button>
+      </div>
+    );
+  }
+  return load.data === null ? <p role="status">Loading {what}…</p> : null;
+}
+
+/** Settings tells the header to read the firm name again. */
+const ME_CHANGED = 'vibe-staff-me-changed';
+
 export function StaffHome(): JSX.Element {
   const me = useLoad<StaffMe>('/auth/me');
   const navigate = useNavigate();
-  if (me.signedOut) return <Navigate to="/staff/login" replace />;
-  if (!me.data) return <p role="status">{me.error || 'Loading…'}</p>;
+  const reloadMe = me.reload;
+  useEffect(() => {
+    window.addEventListener(ME_CHANGED, reloadMe);
+    return () => window.removeEventListener(ME_CHANGED, reloadMe);
+  }, [reloadMe]);
+  if (!me.data) {
+    return (
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: 16 }}>
+        <Status load={me} what="the staff page" />
+      </div>
+    );
+  }
   const signOut = async (): Promise<void> => {
     await staffApi('/auth/logout', { method: 'POST' }).catch(() => undefined);
     navigate('/staff/login', { replace: true });
@@ -133,9 +177,9 @@ function Table({ head, children }: { head: string[]; children: ReactNode }): JSX
 const td = { padding: '6px 8px', borderTop: '1px solid var(--vibe-border, #ddd)' };
 
 function Clients(): JSX.Element {
-  const { data, error } = useLoad<{ clients: ClientRow[] }>('/v1/clients');
+  const load = useLoad<{ clients: ClientRow[] }>('/v1/clients');
   const [q, setQ] = useState('');
-  const rows = (data?.clients ?? []).filter((c) =>
+  const rows = (load.data?.clients ?? []).filter((c) =>
     `${c.displayName} ${c.clientCode}`.toLowerCase().includes(q.trim().toLowerCase()),
   );
   return (
@@ -145,7 +189,10 @@ function Clients(): JSX.Element {
         shared from Vibe Files.
       </p>
       <Input label="Find a client" name="q" value={q} onChange={(e) => setQ(e.target.value)} />
-      <Problem text={error} />
+      <Status load={load} what="the clients" />
+      {load.data && rows.length === 0 && (
+        <p>{q.trim() ? 'No client matches.' : 'No clients on the portal yet.'}</p>
+      )}
       <Table head={['Client', 'ID', 'People', 'Files', 'Uploads waiting']}>
         {rows.map((c) => (
           <tr key={c.id}>
@@ -187,9 +234,13 @@ function ClientDetail(): JSX.Element {
   return (
     <div style={{ display: 'grid', gap: 16 }}>
       <Link to="/staff">← All clients</Link>
+      <Problem text={error} />
       <Card title="People with access">
-        <Problem text={people.error || error} />
-        <Table head={['Name', 'Email / phone', 'Role', 'Last sign-in', '']}>
+        <Status load={people} what="the people" />
+        {people.data && people.data.users.length === 0 && people.data.invitations.length === 0 && (
+          <p>Nobody has access yet.</p>
+        )}
+        <Table head={['Name', 'Email / phone', 'Role', 'Last sign-in', 'Actions']}>
           {(people.data?.users ?? []).map((u) => (
             <tr key={u.identityId}>
               <td style={td}>{label(u)}</td>
@@ -201,6 +252,7 @@ function ClientDetail(): JSX.Element {
                   size="sm"
                   variant="secondary"
                   disabled={busy}
+                  aria-label={`${u.active ? 'Turn off' : 'Turn on'} ${label(u)}`}
                   onClick={() =>
                     void act(`/v1/clients/${id}/users/${u.identityId}`, {
                       method: 'PATCH',
@@ -228,6 +280,7 @@ function ClientDetail(): JSX.Element {
                   size="sm"
                   variant="secondary"
                   disabled={busy}
+                  aria-label={`Withdraw the invitation to ${i.email ?? i.phone ?? ''}`}
                   onClick={() =>
                     void act(`/v1/clients/${id}/invites/${i.invitationId}`, { method: 'DELETE' })
                   }
@@ -270,8 +323,9 @@ function ClientDetail(): JSX.Element {
         </form>
       </Card>
       <Card title="Files on the portal">
-        <Problem text={files.error} />
-        <Table head={['File', 'Shared', 'Who sees it', '']}>
+        <Status load={files} what="the files" />
+        {files.data?.files.length === 0 && <p>No files on the portal for this client.</p>}
+        <Table head={['File', 'Shared', 'Who sees it', 'Actions']}>
           {(files.data?.files ?? []).map((f) => (
             <tr key={f.fileId}>
               <td style={td}>
@@ -317,6 +371,7 @@ function ClientDetail(): JSX.Element {
                   size="sm"
                   variant="danger"
                   disabled={busy}
+                  aria-label={`Remove ${f.name}`}
                   onClick={() => {
                     if (
                       window.confirm(
@@ -360,7 +415,9 @@ function Requests(): JSX.Element {
         People who asked for access and confirmed their email or phone. Only the confirmed contact
         is used.
       </p>
-      <Problem text={reqs.error || error} />
+      <Problem text={error} />
+      <Status load={reqs} what="the requests" />
+      <Status load={clients} what="the clients" />
       {reqs.data?.requests.length === 0 && <p>No requests waiting.</p>}
       {(reqs.data?.requests ?? []).map((r) => {
         const p = pick[r.id] ?? { client: '', role: '' };
@@ -382,7 +439,7 @@ function Requests(): JSX.Element {
             {r.note && <span>“{r.note}”</span>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
               <label style={{ display: 'grid', gap: 4 }}>
-                <span>Client</span>
+                <span>Client for {r.name}</span>
                 <select value={p.client} onChange={(e) => set({ client: e.target.value })}>
                   <option value="">Choose…</option>
                   {(clients.data?.clients ?? [])
@@ -395,13 +452,14 @@ function Requests(): JSX.Element {
                 </select>
               </label>
               <Input
-                label="Role"
+                label={`Role for ${r.name}`}
                 name={`role-${r.id}`}
                 value={p.role}
                 onChange={(e) => set({ role: e.target.value })}
               />
               <Button
                 disabled={busy || !p.client}
+                aria-label={`Approve ${r.name}`}
                 onClick={() =>
                   void act(`/v1/access-requests/${r.id}/approve`, {
                     body: { clientId: p.client, roleLabel: p.role },
@@ -413,6 +471,7 @@ function Requests(): JSX.Element {
               <Button
                 variant="secondary"
                 disabled={busy}
+                aria-label={`Deny ${r.name}`}
                 onClick={() => void act(`/v1/access-requests/${r.id}/deny`, { method: 'POST' })}
               >
                 Deny
@@ -440,14 +499,16 @@ interface UploadRow {
 }
 
 function Uploads(): JSX.Element {
-  const { data, error } = useLoad<{ uploads: UploadRow[] }>('/v1/uploads');
+  const load = useLoad<{ uploads: UploadRow[] }>('/v1/uploads');
+  const data = load.data;
   return (
     <Card title="Uploads waiting for Vibe Files">
       <p>
         What clients sent that Vibe Files has not collected yet. Downloading here does not take it
         out of Intake: Vibe Files still files it.
       </p>
-      <Problem text={error} />
+      <Status load={load} what="the uploads" />
+      {data?.uploads.length === 0 && <p>Nothing waiting: Vibe Files has collected everything.</p>}
       <Table head={['Received', 'Client', 'File', 'From', 'Note']}>
         {(data?.uploads ?? []).map((u) => (
           <tr key={u.uploadId}>
@@ -480,14 +541,15 @@ interface EventRow {
 }
 
 function History(): JSX.Element {
-  const { data, error } = useLoad<{ events: EventRow[] }>('/v1/events?latest=1&limit=300');
-  const rows = data?.events ?? [];
+  const load = useLoad<{ events: EventRow[] }>('/v1/events?latest=1&limit=300');
+  const rows = load.data?.events ?? [];
   return (
     <Card title="History">
       <p>
         The newest 300 events: sign-ins, invitations, sharing, client views and downloads, uploads.
       </p>
-      <Problem text={error} />
+      <Status load={load} what="the history" />
+      {load.data && rows.length === 0 && <p>Nothing has happened yet.</p>}
       <Table head={['When', 'What', 'Who']}>
         {rows.map((e) => (
           <tr key={e.id}>
@@ -531,24 +593,33 @@ function Settings(): JSX.Element {
       lastSignInAt: string | null;
     }[];
   }>('/v1/staff');
+  const me = useLoad<StaffMe>('/auth/me');
   const reload = (): void => {
     s.reload();
     keys.reload();
     staff.reload();
   };
-  const { act, busy, error } = useAct(reload);
+  const { act: run, busy, error } = useAct(reload);
   const [form, setForm] = useState<SettingsData | null>(null);
   const [newKey, setNewKey] = useState('');
   const [keyLabel, setKeyLabel] = useState('');
   const [person, setPerson] = useState({ email: '', name: '' });
-  const [link, setLink] = useState('');
+  const [link, setLink] = useState<{ who: string; url: string } | null>(null);
+  // Bumped when the logo changes, so the browser shows the new one (it caches it).
+  const [logoV, setLogoV] = useState(0);
+  // A key or setup link is shown until the next thing done here.
+  const act: typeof run = (path, init) => {
+    setNewKey('');
+    setLink(null);
+    return run(path, init);
+  };
   useEffect(() => {
     if (s.data && !form) setForm(s.data);
   }, [s.data, form]);
-  if (s.signedOut) return <Navigate to="/staff/login" replace />;
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <Problem text={error || s.error} />
+      <Problem text={error} />
+      <Status load={s} what="the settings" />
       {form && (
         <Card title="Firm">
           <form
@@ -563,6 +634,12 @@ function Settings(): JSX.Element {
                   uploadLimitMb: Number(form.uploadLimitMb),
                   uploadKeepDays: Number(form.uploadKeepDays),
                 },
+              }).then((r) => {
+                if (r) {
+                  // Shown as saved (trimmed), and in the header.
+                  setForm(null);
+                  window.dispatchEvent(new Event(ME_CHANGED));
+                }
               });
             }}
           >
@@ -604,7 +681,7 @@ function Settings(): JSX.Element {
             <strong>Logo</strong>
             {s.data?.hasLogo && (
               <img
-                src="/api/portal/branding/logo"
+                src={`/api/portal/branding/logo?v=${logoV}`}
                 alt="Firm logo"
                 style={{ maxHeight: 60, maxWidth: 240 }}
               />
@@ -614,9 +691,16 @@ function Settings(): JSX.Element {
               <input
                 type="file"
                 accept="image/png,image/jpeg"
+                disabled={busy}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) void act('/v1/settings/logo', { method: 'PUT', raw: f });
+                  // Cleared, so the same file can be chosen again.
+                  e.target.value = '';
+                  if (f) {
+                    void act('/v1/settings/logo', { method: 'PUT', raw: f }).then((r) => {
+                      if (r) setLogoV((v) => v + 1);
+                    });
+                  }
                 }}
               />
             </label>
@@ -625,7 +709,11 @@ function Settings(): JSX.Element {
                 size="sm"
                 variant="secondary"
                 disabled={busy}
-                onClick={() => void act('/v1/settings/logo', { method: 'DELETE' })}
+                onClick={() =>
+                  void act('/v1/settings/logo', { method: 'DELETE' }).then(() =>
+                    setLogoV((v) => v + 1),
+                  )
+                }
               >
                 Remove logo
               </Button>
@@ -634,7 +722,8 @@ function Settings(): JSX.Element {
         </Card>
       )}
       <Card title="Portal keys (for Vibe Files › Admin › Portal)">
-        <Table head={['Name', 'Made', 'Last used', '']}>
+        <Status load={keys} what="the keys" />
+        <Table head={['Name', 'Made', 'Last used', 'Actions']}>
           {(keys.data?.keys ?? []).map((k) => (
             <tr key={k.id}>
               <td style={td}>{k.label}</td>
@@ -648,6 +737,7 @@ function Settings(): JSX.Element {
                     size="sm"
                     variant="danger"
                     disabled={busy}
+                    aria-label={`Revoke ${k.label}`}
                     onClick={() => {
                       if (
                         window.confirm(
@@ -696,40 +786,62 @@ function Settings(): JSX.Element {
         )}
       </Card>
       <Card title="Staff">
-        <Table head={['Name', 'Email', 'State', 'Last sign-in', '']}>
-          {(staff.data?.staff ?? []).map((u) => (
-            <tr key={u.id}>
-              <td style={td}>{u.name}</td>
-              <td style={td}>{u.email}</td>
-              <td style={td}>{!u.active ? 'turned off' : u.ready ? 'active' : 'setting up'}</td>
-              <td style={td}>{when(u.lastSignInAt)}</td>
-              <td style={td}>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void act(`/v1/staff/${u.id}`, { method: 'PATCH', body: { active: !u.active } })
-                  }
-                >
-                  {u.active ? 'Turn off' : 'Turn on'}
-                </Button>{' '}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() =>
-                    void act(`/v1/staff/${u.id}/reset`, { method: 'POST' }).then((r) => {
-                      const l = (r as { setupLink?: string } | null)?.setupLink;
-                      if (l) setLink(l);
-                    })
-                  }
-                >
-                  New setup link
-                </Button>
-              </td>
-            </tr>
-          ))}
+        <Status load={staff} what="the staff" />
+        <Table head={['Name', 'Email', 'State', 'Last sign-in', 'Actions']}>
+          {(staff.data?.staff ?? []).map((u) => {
+            const self = u.email === me.data?.email;
+            return (
+              <tr key={u.id}>
+                <td style={td}>{u.name}</td>
+                <td style={td}>{u.email}</td>
+                <td style={td}>
+                  {self ? 'you' : !u.active ? 'turned off' : u.ready ? 'active' : 'setting up'}
+                </td>
+                <td style={td}>{when(u.lastSignInAt)}</td>
+                <td style={td}>
+                  {!self && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      aria-label={`${u.active ? 'Turn off' : 'Turn on'} ${u.name}`}
+                      onClick={() =>
+                        void act(`/v1/staff/${u.id}`, {
+                          method: 'PATCH',
+                          body: { active: !u.active },
+                        })
+                      }
+                    >
+                      {u.active ? 'Turn off' : 'Turn on'}
+                    </Button>
+                  )}{' '}
+                  {!self && u.active && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      aria-label={`New setup link for ${u.name}`}
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Send ${u.name} a new setup link? Their password and authenticator stop working until they use it.`,
+                          )
+                        ) {
+                          return;
+                        }
+                        void act(`/v1/staff/${u.id}/reset`, { method: 'POST' }).then((r) => {
+                          const l = (r as { setupLink?: string } | null)?.setupLink;
+                          if (l) setLink({ who: `${u.name} (${u.email})`, url: l });
+                        });
+                      }}
+                    >
+                      New setup link
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </Table>
         <form
           style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 8 }}
@@ -738,7 +850,7 @@ function Settings(): JSX.Element {
             void act('/v1/staff', { body: person }).then((r) => {
               const l = (r as { setupLink?: string } | null)?.setupLink;
               if (l) {
-                setLink(l);
+                setLink({ who: `${person.name} (${person.email.trim()})`, url: l });
                 setPerson({ email: '', name: '' });
               }
             });
@@ -762,8 +874,8 @@ function Settings(): JSX.Element {
         </form>
         {link && (
           <p role="status">
-            Setup link (also emailed to them; works for 3 days, once):{' '}
-            <code style={{ wordBreak: 'break-all' }}>{link}</code>
+            Setup link for {link.who} (also emailed to them; works for 3 days, once):{' '}
+            <code style={{ wordBreak: 'break-all' }}>{link.url}</code>
           </p>
         )}
       </Card>

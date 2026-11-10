@@ -23,7 +23,7 @@ import { TooLarge } from '../files/blobs';
 import { drop, enqueue } from '../files/notify-queue';
 import { cleanName, contentTypeOf } from '../files/types';
 import { record, type Actor } from '../lib/events';
-import { body, h, HttpError } from '../lib/http';
+import { body, h, HttpError, notForStaff } from '../lib/http';
 
 const Uuid = z.string().uuid();
 const Sha = z
@@ -52,8 +52,15 @@ function actorOf(req: Request): Actor {
   return req.firmActor ?? { kind: 'firm_key', name: 'Vibe Files' };
 }
 
-export function firmFilesRouter(ctx: Ctx): Router {
+export function firmFilesRouter(ctx: Ctx, staff = false): Router {
   const r = express.Router();
+  if (staff) {
+    // Only Vibe Files reaches the cabinet: staff cannot share new files or replace content.
+    // Registered on the same routes, ahead of them, so they match exactly as those do (Express
+    // ignores case and a trailing slash).
+    r.post('/', notForStaff);
+    r.put('/:id/content', notForStaff);
+  }
 
   /** Streams the request body into a new encrypted blob and checks its hash. */
   async function store(req: Request, sha256: string) {

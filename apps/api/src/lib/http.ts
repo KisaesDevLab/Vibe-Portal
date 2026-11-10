@@ -38,6 +38,15 @@ export function errorHandler(log: { error: (o: object, m: string) => void }): Er
       res.status(err.status).json({ error: err.code });
       return;
     }
+    // body-parser's own limit (a JSON body, the staff logo).
+    if (
+      typeof err === 'object' &&
+      err !== null &&
+      (err as { type?: unknown }).type === 'entity.too.large'
+    ) {
+      res.status(413).json({ error: 'too_large' });
+      return;
+    }
     if (err instanceof SyntaxError && 'body' in err) {
       res.status(400).json({ error: 'invalid_json' });
       return;
@@ -46,6 +55,11 @@ export function errorHandler(log: { error: (o: object, m: string) => void }): Er
     res.status(500).json({ error: 'internal' });
   };
 }
+
+/** A route of the firm API that only Vibe Files may use (the staff page shares it, D13). */
+export const notForStaff: RequestHandler = (_req, res) => {
+  res.status(403).json({ error: 'not_for_staff' });
+};
 
 /**
  * State-changing requests must be JSON (or a file upload as application/octet-stream), or have

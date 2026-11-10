@@ -11,6 +11,7 @@ import { schema } from '@vibe-portal/db';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { createFirmKey } from '../firm/keys';
 import { createSetupLink, LOCK_MINUTES } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
 import { CLIENT, world, type World } from './harness';
@@ -123,10 +124,20 @@ describe('staff sign-in (P9)', () => {
       .post('/api/staff/auth/login')
       .send({ email, password: 'wrong', code: totpCode(secret, w.ctx.now()) })
       .expect(401);
+    // The code that finished setup cannot be used again (RFC 6238 §5.2): the next one can.
+    await a
+      .post('/api/staff/auth/login')
+      .send({ email, password: PASSWORD, code: totpCode(secret, w.ctx.now()) })
+      .expect(401);
+    w.later(1);
     await a
       .post('/api/staff/auth/login')
       .send({ email: email.toUpperCase(), password: PASSWORD, code: totpCode(secret, w.ctx.now()) })
       .expect(200);
+    await request(w.app)
+      .post('/api/staff/auth/login')
+      .send({ email, password: PASSWORD, code: totpCode(secret, w.ctx.now()) })
+      .expect(401);
     await a.get('/api/staff/auth/me').expect(200);
     w.later(31);
     await a.get('/api/staff/auth/me').expect(401);
@@ -140,6 +151,14 @@ describe('staff sign-in (P9)', () => {
         .send({ email, password: 'wrong', code: '123456' })
         .expect(401);
     }
+    // While locked, a wrong try looks like an unknown email; only the right password and code
+    // are told it is locked.
+    const wrong = await request(w.app)
+      .post('/api/staff/auth/login')
+      .send({ email, password: 'wrong', code: '123456' });
+    expect(wrong.status).toBe(401);
+    expect(wrong.body).toEqual({ error: 'sign_in_failed' });
+    w.later(1);
     const locked = await request(w.app)
       .post('/api/staff/auth/login')
       .send({ email, password: PASSWORD, code: totpCode(secret, w.ctx.now()) });
@@ -160,6 +179,11 @@ describe('staff sign-in (P9)', () => {
     await request(w.app).get('/api/staff/v1/clients').expect(401);
     const client = await w.member('c@example.test');
     await client.agent.get('/api/staff/v1/clients').expect(401);
+    const { key } = await createFirmKey(w.t.db, 'Probe');
+    await request(w.app)
+      .get('/api/staff/v1/clients')
+      .set('Authorization', `Bearer ${key}`)
+      .expect(401);
   });
 });
 
@@ -190,14 +214,23 @@ describe('what staff do (D13)', () => {
       .set('Content-Type', 'application/octet-stream')
       .send(body);
     expect(forbidden.status).toBe(403);
+    for (const path of ['/api/staff/v1/FILES', '/api/staff/v1/Files/', '/api/staff/v1/files//']) {
+      const res = await agent
+        .post(`${path}?${q}`)
+        .set('Content-Type', 'application/octet-stream')
+        .send(body);
+      expect(res.status, path).toBe(403);
+    }
     const fileId = (
       await w.firm('post', `/files?${q}`).set('Content-Type', 'application/octet-stream').send(body)
     ).body.fileId as string;
-    await agent
-      .put(`/api/staff/v1/files/${fileId}/content?sha256=${sha}`)
-      .set('Content-Type', 'application/octet-stream')
-      .send(body)
-      .expect(403);
+    for (const p of ['content', 'CONTENT']) {
+      await agent
+        .put(`/api/staff/v1/files/${fileId}/${p}?sha256=${sha}`)
+        .set('Content-Type', 'application/octet-stream')
+        .send(body)
+        .expect(403);
+    }
     await agent
       .put(`/api/staff/v1/files/${fileId}/visibility`)
       .send({ users: { [m.id]: true } })
@@ -279,7 +312,14 @@ describe('what staff do (D13)', () => {
       .expect(201);
     const id = up.body.uploadId as string;
     await agent.get(`/api/staff/v1/uploads/${id}/content`).expect(200);
+    const [dl] = await w.t.db
+      .select()
+      .from(schema.events)
+      .where(eq(schema.events.kind, 'download'));
+    expect(dl).toMatchObject({ actorKind: 'staff', uploadId: id });
     await agent.post(`/api/staff/v1/uploads/${id}/fetched`).expect(403);
+    // Express ignores case and a trailing slash: so does the refusal.
+    await agent.post(`/api/staff/v1/Uploads/${id}/FETCHED/`).expect(403);
     const waiting = await w.firm('get', '/uploads').expect(200);
     expect(waiting.body.uploads.map((u: { uploadId: string }) => u.uploadId)).toEqual([id]);
   });
@@ -329,6 +369,12 @@ describe('Settings (P36)', () => {
       .set('Content-Type', 'application/octet-stream')
       .send(Buffer.from('<svg/>'))
       .expect(415);
+    const big = await agent
+      .put('/api/staff/v1/settings/logo')
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.concat([png, Buffer.alloc(600 * 1024)]));
+    expect(big.status).toBe(413);
+    expect(big.body).toEqual({ error: 'too_large' });
     const b = await request(w.app).get('/api/portal/branding').expect(200);
     expect(b.body).toEqual({ firmName: 'Example CPA LLC', accentColor: '#225588', hasLogo: true });
     const logo = await request(w.app).get('/api/portal/branding/logo').expect(200);
@@ -367,7 +413,41 @@ describe('Settings (P36)', () => {
     await mary.agent.get('/api/staff/auth/me').expect(401);
     const me = list.body.staff.find((s: { email: string }) => s.email === 'kurt@example-cpa.test');
     await agent.patch(`/api/staff/v1/staff/${me.id}`).send({ active: false }).expect(409);
+    await agent.post(`/api/staff/v1/staff/${me.id}/reset`).expect(409);
+    await agent.post(`/api/staff/v1/staff/${m2.id}/reset`).expect(409);
+    await agent.patch(`/api/staff/v1/staff/${m2.id}`).send({ active: true }).expect(200);
     const reset = await agent.post(`/api/staff/v1/staff/${m2.id}/reset`).expect(200);
     expect(reset.body.setupLink).toContain('/staff/setup#t=');
+  });
+
+  it('setup links: a newer one or turning off ends the old; the first account ends the others', async () => {
+    const first1 = tokenOf(await createSetupLink(w.ctx, null, 'appliance'));
+    const { agent } = await staff();
+    // A first-account link made before the first account was finished no longer works.
+    await request(w.app).post('/api/staff/auth/setup/preview').send({ token: first1 }).expect(404);
+
+    const added = await agent
+      .post('/api/staff/v1/staff')
+      .send({ email: 'bob@example-cpa.test', name: 'Bob' })
+      .expect(201);
+    const old = tokenOf(added.body.setupLink as string);
+    const again = await agent.post(`/api/staff/v1/staff/${added.body.id}/reset`).expect(200);
+    await request(w.app).post('/api/staff/auth/setup/preview').send({ token: old }).expect(404);
+    const newer = tokenOf(again.body.setupLink as string);
+    await request(w.app).post('/api/staff/auth/setup/preview').send({ token: newer }).expect(200);
+    // Turned off: the link stops working and cannot turn Bob back on.
+    await agent.patch(`/api/staff/v1/staff/${added.body.id}`).send({ active: false }).expect(200);
+    await request(w.app).post('/api/staff/auth/setup/preview').send({ token: newer }).expect(404);
+  });
+
+  it('a first account left half way can be made again with a new link', async () => {
+    const t1 = tokenOf(await createSetupLink(w.ctx, null, 'appliance'));
+    await request(w.app)
+      .post('/api/staff/auth/setup')
+      .send({ token: t1, email: 'kurt@example-cpa.test', name: 'Kurt', password: PASSWORD })
+      .expect(200);
+    // Closed the tab before the authenticator step; the appliance makes a new link.
+    const { agent } = await staff();
+    await agent.get('/api/staff/auth/me').expect(200);
   });
 });

@@ -58,6 +58,7 @@ export const staffUsers = pgTable('staff_users', {
   totpConfirmedAt: ts('totp_confirmed_at'),
   failedLogins: integer('failed_logins').notNull().default(0),
   lockedUntil: ts('locked_until'),
+  totpLastStep: bigint('totp_last_step', { mode: 'number' }),
 });
 
 export const staffSetupToken = pgTable('staff_setup_token', {
@@ -68,6 +69,8 @@ export const staffSetupToken = pgTable('staff_setup_token', {
   usedAt: ts('used_at'),
   createdBy: text('created_by').notNull().default(''),
   createdAt: ts('created_at').notNull().defaultNow(),
+  /** Made for the first account (`vibe portal setup-link`). */
+  first: boolean('first').notNull().default(false),
 });
 
 export const clients = pgTable('clients', {

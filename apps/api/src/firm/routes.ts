@@ -77,26 +77,11 @@ export function staffApi(ctx: Ctx, auth: RequestHandler): Router {
   return firmApi(ctx, auth, true);
 }
 
-const NOT_FOR_STAFF = [
-  ['POST', /^\/files\/?$/],
-  ['PUT', /^\/files\/[^/]+\/content\/?$/],
-  ['POST', /^\/uploads\/[^/]+\/fetched\/?$/],
-] as const;
-
 function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   const r = express.Router();
   r.use(auth);
-  if (staff) {
-    r.use((req, res, next) => {
-      if (NOT_FOR_STAFF.some(([m, p]) => req.method === m && p.test(req.path))) {
-        res.status(403).json({ error: 'not_for_staff' });
-        return;
-      }
-      next();
-    });
-  }
-  r.use('/files', firmFilesRouter(ctx));
-  r.use('/uploads', firmUploadsRouter(ctx));
+  r.use('/files', firmFilesRouter(ctx, staff));
+  r.use('/uploads', firmUploadsRouter(ctx, staff));
   r.use('/events', firmEventsRouter(ctx));
 
   const clientExists = async (id: string): Promise<boolean> =>

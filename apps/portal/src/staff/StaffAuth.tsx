@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { AuthLayout, Button, Input } from '@vibe/ui';
 
-import { tokenFromHash } from '../api';
+import { ApiError, tokenFromHash } from '../api';
 import { staffApi, staffSay } from './api';
 
 export function StaffLogin(): JSX.Element {
@@ -91,17 +91,21 @@ type Step =
 
 export function StaffSetup(): JSX.Element {
   const navigate = useNavigate();
-  const token = useRef<string | null>(null);
-  if (token.current === null) {
-    token.current = tokenFromHash(window.location.hash);
-    window.history.replaceState(null, '', window.location.pathname);
-  }
+  // Read once per mount; taken out of the address bar in the effect (a render may be repeated
+  // in development, and must still see it).
+  const token = useRef(tokenFromHash(window.location.hash));
   const [step, setStep] = useState<Step>({ at: 'loading' });
   const [f, setF] = useState({ email: '', name: '', password: '', again: '', code: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    window.history.replaceState(null, '', window.location.pathname);
+    if (!token.current) {
+      // Reloaded part way: the link is no longer in the address bar.
+      setStep({ at: 'error', message: staffSay(new ApiError(400, 'setup_link_missing')) });
+      return;
+    }
     staffApi<{ first: boolean; email: string; name: string; firmName: string }>(
       '/auth/setup/preview',
       { body: { token: token.current } },

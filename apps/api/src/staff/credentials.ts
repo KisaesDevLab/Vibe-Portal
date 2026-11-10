@@ -82,14 +82,22 @@ export function totpCode(secret: string, time: Date, step = 30, digits = 6): str
   return String(bin % 10 ** digits).padStart(digits, '0');
 }
 
+/** The 30-second step `code` is right for: now, or one step either side (clock drift). */
+export function totpStep(secret: string, code: string, now: Date): number | null {
+  if (!/^\d{6}$/.test(code)) return null;
+  for (const drift of [-1, 0, 1]) {
+    const at = new Date(now.getTime() + drift * 30_000);
+    const want = totpCode(secret, at);
+    if (timingSafeEqual(Buffer.from(want), Buffer.from(code))) {
+      return Math.floor(at.getTime() / 30_000);
+    }
+  }
+  return null;
+}
+
 /** Whether `code` is right now, or one step either side (clock drift). */
 export function verifyTotp(secret: string, code: string, now: Date): boolean {
-  if (!/^\d{6}$/.test(code)) return false;
-  for (const drift of [-1, 0, 1]) {
-    const want = totpCode(secret, new Date(now.getTime() + drift * 30_000));
-    if (timingSafeEqual(Buffer.from(want), Buffer.from(code))) return true;
-  }
-  return false;
+  return totpStep(secret, code, now) !== null;
 }
 
 /** The link an authenticator app reads (as a QR code or typed). */

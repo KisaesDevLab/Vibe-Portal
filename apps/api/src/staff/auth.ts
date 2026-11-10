@@ -22,7 +22,7 @@ import express, {
   type Router,
 } from 'express';
 import { parse, serialize } from 'cookie';
-import { and, count, eq, gt, isNotNull, isNull } from 'drizzle-orm';
+import { and, count, eq, gt, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema, type Database } from '@vibe-portal/db';
 
@@ -39,6 +39,7 @@ import {
   newTotpSecret,
   otpauthUrl,
   verifyPassword,
+  totpStep,
   verifyTotp,
 } from './credentials';
 
@@ -172,20 +173,65 @@ async function finishedCount(db: Database): Promise<number> {
   return Number(r?.n ?? 0);
 }
 
-/** Makes a one-time setup link (the first account when `staffId` is null). */
+/** Ends a staff member's unused setup links (a newer link, turned off, or finished). */
+export async function cancelSetupLinks(
+  db: Database,
+  staffId: string,
+  now: Date,
+  except?: string,
+): Promise<void> {
+  await db
+    .update(schema.staffSetupToken)
+    .set({ usedAt: now })
+    .where(
+      and(
+        eq(schema.staffSetupToken.staffId, staffId),
+        isNull(schema.staffSetupToken.usedAt),
+        except ? ne(schema.staffSetupToken.id, except) : undefined,
+      ),
+    );
+}
+
+/** Makes a one-time setup link (the first account when `staffId` is null). A staff member's
+ *  earlier links stop working: only the newest one sent can finish the account. */
 export async function createSetupLink(
   ctx: Pick<Ctx, 'db' | 'now' | 'portalUrl'>,
   staffId: string | null,
   by: string,
 ): Promise<string> {
   const token = randomToken();
+  if (staffId) await cancelSetupLinks(ctx.db, staffId, ctx.now());
   await ctx.db.insert(schema.staffSetupToken).values({
     staffId,
+    first: staffId === null,
     tokenHash: sha256(token),
     expiresAt: new Date(ctx.now().getTime() + SETUP_HOURS * 3_600_000),
     createdBy: by,
   });
   return `${ctx.portalUrl}/staff/setup#t=${token}`;
+}
+
+/** Accepts a code once: its step must be newer than the last one used (RFC 6238 §5.2). */
+async function useTotp(
+  db: Database,
+  staffId: string,
+  secret: string,
+  code: string,
+  now: Date,
+): Promise<boolean> {
+  const step = totpStep(secret, code, now);
+  if (step === null) return false;
+  const took = await db
+    .update(schema.staffUsers)
+    .set({ totpLastStep: step })
+    .where(
+      and(
+        eq(schema.staffUsers.id, staffId),
+        or(isNull(schema.staffUsers.totpLastStep), lt(schema.staffUsers.totpLastStep, step)),
+      ),
+    )
+    .returning({ id: schema.staffUsers.id });
+  return took.length > 0;
 }
 
 export function staffAuthRouter(ctx: Ctx): Router {
@@ -203,9 +249,18 @@ export function staffAuthRouter(ctx: Ctx): Router {
         ),
       );
     if (!t) throw new HttpError(404, 'setup_link_expired');
-    // A first-account link works only while no account is finished.
-    if (!t.staffId && (await finishedCount(ctx.db)) > 0) {
+    // A first-account link works only while no account is finished (checked again when it
+    // finishes, as it names the account it made by then).
+    if (t.first && (await finishedCount(ctx.db)) > 0) {
       throw new HttpError(404, 'setup_link_expired');
+    }
+    if (t.staffId && !t.first) {
+      // A turned-off staff member's link does not turn them back on.
+      const [u] = await ctx.db
+        .select({ active: schema.staffUsers.active })
+        .from(schema.staffUsers)
+        .where(eq(schema.staffUsers.id, t.staffId));
+      if (!u?.active) throw new HttpError(404, 'setup_link_expired');
     }
     return t;
   };
@@ -263,17 +318,23 @@ export function staffAuthRouter(ctx: Ctx): Router {
         const e = normalizeEmail(input.email);
         if (!e) throw new HttpError(400, 'invalid_email');
         if (!input.name) throw new HttpError(400, 'name_required');
-        // The first account. Trying again with the same link updates this account (the
-        // link now names it); nothing is ever deleted.
+        // The first account. Trying again (this link, or a new one after giving up half way)
+        // takes over the unfinished account with that email; nothing is ever deleted.
         const [taken] = await ctx.db
-          .select({ id: schema.staffUsers.id })
+          .select()
           .from(schema.staffUsers)
           .where(eq(schema.staffUsers.email, e));
-        if (taken) throw new HttpError(409, 'email_taken');
-        const [u] = await ctx.db
-          .insert(schema.staffUsers)
-          .values({ email: e, name: input.name, passwordHash, totpSecretEnc: enc })
-          .returning();
+        if (taken?.totpConfirmedAt) throw new HttpError(409, 'email_taken');
+        const [u] = taken
+          ? await ctx.db
+              .update(schema.staffUsers)
+              .set({ name: input.name, passwordHash, totpSecretEnc: enc, active: true })
+              .where(eq(schema.staffUsers.id, taken.id))
+              .returning()
+          : await ctx.db
+              .insert(schema.staffUsers)
+              .values({ email: e, name: input.name, passwordHash, totpSecretEnc: enc })
+              .returning();
         if (!u) throw new Error('staff insert returned nothing');
         staffId = u.id;
         email = e;
@@ -299,7 +360,9 @@ export function staffAuthRouter(ctx: Ctx): Router {
         .where(eq(schema.staffUsers.id, t.staffId));
       if (!u?.totpSecretEnc || !u.passwordHash) throw new HttpError(400, 'setup_not_started');
       const secret = Buffer.from(ctx.keyring.unwrap(new Uint8Array(u.totpSecretEnc))).toString();
-      if (!verifyTotp(secret, input.code, ctx.now())) throw new HttpError(400, 'code_wrong');
+      if (!(await useTotp(ctx.db, u.id, secret, input.code, ctx.now()))) {
+        throw new HttpError(400, 'code_wrong');
+      }
       const used = await ctx.db
         .update(schema.staffSetupToken)
         .set({ usedAt: ctx.now() })
@@ -308,8 +371,18 @@ export function staffAuthRouter(ctx: Ctx): Router {
       if (!used.length) throw new HttpError(404, 'setup_link_expired');
       await ctx.db
         .update(schema.staffUsers)
-        .set({ totpConfirmedAt: ctx.now(), active: true })
+        .set({ totpConfirmedAt: ctx.now() })
         .where(eq(schema.staffUsers.id, u.id));
+      await cancelSetupLinks(ctx.db, u.id, ctx.now());
+      if (t.first) {
+        // The first account is made: every other first-account link stops working.
+        await ctx.db
+          .update(schema.staffSetupToken)
+          .set({ usedAt: ctx.now() })
+          .where(
+            and(eq(schema.staffSetupToken.first, true), isNull(schema.staffSetupToken.usedAt)),
+          );
+      }
       await startSession(ctx, res, u.id, u.email);
       res.json({ ok: true });
     }),
@@ -330,23 +403,32 @@ export function staffAuthRouter(ctx: Ctx): Router {
         await verifyPassword(await dummyHash(), input.password);
         throw new HttpError(401, 'sign_in_failed');
       }
-      if (u.lockedUntil && u.lockedUntil > now) throw new HttpError(423, 'locked');
       const secret = Buffer.from(
         ctx.keyring.unwrap(new Uint8Array(u.totpSecretEnc as Buffer)),
       ).toString();
-      const ok =
-        (await verifyPassword(u.passwordHash as string, input.password)) &&
-        verifyTotp(secret, input.code, now);
+      const passwordOk = await verifyPassword(u.passwordHash as string, input.password);
+      if (u.lockedUntil && u.lockedUntil > now) {
+        // Only someone with the right password and code learns the account is locked; to
+        // anyone else it looks like any wrong try (or an unknown email).
+        if (passwordOk && verifyTotp(secret, input.code, now)) {
+          throw new HttpError(423, 'locked');
+        }
+        throw new HttpError(401, 'sign_in_failed');
+      }
+      const ok = passwordOk && (await useTotp(ctx.db, u.id, secret, input.code, now));
       if (!ok) {
-        const failed = u.failedLogins + 1;
-        await ctx.db
+        // Counted in the database, so tries at the same moment are all counted.
+        const [f] = await ctx.db
           .update(schema.staffUsers)
-          .set({
-            failedLogins: failed >= MAX_FAILED ? 0 : failed,
-            lockedUntil:
-              failed >= MAX_FAILED ? new Date(now.getTime() + LOCK_MINUTES * 60_000) : null,
-          })
-          .where(eq(schema.staffUsers.id, u.id));
+          .set({ failedLogins: sql`${schema.staffUsers.failedLogins} + 1` })
+          .where(eq(schema.staffUsers.id, u.id))
+          .returning({ failed: schema.staffUsers.failedLogins });
+        if ((f?.failed ?? 0) >= MAX_FAILED) {
+          await ctx.db
+            .update(schema.staffUsers)
+            .set({ failedLogins: 0, lockedUntil: new Date(now.getTime() + LOCK_MINUTES * 60_000) })
+            .where(eq(schema.staffUsers.id, u.id));
+        }
         throw new HttpError(401, 'sign_in_failed');
       }
       await startSession(ctx, res, u.id, u.email);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
+import { StrictMode } from 'react';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -158,6 +159,26 @@ describe('staff page', () => {
     expect(window.location.hash).toBe('');
   });
 
+  it('keeps the setup token when React renders twice (development StrictMode)', async () => {
+    window.location.hash = '#t=strict123';
+    const calls = serve({
+      'POST /auth/setup/preview': {
+        body: { first: true, email: '', name: '', firmName: 'Example CPA' },
+      },
+    });
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/staff/setup']}>
+          <App />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    await screen.findByLabelText('Your email');
+    const previews = calls.filter((c) => c.path === '/auth/setup/preview');
+    expect(previews.length).toBeGreaterThan(0);
+    for (const c of previews) expect(c.body).toEqual({ token: 'strict123' });
+  });
+
   it('a used setup link says so', async () => {
     window.location.hash = '#t=old';
     serve({ 'POST /auth/setup/preview': { status: 410, body: { error: 'setup_link_expired' } } });
@@ -215,7 +236,7 @@ describe('staff page', () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Smith 2025 Form 1040.pdf' }));
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'DELETE' && c.path === '/v1/files/f1')).toBe(true),
     );
@@ -245,10 +266,14 @@ describe('staff page', () => {
     });
     at('/staff/requests');
     const box = (await screen.findByText('Jane Smith')).parentElement as HTMLElement;
-    const approve = within(box).getByRole('button', { name: 'Approve' }) as HTMLButtonElement;
+    const approve = within(box).getByRole('button', {
+      name: 'Approve Jane Smith',
+    }) as HTMLButtonElement;
     expect(approve.disabled).toBe(true);
     await within(box).findByRole('option', { name: /Smith, John/ });
-    fireEvent.change(within(box).getByLabelText('Client'), { target: { value: CLIENT.id } });
+    fireEvent.change(within(box).getByLabelText('Client for Jane Smith'), {
+      target: { value: CLIENT.id },
+    });
     fireEvent.click(approve);
     await waitFor(() =>
       expect(calls.find((c) => c.path === '/v1/access-requests/r1/approve')?.body).toEqual({
@@ -272,7 +297,20 @@ describe('staff page', () => {
         },
       },
       '/v1/keys': { body: { keys: [] } },
-      '/v1/staff': { body: { staff: [] } },
+      '/v1/staff': {
+        body: {
+          staff: [
+            {
+              id: 's1',
+              email: 'ann@firm.test',
+              name: 'Ann Staff',
+              active: true,
+              ready: true,
+              lastSignInAt: null,
+            },
+          ],
+        },
+      },
       'POST /v1/keys': { status: 201, body: { id: 'k1', key: 'vpk_secret' } },
       'POST /v1/staff': {
         status: 201,
@@ -289,6 +327,41 @@ describe('staff page', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Bob' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
     expect(await screen.findByText(/staff\/setup#t=abc/)).toBeTruthy();
+    expect(screen.getByText(/Setup link for Bob \(bob@firm.test\)/)).toBeTruthy();
+    // The key is shown only until the next thing done.
+    expect(screen.queryByText('vpk_secret')).toBeNull();
+    // Your own row cannot be turned off or reset.
+    expect(screen.getByText('you')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Ann Staff/ })).toBeNull();
+  });
+
+  it('a page whose session ended goes to sign in', async () => {
+    let n = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const path = url.replace('/api/staff', '');
+        if (path === '/auth/me' && n++ === 0) return new Response(JSON.stringify(ME.body));
+        if (path === '/auth/status') return new Response(JSON.stringify({ setupNeeded: false }));
+        return new Response(JSON.stringify({ error: 'signed_out' }), { status: 401 });
+      }),
+    );
+    at('/staff/uploads');
+    await screen.findByRole('heading', { name: 'Staff sign in' });
+  });
+
+  it('a failed load says so with Try again', async () => {
+    const calls = serve({ '/auth/me': ME, '/v1/uploads': { status: 500, body: { error: 'x' } } });
+    at('/staff/uploads');
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(calls.filter((c) => c.path === '/v1/uploads')).toHaveLength(2));
+  });
+
+  it('a reload part way through setup says to open the link again', async () => {
+    window.location.hash = '';
+    serve({});
+    at('/staff/setup');
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Open the setup link again/);
   });
 
   it('History asks for the newest events', async () => {

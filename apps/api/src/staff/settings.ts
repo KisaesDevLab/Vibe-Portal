@@ -28,7 +28,7 @@ import { normalizeEmail } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
-import { createSetupLink, type StaffSession } from './auth';
+import { cancelSetupLinks, createSetupLink, type StaffSession } from './auth';
 
 const MB = 1024 * 1024;
 const LOGO_MAX = 512 * 1024;
@@ -234,6 +234,7 @@ export function staffSettingsRouter(ctx: Ctx): Router {
       if (!rows.length) throw new HttpError(404, 'not_found');
       if (!active) {
         await ctx.db.delete(schema.sessions).where(eq(schema.sessions.subjectId, id));
+        await cancelSetupLinks(ctx.db, id, ctx.now());
       }
       await record(ctx.db, active ? 'staff_on' : 'staff_off', actor(req), {
         detail: { staffId: id },
@@ -246,8 +247,13 @@ export function staffSettingsRouter(ctx: Ctx): Router {
     '/staff/:id/reset',
     h(async (req, res) => {
       const id = idParam(req);
+      // Resetting yourself would sign you out with the link only on a screen that is gone.
+      if (id === (req.staff as StaffSession).staffId) {
+        throw new HttpError(409, 'cannot_reset_yourself');
+      }
       const [u] = await ctx.db.select().from(schema.staffUsers).where(eq(schema.staffUsers.id, id));
       if (!u) throw new HttpError(404, 'not_found');
+      if (!u.active) throw new HttpError(409, 'staff_off');
       const a = actor(req);
       // Their old password and authenticator stop working; sessions end.
       await ctx.db

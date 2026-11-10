@@ -17,7 +17,7 @@ import { schema } from '@vibe-portal/db';
 import type { Ctx } from '../context';
 import { sendStored } from '../files/send';
 import { record, type Actor } from '../lib/events';
-import { h, HttpError } from '../lib/http';
+import { h, HttpError, notForStaff } from '../lib/http';
 
 function actorOf(req: Request): Actor {
   return req.firmActor ?? { kind: 'firm_key', name: 'Vibe Files' };
@@ -29,8 +29,10 @@ const idOf = (req: Request): string => {
   return v.data;
 };
 
-export function firmUploadsRouter(ctx: Ctx): Router {
+export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
   const r = express.Router();
+  // P10: downloading on the staff page never marks an upload fetched; it still reaches Intake.
+  if (staff) r.post('/:id/fetched', notForStaff);
 
   r.get(
     '/',
@@ -88,6 +90,16 @@ export function firmUploadsRouter(ctx: Ctx): Router {
         { id: u.id, blobKey, dekWrapped, size: u.size, name: u.name, inlineType: null },
         async () => {
           res.setHeader('X-Content-SHA256', u.sha256);
+          // Vibe Files' own download is recorded when it marks the upload fetched; a staff
+          // download on the page is recorded here (P10).
+          const actor = actorOf(req);
+          if (actor.kind === 'staff') {
+            await record(ctx.db, 'download', actor, {
+              clientId: u.clientId,
+              identityId: u.identityId,
+              uploadId: u.id,
+            });
+          }
         },
       );
     }),
