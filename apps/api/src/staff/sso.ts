@@ -96,6 +96,9 @@ export function staffUsers(db: Database): UserAdapter {
   };
   const byEmail = (email: string) =>
     one(eq(schema.staffUsers.email, normalizeEmail(email) ?? email.trim().toLowerCase()));
+  // Security review: a Vibe Auth sign-in is linked to a staff account by its verified email.
+  // Never to the emergency account, whatever email a Vibe Auth user may give themselves.
+  const linkable = async (email: string) => (isBreakglass(email) ? null : byEmail(email));
   const otherAdmins = async (excludeUserId: string): Promise<number> => {
     const [r] = await db
       .select({ n: count() })
@@ -112,7 +115,7 @@ export function staffUsers(db: Database): UserAdapter {
   };
   return {
     findById: (id) => one(eq(schema.staffUsers.id, id)),
-    findByEmail: byEmail,
+    findByEmail: linkable,
     findByUsername: (username) =>
       byEmail(username.toLowerCase() === BREAKGLASS_USERNAME ? BREAKGLASS_EMAIL : username),
     async create(input) {
@@ -188,9 +191,7 @@ export function keyringWrap(keyring: Keyring): SecretWrap {
   return {
     wrap: async (plain) => Buffer.from(keyring.wrap(Buffer.from(plain, 'utf8'))).toString('base64'),
     unwrap: async (wrapped) =>
-      Buffer.from(keyring.unwrap(new Uint8Array(Buffer.from(wrapped, 'base64')))).toString(
-        'utf8',
-      ),
+      Buffer.from(keyring.unwrap(new Uint8Array(Buffer.from(wrapped, 'base64')))).toString('utf8'),
   };
 }
 

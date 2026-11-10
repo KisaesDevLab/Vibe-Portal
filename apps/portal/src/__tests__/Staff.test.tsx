@@ -641,6 +641,62 @@ describe('staff page', () => {
     }
   });
 
+  it('offers Vibe Auth sign-in when the firm has turned it on (P44)', async () => {
+    const status = (mode: string) => ({
+      body: {
+        mode,
+        product: 'vibe-files-portal',
+        oidc: {
+          enabled: true,
+          idpName: 'Vibe Auth',
+          reachable: true,
+          startPath: '/api/staff/sso/auth/oidc/start',
+        },
+        localLoginVisible: mode !== 'oidc_only',
+        breakglassPath: '/staff/login?local=1',
+      },
+    });
+    serve({ '/auth/status': { body: { setupNeeded: false } }, '/sso/auth/status': status('both') });
+    at('/staff/login');
+    const sso = (await screen.findByRole('link', {
+      name: 'Sign in with Vibe Auth',
+    })) as HTMLAnchorElement;
+    expect(sso.getAttribute('href')).toBe('/api/staff/sso/auth/oidc/start?return_to=%2Fstaff');
+    // Both: the portal's own sign-in is still there.
+    expect(screen.getByLabelText('Password')).toBeTruthy();
+    cleanup();
+
+    // Single sign-on only: the form is behind the emergency link.
+    serve({
+      '/auth/status': { body: { setupNeeded: false } },
+      '/sso/auth/status': status('oidc_only'),
+    });
+    at('/staff/login');
+    await screen.findByRole('link', { name: 'Sign in with Vibe Auth' });
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Emergency sign-in' }).getAttribute('href')).toBe(
+      '/staff/login?local=1',
+    );
+  });
+
+  it('without Vibe Auth, sign-in is as before (P44)', async () => {
+    serve({
+      '/auth/status': { body: { setupNeeded: false } },
+      '/sso/auth/status': {
+        body: {
+          mode: 'local',
+          product: 'vibe-files-portal',
+          oidc: { enabled: false, idpName: '', reachable: false, startPath: '' },
+          localLoginVisible: true,
+          breakglassPath: '',
+        },
+      },
+    });
+    at('/staff/login');
+    expect(await screen.findByLabelText('Password')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /Sign in with/ })).toBeNull();
+  });
+
   it('long client lists come a page at a time (P57)', async () => {
     const clients = Array.from({ length: 120 }, (_, i) => ({
       ...CLIENT,

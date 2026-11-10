@@ -128,8 +128,53 @@ function TotpQr({ url }: { url: string }): JSX.Element | null {
   );
 }
 
+/** What Vibe Auth's engine says about signing in (P44). */
+interface SsoStatus {
+  mode: 'local' | 'both' | 'oidc_only';
+  oidc: { enabled: boolean; idpName: string; reachable: boolean; startPath: string };
+  localLoginVisible: boolean;
+}
+
+/** Vibe Auth's sign-in for staff, when the firm has turned it on (P44). */
+function useSso(): SsoStatus | null {
+  const [s, setS] = useState<SsoStatus | null>(null);
+  useEffect(() => {
+    staffApi<SsoStatus>('/sso/auth/status')
+      .then(setS)
+      .catch(() => setS(null));
+  }, []);
+  return s;
+}
+
+function SsoButton({ sso }: { sso: SsoStatus }): JSX.Element {
+  const name = sso.oidc.idpName || 'Vibe Auth';
+  return (
+    <a
+      href={`${sso.oidc.startPath}?return_to=${encodeURIComponent('/staff')}`}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 44,
+        borderRadius: 8,
+        background: 'var(--vibe-color-accent)',
+        color: 'var(--vibe-on-accent, #fff)',
+        fontWeight: 600,
+        textDecoration: 'none',
+      }}
+    >
+      Sign in with {name}
+    </a>
+  );
+}
+
 export function StaffLogin(): JSX.Element {
   const navigate = useNavigate();
+  const sso = useSso();
+  // P44: the emergency account's own way in, when only single sign-on is allowed.
+  const emergency = new URLSearchParams(window.location.search).has('local');
+  const ssoOn = Boolean(sso?.oidc.enabled && sso.mode !== 'local');
+  const localShown = !sso || sso.mode !== 'oidc_only' || emergency;
   const [f, setF] = useState({ email: '', password: '', code: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -161,7 +206,26 @@ export function StaffLogin(): JSX.Element {
 
   return (
     <FirmAuthLayout brand="Portal staff" title="Staff sign in">
-      {setupNeeded ? (
+      {ssoOn && sso && !emergency && (
+        <div style={{ display: 'grid', gap: 12, marginBottom: 16 }}>
+          <SsoButton sso={sso} />
+          {!sso.oidc.reachable && (
+            <p role="status" style={{ margin: 0, fontSize: 13 }}>
+              {sso.oidc.idpName || 'Vibe Auth'} cannot be reached right now.
+              {localShown ? ' Sign in below instead.' : ''}
+            </p>
+          )}
+          {localShown && !setupNeeded && (
+            <div style={{ textAlign: 'center', fontSize: 13, opacity: 0.7 }}>or</div>
+          )}
+        </div>
+      )}
+      {!localShown ? (
+        <p style={{ margin: 0, fontSize: 13 }}>
+          Staff sign in with {sso?.oidc.idpName || 'Vibe Auth'} only.{' '}
+          <a href="/staff/login?local=1">Emergency sign-in</a>
+        </p>
+      ) : setupNeeded && !emergency ? (
         <FirstAccount first={first} />
       ) : (
         <form onSubmit={submit} style={{ display: 'grid', gap: 12 }}>
@@ -191,7 +255,6 @@ export function StaffLogin(): JSX.Element {
             maxLength={6}
             value={f.code}
             onChange={(e) => setF({ ...f, code: e.target.value })}
-            required
           />
           {error && <p role="alert">{error}</p>}
           <Button type="submit" disabled={busy}>

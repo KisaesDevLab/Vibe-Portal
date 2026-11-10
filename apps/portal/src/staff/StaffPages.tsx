@@ -28,6 +28,7 @@ import {
 
 import { FirmLogo, reloadBranding } from '../branding';
 import { Select } from '../components/Field';
+import { AuthSettingsPage } from '@kisaesdevlab/vibe-auth/react';
 import { usePages } from '../paging';
 import { ApiError } from '../api';
 import {
@@ -159,6 +160,12 @@ export function StaffHome(): JSX.Element {
     );
   }
   const signOut = async (): Promise<void> => {
+    // P44: signed in through Vibe Auth, signed out there too (it ends this session, then
+    // Vibe Auth's own, and comes back to the sign-in page).
+    if (me.data?.sso) {
+      window.location.assign('/api/staff/sso/auth/oidc/logout');
+      return;
+    }
     await staffApi('/auth/logout', { method: 'POST' }).catch(() => undefined);
     navigate('/staff/login', { replace: true });
   };
@@ -1805,6 +1812,30 @@ function Settings(): JSX.Element {
         )}
       </Card>
       <Storage />
+      <Card title="Sign-in with Vibe Auth">
+        <p style={{ marginTop: 0 }}>
+          With Vibe Auth on the appliance, staff can sign in with their Vibe Auth account instead of
+          a portal password and authenticator code. Anyone Vibe Auth lets in gets a staff account
+          here on first sign-in; Vibe Auth groups decide who is an admin. The portal keeps its own
+          sign-in until you choose single sign-on only.
+        </p>
+        <AuthSettingsPage
+          basePath="/api/staff/sso"
+          productName="Vibe Portal"
+          classNames={{
+            root: 'vauth',
+            section: 'vauth-section',
+            label: 'vauth-label',
+            input: 'vauth-input',
+            button: 'vauth-button',
+            buttonPrimary: 'vauth-button vauth-primary',
+            buttonDanger: 'vauth-button vauth-danger',
+            table: 'vauth-table',
+            note: 'vauth-note',
+            error: 'vauth-error',
+          }}
+        />
+      </Card>
     </div>
   );
 }

@@ -17,6 +17,9 @@
     "snapshot-restore": "tsx --env-file-if-exists=../../.env src/scripts/snapshot-restore.ts",
     "test-email": "tsx --env-file-if-exists=../../.env src/scripts/test-email.ts"
   },
+  "vibeAuth": {
+    "adapter": "./src/staff/sso-cli.ts"
+  },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/lib-storage": "^3.600.0",

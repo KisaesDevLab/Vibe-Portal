@@ -100,6 +100,8 @@ export function staffSay(err: unknown): string {
     already_there: 'The files are already there.',
     snapshot_not_b2: 'Database snapshots go to the bucket once files are stored there.',
     download_limit: 'This link has been downloaded as many times as it allows.',
+    local_login_disabled:
+      'Staff sign in with Vibe Auth only. Use the Sign in with Vibe Auth button above.',
     snapshot_busy: 'A database copy is being sent right now. Try again in a minute.',
   };
   // The portal's own reason (Object Lock, another portal's bucket, no room), in full.
@@ -121,6 +123,8 @@ export interface StaffMe {
   admin: boolean;
   /** False for someone an admin limited to some clients. */
   allClients: boolean;
+  /** Signed in through Vibe Auth (P44). */
+  sso?: boolean;
 }
 
 export interface StaffRow {

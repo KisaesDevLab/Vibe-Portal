@@ -537,10 +537,7 @@ export function staffAuthRouter(ctx: Ctx): Router {
       // someone sets one up for it (a setup link): the password alone, as Vibe Auth intends.
       const passwordOnly = Boolean(u && isBreakglass(u.email) && !u.totpConfirmedAt);
       const usable =
-        u &&
-        u.active &&
-        u.passwordHash &&
-        (passwordOnly || (u.totpConfirmedAt && u.totpSecretEnc));
+        u && u.active && u.passwordHash && (passwordOnly || (u.totpConfirmedAt && u.totpSecretEnc));
       if (!usable) {
         await verifyPassword(await dummyHash(), input.password);
         throw new HttpError(401, 'sign_in_failed');
