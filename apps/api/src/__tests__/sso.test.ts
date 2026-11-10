@@ -5,12 +5,14 @@
 // OpenID Connect flow is checked against a real Vibe Auth separately.
 
 import { schema } from '@vibe-portal/db';
+import type { SQL } from 'drizzle-orm';
+import { PgDialect } from 'drizzle-orm/pg-core';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../app';
 import { staffSessions } from '../staff/auth';
-import { BREAKGLASS_EMAIL, createStaffSso, staffUsers } from '../staff/sso';
+import { BREAKGLASS_EMAIL, createStaffSso, queryFn, staffUsers } from '../staff/sso';
 import { world, type World } from './harness';
 
 let w: World;
@@ -30,6 +32,19 @@ async function withSso() {
 }
 
 describe('Vibe Auth staff sign-in (P44)', () => {
+  it('sends dates to the database as text (postgres-js under Drizzle refuses a Date)', async () => {
+    let sent: unknown[] = [];
+    const run = queryFn({
+      execute: (async (q: SQL) => {
+        sent = new PgDialect().sqlToQuery(q).params;
+        return [];
+      }) as never,
+    });
+    const at = new Date('2026-11-10T12:00:00Z');
+    await run('UPDATE x SET a = $1, b = $2 WHERE c = $1', [at, 'b']);
+    expect(sent).toEqual(['2026-11-10T12:00:00.000Z', 'b', '2026-11-10T12:00:00.000Z']);
+  });
+
   it('changes nothing until the firm turns it on', async () => {
     const app = await withSso();
     const s = await request(app).get('/api/staff/sso/auth/status').expect(200);

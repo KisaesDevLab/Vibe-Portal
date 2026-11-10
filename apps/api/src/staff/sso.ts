@@ -80,7 +80,10 @@ export function queryFn(db: Pick<Database, 'execute'>): QueryFn {
     let last = 0;
     for (let m = re.exec(text); m; m = re.exec(text)) {
       chunks.push(sql.raw(text.slice(last, m.index)));
-      chunks.push(sql`${params[Number(m[1]) - 1]}`);
+      // Dates as ISO text: Drizzle turns off postgres-js's own date handling, so a Date
+      // parameter fails on a real server (pglite in the tests takes it either way).
+      const v = params[Number(m[1]) - 1];
+      chunks.push(sql`${v instanceof Date ? v.toISOString() : v}`);
       last = re.lastIndex;
     }
     chunks.push(sql.raw(text.slice(last)));
