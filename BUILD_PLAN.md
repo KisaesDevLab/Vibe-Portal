@@ -150,13 +150,13 @@ Intake inbox registration through Filer's existing shared-inbox setting.
 ## 6. Appliance packaging (vibe-installer)
 
 - `apps/portal/` with `docker-compose.yml`, `docker-compose.grouped.yml`, `env.template`,
-  `caddy.fragment` (`/portal/*` in multi-app mode; root in single-app mode), `healthcheck.sh`, as
+  `caddy.fragment` (its own path in multi-app mode, see QUESTIONS P7; root in single-app mode), `healthcheck.sh`, as
   `apps/connect`.
 - `vibe install portal`; appears in Vibe Admin's app list.
 - Admin config fields: firm name, logo, colour, portal URL; **Create firm key** (shown once) and
   revoke; upload size limit.
 - Backups: Vibe Vault discovers the portal's Postgres and `/data/portal` volume.
-- With TB also installed: separate hostnames or paths (`/portal` vs TB's portal), no shared state
+- With TB also installed: separate hostnames or paths (QUESTIONS P7), no shared state
   (D11).
 
 ---
