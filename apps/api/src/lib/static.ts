@@ -39,7 +39,9 @@ export function contentSecurityPolicy(html: string): string {
 }
 
 export function serveClient(app: Express, dir: string, https: boolean): void {
-  const html = readFileSync(join(dir, 'index.html'), 'utf8');
+  // Line ends as a browser reads them: it turns CRLF into LF before hashing an inline script,
+  // so a page built from a Windows checkout would otherwise have every start-up script blocked.
+  const html = readFileSync(join(dir, 'index.html'), 'utf8').replace(/\r\n?/g, '\n');
   const csp = contentSecurityPolicy(html);
   app.use(
     '/assets',

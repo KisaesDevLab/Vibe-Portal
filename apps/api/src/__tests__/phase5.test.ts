@@ -163,6 +163,20 @@ describe('serving the client portal', () => {
     expect(csp).not.toContain('unsafe-eval');
   });
 
+  it('hashes the start-up scripts as a browser reads them, whatever the line ends', async () => {
+    // A page built from a Windows checkout has CRLF; the browser hashes the script with LF.
+    const body = "\n  document.documentElement.dataset.theme='light';\n";
+    const crlf = `<!doctype html><html><head><script>${body.replace(/\n/g, '\r\n')}</script></head><body><div id="root"></div></body></html>`;
+    dir = await mkdtemp(join(tmpdir(), 'vibe-portal-web-'));
+    await mkdir(join(dir, 'assets'));
+    await writeFile(join(dir, 'index.html'), crlf);
+    const app = createApp({ pingDb: async () => true, staticDir: dir });
+    const res = await request(app).get('/login').expect(200);
+    const want = `'sha256-${createHash('sha256').update(body).digest('base64')}'`;
+    expect(res.headers['content-security-policy']).toContain(want);
+    expect(res.text).not.toContain(String.fromCharCode(13));
+  });
+
   it('serves the page for any portal address, and assets with long caching', async () => {
     const app = await site();
     for (const path of ['/', '/login', '/files/123', '/auth/verify']) {
