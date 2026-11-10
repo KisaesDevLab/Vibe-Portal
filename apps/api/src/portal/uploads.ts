@@ -159,6 +159,9 @@ export function clientUploadsRouter(
         .orderBy(desc(schema.uploads.uploadedAt))
         .limit(200);
       res.json({
+        // So the page can say "too large" before sending (a browser shows a refused large
+        // upload as a broken connection).
+        limitBytes: await uploadLimit(ctx),
         uploads: rows.map((u) => ({
           id: u.id,
           name: u.name,

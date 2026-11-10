@@ -4,6 +4,8 @@ A client file portal for firms that run **Vibe Files** but not **Vibe Practice M
 Staff share files with clients from Vibe Files; clients sign in to download them and to upload
 documents, which come back into Vibe Files' Intake. Installed as an app on the Vibe Appliance.
 
+Setting it up for a firm: [docs/firm-setup.md](docs/firm-setup.md).
+
 See [BUILD_PLAN.md](BUILD_PLAN.md) for the design and phases, and [QUESTIONS.md](QUESTIONS.md)
 for decisions.
 

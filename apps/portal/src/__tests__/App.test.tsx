@@ -374,6 +374,29 @@ describe('portal', () => {
     expect(sent[0]?.type).toBe('application/octet-stream');
   });
 
+  it('says a file is too large without sending it', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal(
+      'XMLHttpRequest',
+      class {
+        upload = { onprogress: null };
+        open(_m: string, url: string): void {
+          sent.push(url);
+        }
+        setRequestHeader(): void {}
+        send(): void {}
+      },
+    );
+    serve({ '/auth/me': { body: ME }, '/uploads': { body: { uploads: [], limitBytes: 10 } } });
+    at('/');
+    fireEvent.change(await screen.findByLabelText(/^Files \(up to 20/), {
+      target: { files: [new File(['%PDF-1.7 more than ten bytes'], 'big.pdf')] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText(/too large to send/)).toBeTruthy();
+    expect(sent).toHaveLength(0);
+  });
+
   it('will not send more than 20 files at once', async () => {
     serve({ '/auth/me': { body: ME } });
     at('/');

@@ -57,6 +57,7 @@ function newBatchId(): string {
 
 export function Uploads({ clientId }: { clientId: string }): JSX.Element {
   const [uploads, setUploads] = useState<Upload[] | null>(null);
+  const [limitBytes, setLimitBytes] = useState(0);
   const [chosen, setChosen] = useState<File[]>([]);
   const [note, setNote] = useState('');
   const [progress, setProgress] = useState('');
@@ -66,8 +67,11 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
   const input = useRef<HTMLInputElement>(null);
 
   const load = useCallback(() => {
-    api<{ uploads: Upload[] }>('/uploads')
-      .then((r) => setUploads(r.uploads))
+    api<{ uploads: Upload[]; limitBytes?: number }>('/uploads')
+      .then((r) => {
+        setUploads(r.uploads);
+        setLimitBytes(r.limitBytes ?? 0);
+      })
       .catch((err: unknown) => setError(say(err)));
   }, []);
   useEffect(load, [load, clientId]);
@@ -82,6 +86,14 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
     for (const [i, file] of chosen.entries()) {
       const q = new URLSearchParams({ clientId, batchId, name: file.name });
       if (note.trim()) q.set('note', note.trim());
+      if (limitBytes > 0 && file.size > limitBytes) {
+        done.push({
+          name: file.name,
+          error: `This file is too large to send (the limit is ${Math.floor(limitBytes / 1048576)} MB).`,
+        });
+        setResults([...done]);
+        continue;
+      }
       try {
         await sendFile(`/api/portal/uploads?${q.toString()}`, file, (f) =>
           setProgress(

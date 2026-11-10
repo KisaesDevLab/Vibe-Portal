@@ -298,28 +298,31 @@ export function firmFilesRouter(ctx: Ctx): Router {
     '/',
     h(async (req, res) => {
       const q = ListQuery.parse(req.query);
+      const live = and(
+        isNull(schema.files.removedAt),
+        q.clientId ? eq(schema.files.clientId, q.clientId) : undefined,
+        q.vfDocumentId ? eq(schema.files.vfDocumentId, q.vfDocumentId) : undefined,
+      );
       const rows = await ctx.db
         .select()
         .from(schema.files)
-        .where(
-          and(
-            isNull(schema.files.removedAt),
-            q.clientId ? eq(schema.files.clientId, q.clientId) : undefined,
-            q.vfDocumentId ? eq(schema.files.vfDocumentId, q.vfDocumentId) : undefined,
-          ),
-        )
+        .where(live)
         .orderBy(asc(schema.files.sharedAt));
-      const vis = rows.length
-        ? await ctx.db
-            .select()
-            .from(schema.fileVisibility)
-            .where(
-              inArray(
-                schema.fileVisibility.fileId,
-                rows.map((f) => f.id),
-              ),
-            )
-        : [];
+      // The same files' visibility in one joined query (all=1 can be tens of thousands of files:
+      // too many to pass as parameters), grouped once by file.
+      const byFile = new Map<string, (typeof schema.fileVisibility.$inferSelect)[]>();
+      if (rows.length) {
+        const vis = await ctx.db
+          .select({ v: schema.fileVisibility })
+          .from(schema.fileVisibility)
+          .innerJoin(schema.files, eq(schema.files.id, schema.fileVisibility.fileId))
+          .where(live);
+        for (const { v } of vis) {
+          const list = byFile.get(v.fileId);
+          if (list) list.push(v);
+          else byFile.set(v.fileId, [v]);
+        }
+      }
       res.json({
         files: rows.map((f) => ({
           fileId: f.id,
@@ -333,14 +336,12 @@ export function firmFilesRouter(ctx: Ctx): Router {
           sharedBy: f.sharedBy,
           contentUpdatedAt: f.contentUpdatedAt,
           // P21: who sees it, and whether they opened the current content.
-          users: vis
-            .filter((v) => v.fileId === f.id)
-            .map((v) => ({
-              identityId: v.identityId,
-              visible: v.visible,
-              viewedAt: v.viewedAt,
-              firstViewedAt: v.firstViewedAt,
-            })),
+          users: (byFile.get(f.id) ?? []).map((v) => ({
+            identityId: v.identityId,
+            visible: v.visible,
+            viewedAt: v.viewedAt,
+            firstViewedAt: v.firstViewedAt,
+          })),
         })),
       });
     }),

@@ -247,6 +247,28 @@ describe('what staff do (D13)', () => {
     expect(ev).toMatchObject({ actorKind: 'staff', actor: 'kurt@example-cpa.test' });
   });
 
+  it('the client list counts people, live files and waiting uploads', async () => {
+    const { agent } = await staff();
+    const m = await w.member('a@example.test');
+    const body = Buffer.from('%PDF counted');
+    const sha = createHash('sha256').update(body).digest('hex');
+    for (const d of ['d1', 'd2']) {
+      await w
+        .firm('post', `/files?clientId=${CLIENT}&vfDocumentId=${d}&name=${d}.pdf&sha256=${sha}`)
+        .set('Content-Type', 'application/octet-stream')
+        .send(body)
+        .expect(201);
+    }
+    await m.agent
+      .post(`/api/portal/uploads?clientId=${CLIENT}&batchId=${randomUUID()}&name=W-2.pdf`)
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('%PDF-1.7 W-2'))
+      .expect(201);
+    const list = await agent.get('/api/staff/v1/clients').expect(200);
+    const row = list.body.clients.find((c: { id: string }) => c.id === CLIENT);
+    expect(row).toMatchObject({ users: 1, files: 2, waiting: 1 });
+  });
+
   it('can download a client upload without taking it from Intake (P10)', async () => {
     const { agent } = await staff();
     const m = await w.member('a@example.test');

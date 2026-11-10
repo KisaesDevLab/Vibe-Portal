@@ -138,6 +138,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   );
 
   // Every client on the portal, with how many people and live files each has.
+  // The counts name `clients.id` in full: Drizzle writes a column of the selected table as a
+  // bare "id", which inside `FROM files f` would mean the file's own id.
   r.get(
     '/clients',
     h(async (_req, res) => {
@@ -147,9 +149,9 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           clientCode: schema.clients.clientCode,
           displayName: schema.clients.displayName,
           active: schema.clients.active,
-          users: sql<number>`(SELECT count(*) FROM client_access a WHERE a.client_id = ${schema.clients.id} AND a.active)`,
-          files: sql<number>`(SELECT count(*) FROM files f WHERE f.client_id = ${schema.clients.id} AND f.removed_at IS NULL)`,
-          waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = ${schema.clients.id} AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
+          users: sql<number>`(SELECT count(*) FROM client_access a WHERE a.client_id = clients.id AND a.active)`,
+          files: sql<number>`(SELECT count(*) FROM files f WHERE f.client_id = clients.id AND f.removed_at IS NULL)`,
+          waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = clients.id AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
         })
         .from(schema.clients)
         .orderBy(asc(schema.clients.displayName));
