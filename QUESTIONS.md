@@ -37,3 +37,9 @@
 | P33 | 2026-11-09 | iPhone HEIC photos | Kept as uploaded | Owner 2026-11-09: **converted to JPG** on the portal before Vibe Files fetches them |
 | P34 | 2026-11-09 | How many files per upload | Up to 20 per batch, each within the firm's size limit; one note covers the batch | Owner 2026-11-09: as assumed |
 | P35 | 2026-11-09 | HEIC conversion library licence | `heic-convert` (ISC) uses `libheif-js` (LGPL-3.0), unmodified, as Vibe Time & Billing already does; same licence position as TB | |
+| P36 | 2026-11-09 | Where portal settings live, now that the appliance admin screen is gone (vibe-installer 02c18f2) | Staff web page | Owner 2026-11-09: the staff web page (Phase 6b) gets Settings: firm name/logo, upload limit, firm key create/revoke, staff accounts. The first staff account comes from a one-time setup link printed at install. Until 6b, the `firm-key` command |
+| P37 | 2026-11-09 | Own hostname (P7) on the appliance | Extend the installer's Caddy | Owner 2026-11-09: `vibe install portal --host files.firm.com` adds a second site; the firm adds that hostname to the same Cloudflare tunnel; other apps untouched |
+| P38 | 2026-11-09 | Email and SMS services | SMTP + Twilio, as Vibe Connect | Owner 2026-11-09: as assumed; set in /etc/vibe/portal/.env |
+| P39 | 2026-11-09 | Licence check | Like the other apps | Owner 2026-11-09: **none**; free with Vibe Files |
+| P40 | 2026-11-09 | Container image | Public GHCR image, private source | Owner 2026-11-09: as assumed; built and published on version tags (I ask before tagging) |
+| P41 | 2026-11-09 | Working in vibe-installer | Branch `feat/portal-app`, leaving the untracked admin-config addendum alone | Owner 2026-11-09: as assumed |
