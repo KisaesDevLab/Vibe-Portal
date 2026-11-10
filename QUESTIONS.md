@@ -30,3 +30,9 @@
 | P26 | 2026-11-09 | Does opening a sign-in link sign the person in at once | No: the page asks them to press **Sign in**, so email security scanners that open links cannot use up the one-time link (QA 2026-11-09) | |
 | P27 | 2026-11-09 | Which contact is used when an invitation or request carries both email and phone | Only the one the link or code went to (email when given). The other never matches an existing person; from an invitation (staff typed it) it is stored only if no one else has it; from a request it is never stored (QA 2026-11-09) | |
 | P28 | 2026-11-09 | Where the key that unlocks stored files lives | `DATA_DIR/.firm-key.seal` on the appliance (TB's sealed-on-disk mode); the database holds the master key wrapped by it. Losing the file loses every stored file, so backups must include it (Phase 5); a backup holding both can read the files | |
+| P29 | 2026-11-09 | Which file types clients may upload | PDF; JPG/PNG/HEIC/TIFF; Word/Excel; CSV; TXT, checked by content as well as name; nothing else | Owner 2026-11-09: as assumed |
+| P30 | 2026-11-09 | What a client adds with an upload | An optional note (no year picker) | Owner 2026-11-09: optional note only |
+| P31 | 2026-11-09 | Are staff told of new uploads beyond Intake | No; uploads appear in Intake's Portal inbox within the fetch interval | Owner 2026-11-09: as assumed |
+| P32 | 2026-11-09 | Can a client delete their own upload | Only before Vibe Files fetches it; afterwards it shows "Received by the firm" | Owner 2026-11-09: as assumed |
+| P33 | 2026-11-09 | iPhone HEIC photos | Kept as uploaded | Owner 2026-11-09: **converted to JPG** on the portal before Vibe Files fetches them |
+| P34 | 2026-11-09 | How many files per upload | Up to 20 per batch, each within the firm's size limit; one note covers the batch | Owner 2026-11-09: as assumed |
