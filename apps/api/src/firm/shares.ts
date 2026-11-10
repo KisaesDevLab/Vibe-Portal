@@ -104,6 +104,186 @@ export function shareStatus(
   return s.opens > 0 ? 'opened' : 'sent';
 }
 
+/** What makes a secure link, from the staff page or (P55) from a client. */
+export interface ShareInput {
+  fileIds: string[];
+  email: string;
+  name: string;
+  organization: string;
+  message: string;
+  canDownload: boolean;
+  watermark: boolean;
+  days: number;
+}
+
+/**
+ * Makes a secure link to `client`'s files and emails it: every file checked, at most a few live
+ * links per recipient, and nothing kept if the email cannot be sent. `from` names a client who
+ * sends it themselves (P55); otherwise it comes from the firm.
+ */
+export async function createOutsideShare(
+  ctx: Ctx,
+  o: {
+    client: typeof schema.clients.$inferSelect;
+    input: ShareInput;
+    actor: Actor;
+    quota: string;
+    limit: { max: number; windowSeconds: number };
+    from?: { identityId: string; name: string };
+  },
+): Promise<{ shareId: string; expiresAt: Date }> {
+  const { client, input, actor } = o;
+  const email = normalizeEmail(input.email);
+  if (!email) throw new HttpError(400, 'invalid_email');
+  const name = oneLine(input.name);
+  const organization = oneLine(input.organization);
+  const message = lines(input.message);
+
+  // Every file is this client's, and still on the portal.
+  const ids = [...new Set(input.fileIds.map((id) => id.toLowerCase()))];
+  const files = await ctx.db
+    .select()
+    .from(schema.files)
+    .where(
+      and(
+        inArray(schema.files.id, ids),
+        eq(schema.files.clientId, client.id),
+        isNull(schema.files.removedAt),
+      ),
+    );
+  if (files.length !== ids.length || files.some((f) => !f.blobKey || !f.dekWrapped)) {
+    throw new HttpError(400, 'file_not_found');
+  }
+  for (const f of files) {
+    const why = wontFit(input, f);
+    if (why) throw new HttpError(400, why);
+  }
+
+  // A PDF that cannot be marked (locked with a password, damaged) is found out now, by the
+  // staff member, not later by the recipient. Only read here, in a worker: marking waits
+  // until the recipient opens it.
+  if (input.watermark) {
+    for (const f of files) {
+      if (previewOf(f.contentType) !== 'pdf') continue;
+      const plain = await readPlain(ctx, {
+        id: f.id,
+        blobKey: f.blobKey as string,
+        dekWrapped: f.dekWrapped as Buffer,
+      });
+      try {
+        await checkPdf(plain);
+      } catch {
+        throw new HttpError(400, 'cannot_watermark');
+      }
+    }
+  }
+
+  const now = ctx.now();
+  // Counted now and given back if no link goes out: a refused or failed try is not a link.
+  const quota = o.quota;
+  if (!(await hit(ctx.db, quota, o.limit, now))) {
+    await refund(ctx.db, quota, o.limit, now);
+    throw new HttpError(429, 'too_many_shares');
+  }
+
+  const id = randomUUID();
+  const secret = randomToken();
+  const expiresAt = new Date(now.getTime() + input.days * 86_400_000);
+  const made = await ctx.db.transaction(async (tx) => {
+    // The client's row is held until the link is in, so two staff sending to the same
+    // recipient at once are counted one after the other.
+    await tx
+      .select({ id: schema.clients.id })
+      .from(schema.clients)
+      .where(eq(schema.clients.id, client.id))
+      .for('update');
+    const [held] = await tx
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.fileShare)
+      .where(
+        and(
+          eq(schema.fileShare.clientId, client.id),
+          eq(schema.fileShare.recipientEmail, email),
+          isNull(schema.fileShare.revokedAt),
+          gt(schema.fileShare.expiresAt, now),
+        ),
+      );
+    if (Number(held?.n ?? 0) >= SHARE_MAX_PER_RECIPIENT) return false;
+    await tx.insert(schema.fileShare).values({
+      id,
+      clientId: client.id,
+      secretHash: sha256(secret),
+      recipientEmail: email,
+      recipientName: name,
+      organization,
+      message,
+      canDownload: input.canDownload,
+      watermark: input.watermark,
+      createdBy: o.from ? o.from.name : actor.name,
+      sentByIdentityId: o.from?.identityId ?? null,
+      createdAt: now,
+      expiresAt,
+    });
+    await tx.insert(schema.fileShareItem).values(files.map((f) => ({ shareId: id, fileId: f.id })));
+    return true;
+  });
+  if (!made) {
+    await refund(ctx.db, quota, o.limit, now);
+    throw new HttpError(429, 'recipient_has_too_many');
+  }
+
+  // The link exists nowhere but in this email: if it cannot be sent, there is no share.
+  const firm = await firmName(ctx);
+  const what = files.length === 1 ? 'a document' : `${files.length} documents`;
+  const text = [
+    name ? `Hello ${name},` : 'Hello,',
+    '',
+    o.from
+      ? `${o.from.name}, a client of ${firm}, has shared ${what} with you securely through ${firm}'s client portal.`
+      : `${firm} has shared ${what} with you securely.`,
+    ...(message ? ['', message] : []),
+    '',
+    `View ${files.length === 1 ? 'it' : 'them'} here (expires ${expiresAt.toISOString().slice(0, 10)}):`,
+    shareLink(ctx, id, secret),
+    '',
+    "When you open the page, you'll receive a one-time access code at this address to unlock " +
+      `the ${files.length === 1 ? 'document' : 'documents'}.`,
+    '',
+    'This link is private. Please do not forward it.',
+  ].join('\n');
+  try {
+    await ctx.notifier.send(
+      messageTo(
+        email,
+        o.from
+          ? `${o.from.name} shared a secure document with you`
+          : `${firm} shared a secure document with you`,
+        text,
+      ),
+    );
+  } catch (err) {
+    ctx.log.error({ err, channel: 'email' }, 'notification failed');
+    await ctx.db.delete(schema.fileShare).where(eq(schema.fileShare.id, id));
+    await refund(ctx.db, quota, o.limit, now);
+    throw new HttpError(502, 'email_failed');
+  }
+
+  await record(ctx.db, 'outside_share', actor, {
+    clientId: client.id,
+    fileId: files.length === 1 ? files[0]?.id : null,
+    detail: {
+      shareId: id,
+      to: email,
+      files: files.length,
+      days: input.days,
+      canDownload: input.canDownload,
+      watermark: input.watermark,
+      ...(o.from ? { byClient: true } : {}),
+    },
+  });
+  return { shareId: id, expiresAt };
+}
+
 export function firmSharesRouter(ctx: Ctx): Router {
   const r = express.Router();
 
@@ -119,148 +299,14 @@ export function firmSharesRouter(ctx: Ctx): Router {
         .where(eq(schema.clients.id, input.clientId));
       if (!client) throw new HttpError(404, 'client_not_found');
       if (!client.active) throw new HttpError(409, 'client_inactive');
-      const email = normalizeEmail(input.email);
-      if (!email) throw new HttpError(400, 'invalid_email');
-      const name = oneLine(input.name);
-      const organization = oneLine(input.organization);
-      const message = lines(input.message);
-
-      // Every file is this client's, and still on the portal.
-      const ids = [...new Set(input.fileIds.map((id) => id.toLowerCase()))];
-      const files = await ctx.db
-        .select()
-        .from(schema.files)
-        .where(
-          and(
-            inArray(schema.files.id, ids),
-            eq(schema.files.clientId, client.id),
-            isNull(schema.files.removedAt),
-          ),
-        );
-      if (files.length !== ids.length || files.some((f) => !f.blobKey || !f.dekWrapped)) {
-        throw new HttpError(400, 'file_not_found');
-      }
-      for (const f of files) {
-        const why = wontFit(input, f);
-        if (why) throw new HttpError(400, why);
-      }
-
-      // A PDF that cannot be marked (locked with a password, damaged) is found out now, by the
-      // staff member, not later by the recipient. Only read here, in a worker: marking waits
-      // until the recipient opens it.
-      if (input.watermark) {
-        for (const f of files) {
-          if (previewOf(f.contentType) !== 'pdf') continue;
-          const plain = await readPlain(ctx, {
-            id: f.id,
-            blobKey: f.blobKey as string,
-            dekWrapped: f.dekWrapped as Buffer,
-          });
-          try {
-            await checkPdf(plain);
-          } catch {
-            throw new HttpError(400, 'cannot_watermark');
-          }
-        }
-      }
-
-      const now = ctx.now();
-      // Counted now and given back if no link goes out: a refused or failed try is not a link.
-      const quota = `outside-share:${staff.staffId}`;
-      if (!(await hit(ctx.db, quota, LIMITS.outsideSharePerStaff, now))) {
-        await refund(ctx.db, quota, LIMITS.outsideSharePerStaff, now);
-        throw new HttpError(429, 'too_many_shares');
-      }
-
-      const id = randomUUID();
-      const secret = randomToken();
-      const expiresAt = new Date(now.getTime() + input.days * 86_400_000);
-      const actor = actorOf(req);
-      const made = await ctx.db.transaction(async (tx) => {
-        // The client's row is held until the link is in, so two staff sending to the same
-        // recipient at once are counted one after the other.
-        await tx
-          .select({ id: schema.clients.id })
-          .from(schema.clients)
-          .where(eq(schema.clients.id, client.id))
-          .for('update');
-        const [held] = await tx
-          .select({ n: sql<number>`count(*)` })
-          .from(schema.fileShare)
-          .where(
-            and(
-              eq(schema.fileShare.clientId, client.id),
-              eq(schema.fileShare.recipientEmail, email),
-              isNull(schema.fileShare.revokedAt),
-              gt(schema.fileShare.expiresAt, now),
-            ),
-          );
-        if (Number(held?.n ?? 0) >= SHARE_MAX_PER_RECIPIENT) return false;
-        await tx.insert(schema.fileShare).values({
-          id,
-          clientId: client.id,
-          secretHash: sha256(secret),
-          recipientEmail: email,
-          recipientName: name,
-          organization,
-          message,
-          canDownload: input.canDownload,
-          watermark: input.watermark,
-          createdBy: actor.name,
-          createdAt: now,
-          expiresAt,
-        });
-        await tx
-          .insert(schema.fileShareItem)
-          .values(files.map((f) => ({ shareId: id, fileId: f.id })));
-        return true;
+      const made = await createOutsideShare(ctx, {
+        client,
+        input,
+        actor: actorOf(req),
+        quota: `outside-share:${staff.staffId}`,
+        limit: LIMITS.outsideSharePerStaff,
       });
-      if (!made) {
-        await refund(ctx.db, quota, LIMITS.outsideSharePerStaff, now);
-        throw new HttpError(429, 'recipient_has_too_many');
-      }
-
-      // The link exists nowhere but in this email: if it cannot be sent, there is no share.
-      const firm = await firmName(ctx);
-      const what = files.length === 1 ? 'a document' : `${files.length} documents`;
-      const text = [
-        name ? `Hello ${name},` : 'Hello,',
-        '',
-        `${firm} has shared ${what} with you securely.`,
-        ...(message ? ['', message] : []),
-        '',
-        `View ${files.length === 1 ? 'it' : 'them'} here (expires ${expiresAt.toISOString().slice(0, 10)}):`,
-        shareLink(ctx, id, secret),
-        '',
-        "When you open the page, you'll receive a one-time access code at this address to unlock " +
-          `the ${files.length === 1 ? 'document' : 'documents'}.`,
-        '',
-        'This link is private. Please do not forward it.',
-      ].join('\n');
-      try {
-        await ctx.notifier.send(
-          messageTo(email, `${firm} shared a secure document with you`, text),
-        );
-      } catch (err) {
-        ctx.log.error({ err, channel: 'email' }, 'notification failed');
-        await ctx.db.delete(schema.fileShare).where(eq(schema.fileShare.id, id));
-        await refund(ctx.db, quota, LIMITS.outsideSharePerStaff, now);
-        throw new HttpError(502, 'email_failed');
-      }
-
-      await record(ctx.db, 'outside_share', actor, {
-        clientId: client.id,
-        fileId: files.length === 1 ? files[0]?.id : null,
-        detail: {
-          shareId: id,
-          to: email,
-          files: files.length,
-          days: input.days,
-          canDownload: input.canDownload,
-          watermark: input.watermark,
-        },
-      });
-      res.status(201).json({ shareId: id, expiresAt });
+      res.status(201).json(made);
     }),
   );
 
@@ -305,6 +351,8 @@ export function firmSharesRouter(ctx: Ctx): Router {
           watermark: s.watermark,
           createdAt: s.createdAt,
           createdBy: s.createdBy,
+          // P55: sent by one of the client's people, not by the firm.
+          byClient: s.sentByIdentityId !== null,
           expiresAt: s.expiresAt,
           revokedAt: s.revokedAt,
           opens: s.opens,

@@ -14,6 +14,7 @@ import { errorHandler, requireJson, TRUST_CF_IP } from './lib/http';
 import { accountRouter } from './portal/account';
 import { accessRequestsRouter } from './portal/access-requests';
 import { clientFilesRouter } from './portal/files';
+import { clientSharesRouter } from './portal/client-shares';
 import { sharedRouter } from './portal/shared';
 import { clientUploadsRouter, type HeicConverter } from './portal/uploads';
 import { invitationsRouter } from './portal/invitations';
@@ -75,6 +76,8 @@ export function createApp(deps: AppDeps): Express {
     app.use('/api/portal/uploads', clientUploadsRouter(ctx, deps.convertHeic));
     // Someone outside the client, with a secure link (P49): no account, no session.
     app.use('/api/portal/shared', sharedRouter(ctx));
+    // P55: a client sending files shared with them to someone outside, when the firm allows.
+    app.use('/api/portal/outside-shares', clientSharesRouter(ctx));
     app.use('/api/firm/v1', firmRouter(ctx));
     // The staff web page (D13): staff sign-in, then the firm API's work and Settings.
     app.use('/api/staff', requireJson);

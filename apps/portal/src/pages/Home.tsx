@@ -8,7 +8,8 @@ import { Button, Card } from '@vibe/ui';
 
 import { FirmLogo } from '../branding';
 import { api, ApiError, say, type Me } from '../api';
-import { Files } from './Files';
+import { ClientLinksList, SendLinkForm, useClientLinks } from './ClientLinks';
+import { Files, type PortalFile } from './Files';
 import { PhoneSignIn, type Pending } from './PhoneSignIn';
 import { Uploads } from './Uploads';
 
@@ -23,7 +24,11 @@ export function Home(): JSX.Element {
     () => location.state as { phoneCode?: Pending; phoneProblem?: string } | null,
   );
   const pending = handoff?.phoneCode ?? null;
+  // P55: a file being sent to someone outside, and what was last sent.
+  const [sending, setSending] = useState<PortalFile | null>(null);
+  const [sentNote, setSentNote] = useState('');
   const [me, setMe] = useState<Me | null>(null);
+  const links = useClientLinks(me?.activeClientId ?? '');
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -120,7 +125,33 @@ export function Home(): JSX.Element {
             </select>
           </label>
         )}
-        <Files clientId={me.activeClientId} />
+        {sentNote && <p role="status">{sentNote}</p>}
+        {sending && (
+          <SendLinkForm
+            key={sending.id}
+            clientId={me.activeClientId}
+            file={{ id: sending.id, name: sending.name, preview: sending.preview !== null }}
+            maxDays={links.maxDays}
+            onSent={(note) => {
+              setSending(null);
+              setSentNote(note);
+              links.reload();
+            }}
+            onCancel={() => setSending(null)}
+          />
+        )}
+        <Files
+          clientId={me.activeClientId}
+          {...(links.enabled
+            ? {
+                onSend: (f: PortalFile) => {
+                  setSentNote('');
+                  setSending(f);
+                },
+              }
+            : {})}
+        />
+        <ClientLinksList links={links.links} onChanged={links.reload} />
       </Card>
       <Card>
         <Uploads clientId={me.activeClientId} />

@@ -187,6 +187,8 @@ export interface OutsideShare {
   watermark: boolean;
   createdAt: string;
   createdBy: string;
+  /** Sent by one of the client's people, not the firm (P55). */
+  byClient?: boolean;
   expiresAt: string;
   revokedAt: string | null;
   opens: number;

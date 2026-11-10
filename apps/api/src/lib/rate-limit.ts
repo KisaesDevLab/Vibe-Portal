@@ -35,6 +35,8 @@ export const LIMITS = {
   uploadPerClient: { max: 200, windowSeconds: 60 * 60 },
   /** Secure links to people outside, made by one staff member in a day (P49). */
   outsideSharePerStaff: { max: 50, windowSeconds: 24 * 60 * 60 },
+  /** Secure links one client person may send a day (P55). */
+  outsideSharePerClientPerson: { max: 10, windowSeconds: 24 * 60 * 60 },
   /** Every call about secure links from one address. */
   outsidePerIp: { max: 60, windowSeconds: 60 },
   /** Access codes asked for from one address. */

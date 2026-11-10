@@ -214,6 +214,7 @@ describe('a secure link to someone outside (P49)', () => {
         watermark: false,
         createdAt: '2026-11-09T15:00:00.000Z',
         createdBy: 'kurt@example-cpa.test',
+        byClient: false,
         expiresAt: '2026-11-16T15:00:00.000Z',
         revokedAt: null,
         opens: 1,

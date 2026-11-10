@@ -38,7 +38,14 @@ function dateText(iso: string): string {
   });
 }
 
-export function Files({ clientId }: { clientId: string }): JSX.Element {
+export function Files({
+  clientId,
+  onSend,
+}: {
+  clientId: string;
+  /** P55: when the firm allows clients to send secure links, beside each file. */
+  onSend?: (f: PortalFile) => void;
+}): JSX.Element {
   const [files, setFiles] = useState<PortalFile[] | null>(null);
   const [years, setYears] = useState<number[]>([]);
   const [year, setYear] = useState('');
@@ -163,6 +170,24 @@ export function Files({ clientId }: { clientId: string }): JSX.Element {
                 >
                   Download
                 </a>
+                {onSend && (
+                  <button
+                    type="button"
+                    onClick={() => onSend(f)}
+                    aria-label={`Send ${f.name} to someone outside`}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      color: 'inherit',
+                      textDecoration: 'underline',
+                      cursor: 'pointer',
+                      font: 'inherit',
+                    }}
+                  >
+                    Send securely…
+                  </button>
+                )}
               </div>
             </li>
           ))}

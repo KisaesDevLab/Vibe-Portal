@@ -89,6 +89,8 @@ export const firm = pgTable('firm', {
   installId: uuid('install_id').notNull().defaultRandom(),
   storageNote: jsonb('storage_note').$type<StorageNote>(),
   firstAdminMail: jsonb('first_admin_mail').$type<FirstAdminMail>(),
+  /** The client's people may send secure links to files shared with them (P55). */
+  clientLinks: boolean('client_links').notNull().default(false),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
@@ -333,6 +335,8 @@ export const fileShare = pgTable('file_share', {
   canDownload: boolean('can_download').notNull().default(false),
   watermark: boolean('watermark').notNull().default(false),
   createdBy: text('created_by').notNull(),
+  /** Sent by one of the client's people rather than the firm (P55). */
+  sentByIdentityId: uuid('sent_by_identity_id').references(() => portalIdentity.id),
   createdAt: ts('created_at').notNull().defaultNow(),
   expiresAt: ts('expires_at').notNull(),
   revokedAt: ts('revoked_at'),

@@ -982,6 +982,7 @@ function SecureLinks({
               </td>
               <td style={td}>
                 {when(s.createdAt)} by {s.createdBy}
+                {s.byClient && ' (the client)'}
               </td>
               <td style={td}>{when(s.expiresAt)}</td>
               <td style={td}>
@@ -1188,6 +1189,8 @@ interface SettingsData {
   uploadKeepDays: number;
   hasLogo: boolean;
   portalUrl: string;
+  /** Clients may send secure links to files shared with them (P55). */
+  clientLinks: boolean;
 }
 
 function Settings(): JSX.Element {
@@ -1245,6 +1248,7 @@ function Settings(): JSX.Element {
                   accentColor: form.accentColor,
                   uploadLimitMb: Number(form.uploadLimitMb),
                   uploadKeepDays: Number(form.uploadKeepDays),
+                  clientLinks: form.clientLinks,
                 },
               }).then((r) => {
                 if (r) {
@@ -1287,6 +1291,19 @@ function Settings(): JSX.Element {
               value={form.uploadKeepDays}
               onChange={(e) => setForm({ ...form, uploadKeepDays: Number(e.target.value) })}
             />
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                checked={form.clientLinks}
+                onChange={(e) => setForm({ ...form, clientLinks: e.target.checked })}
+              />
+              <span>
+                <strong>Clients may send secure links</strong>: a client can send files you shared
+                with them to someone outside, such as a lender, with the same secure link staff
+                send. Always watermarked, at most 30 days; you see each link on the client&rsquo;s
+                page and can revoke it.
+              </span>
+            </label>
             <Button type="submit" disabled={busy}>
               Save
             </Button>
