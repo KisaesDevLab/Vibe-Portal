@@ -31,6 +31,8 @@ export interface Me {
   clients: { id: string; name: string }[];
   activeClientId: string;
   firmName: string;
+  /** Texts are set up, so a mobile number can be added (P50). */
+  textsOn?: boolean;
 }
 
 /** Plain words for the API's error codes. */
@@ -55,6 +57,11 @@ export function say(err: unknown): string {
     too_much_waiting:
       'The firm has not yet collected the files already sent. Please try again later.',
     phone_us_only: 'Please give a US or Canadian mobile number, or use your email.',
+    phone_in_use:
+      'That number is already used to sign in to another portal account. Ask the firm for help.',
+    phone_already_yours: 'You already sign in with that number.',
+    phone_only_contact: 'This number is how you sign in, so it cannot be removed.',
+    texts_off: 'This portal does not send text messages. Sign in by email.',
     photo_unreadable: 'This photo could not be read. Try taking it again or saving it as JPG.',
     already_received: 'The firm has already received this file.',
     code_wait: 'A code was sent a moment ago. Wait a minute before asking for another.',

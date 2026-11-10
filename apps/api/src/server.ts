@@ -108,6 +108,7 @@ async function main(): Promise<void> {
     trustCfIp: config.TRUST_CF_CONNECTING_IP,
     keyring,
     blobs,
+    textsOff: config.SMS_PROVIDER === 'none',
   };
   const app = createApp({
     pingDb: ping,

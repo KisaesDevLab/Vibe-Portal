@@ -1,19 +1,27 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
-// Signed-in home: which client, its files, sign out.
+// Signed-in home: which client, its files, sign out, and signing in by text (P50).
 
 import { useCallback, useEffect, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Button, Card } from '@vibe/ui';
 
 import { api, ApiError, say, type Me } from '../api';
 import { Files } from './Files';
+import { PhoneSignIn, type Pending } from './PhoneSignIn';
 import { Uploads } from './Uploads';
 
 type State = 'loading' | 'ready' | 'signed_out' | 'error';
 
 export function Home(): JSX.Element {
   const navigate = useNavigate();
+  // A code texted when the invitation was accepted with "also sign in by text", or why none
+  // was. Kept here and cleared from the history entry, so a reload does not bring it back.
+  const location = useLocation();
+  const [handoff] = useState(
+    () => location.state as { phoneCode?: Pending; phoneProblem?: string } | null,
+  );
+  const pending = handoff?.phoneCode ?? null;
   const [me, setMe] = useState<Me | null>(null);
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState('');
@@ -39,6 +47,18 @@ export function Home(): JSX.Element {
   }, [fail]);
 
   useEffect(load, [load]);
+
+  useEffect(() => {
+    if (!handoff) return;
+    if (handoff.phoneProblem) {
+      setNotice(
+        `${say(new ApiError(0, handoff.phoneProblem))} You can add your mobile number below.`,
+      );
+    }
+    navigate(location.pathname, { replace: true, state: null });
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (state === 'signed_out') return <Navigate to="/login" replace />;
   if (state === 'loading') return <p role="status">Loading…</p>;
@@ -100,6 +120,13 @@ export function Home(): JSX.Element {
       </Card>
       <Card>
         <Uploads clientId={me.activeClientId} />
+      </Card>
+      <Card>
+        <PhoneSignIn
+          me={me}
+          pending={pending}
+          onChange={(phone) => setMe((m) => (m ? { ...m, identity: { ...m.identity, phone } } : m))}
+        />
       </Card>
     </main>
   );

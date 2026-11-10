@@ -50,7 +50,9 @@ sudo VIBE_PORTAL_TWILIO_ACCOUNT_SID=AC… VIBE_PORTAL_TWILIO_AUTH_TOKEN=… \
      vibe install portal --host files.yourfirm.com
 ```
 
-Without them clients sign in by email only. US numbers need A2P 10DLC registration with
+Without them clients sign in by email only. With them, a client invited by email can add a
+mobile number on their home page (**Sign in by text**); it is used once they type back the code
+texted to it. A number you type beside the email on an invitation is offered to them the same way. US numbers need A2P 10DLC registration with
 Twilio first. To add texts later, set `SMS_PROVIDER=twilio` and the `TWILIO_*` lines in
 `/etc/vibe/portal/.env`, then run `sudo vibe upgrade portal` (it starts the portal again with
 the new settings).

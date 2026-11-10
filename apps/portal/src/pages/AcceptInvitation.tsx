@@ -14,6 +14,8 @@ interface Preview {
   clientName: string;
   name: string;
   contact: string;
+  /** A mobile number staff gave beside the email, masked, offered for signing in by text. */
+  alsoPhone?: string | null;
 }
 
 export function AcceptInvitation(): JSX.Element {
@@ -22,6 +24,7 @@ export function AcceptInvitation(): JSX.Element {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [name, setName] = useState('');
   const [keep, setKeep] = useState(false);
+  const [addPhone, setAddPhone] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -40,10 +43,25 @@ export function AcceptInvitation(): JSX.Element {
     setBusy(true);
     setError('');
     try {
-      await api('/invitations/accept', {
-        body: { token: token.current, name: name.trim(), keepSignedIn: keep },
+      const r = await api<{ phoneCode?: string; phone?: string }>('/invitations/accept', {
+        body: {
+          token: token.current,
+          name: name.trim(),
+          keepSignedIn: keep,
+          addPhone: addPhone && Boolean(preview?.alsoPhone),
+        },
       });
-      navigate('/', { replace: true });
+      // A code texted to the number waits on the home page; any other answer (too many codes)
+      // is said there, where the person can add the number.
+      navigate('/', {
+        replace: true,
+        state:
+          r.phoneCode === 'sent' && r.phone
+            ? { phoneCode: { phone: r.phone } }
+            : r.phoneCode
+              ? { phoneProblem: r.phoneCode }
+              : null,
+      });
     } catch (err) {
       setError(say(err));
       setBusy(false);
@@ -82,6 +100,20 @@ export function AcceptInvitation(): JSX.Element {
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
+        {preview.alsoPhone && (
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 14 }}>
+            <input
+              type="checkbox"
+              checked={addPhone}
+              onChange={(e) => setAddPhone(e.target.checked)}
+            />
+            <span>
+              Also let me sign in by text at {preview.alsoPhone}
+              <br />
+              <small>A code is texted to that number to confirm it is yours.</small>
+            </span>
+          </label>
+        )}
         <KeepSignedIn checked={keep} onChange={setKeep} />
         {error && <p role="alert">{error}</p>}
         <Button type="submit" disabled={busy}>

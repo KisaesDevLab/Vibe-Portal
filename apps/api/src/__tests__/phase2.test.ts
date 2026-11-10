@@ -140,6 +140,7 @@ describe('invite -> accept -> sign in -> sign out', () => {
       clientName: 'Smith, John',
       name: 'John Smith',
       contact: 'j***@example.test',
+      alsoPhone: null,
     });
 
     const agent = request.agent(app);
