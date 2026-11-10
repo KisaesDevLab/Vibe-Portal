@@ -24,7 +24,8 @@ const variantStyle = (variant: ButtonProps['variant']) => {
       return { background: 'transparent', color: tokens.color.text, border: 'none' };
     case 'primary':
     default:
-      return { background: tokens.color.accent, color: '#fff', border: 'none' };
+      // Vibe Portal (P59): black or white text, whichever reads on the firm colour.
+      return { background: tokens.color.accent, color: 'var(--vibe-on-accent, #fff)', border: 'none' };
   }
 };
 

@@ -4,9 +4,10 @@
 // filter and a search (P19). PDFs and pictures open in the portal (P22); everything downloads.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Button, EmptyState, Pill } from '@vibe/ui';
+import { Button, Download, EmptyState, Eye, Input, Pill, ShareIcon } from '@vibe/ui';
 
+import { ActionButton, ActionDownload, ActionLink, Actions, ItemRow } from '../components/Action';
+import { Select } from '../components/Field';
 import { usePages } from '../paging';
 import { api, say } from '../api';
 
@@ -95,29 +96,29 @@ export function Files({
   const filtering = Boolean(year || query);
   return (
     <section aria-label="Files" style={{ display: 'grid', gap: 12 }}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'end' }}>
+        <div style={{ flex: '1 1 220px' }}>
+          <Input
+            label="Search"
+            name="search"
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="File name"
+          />
+        </div>
         {years.length > 0 && (
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span>Year</span>
-            <select value={year} onChange={(e) => setYear(e.target.value)}>
+          <div style={{ flex: '0 1 160px' }}>
+            <Select label="Year" value={year} onChange={(e) => setYear(e.target.value)}>
               <option value="">All years</option>
               {years.map((y) => (
                 <option key={y} value={String(y)}>
                   {y}
                 </option>
               ))}
-            </select>
-          </label>
+            </Select>
+          </div>
         )}
-        <label style={{ display: 'grid', gap: 4, flex: '1 1 200px' }}>
-          <span>Search</span>
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="File name"
-          />
-        </label>
       </div>
       {files.length === 0 ? (
         <EmptyState
@@ -129,71 +130,51 @@ export function Files({
           }
         />
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
           {page.map((f) => (
-            <li
+            <ItemRow
               key={f.id}
-              style={{
-                display: 'flex',
-                gap: 12,
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                padding: '10px 0',
-                borderBottom: '1px solid var(--vibe-border, #ddd)',
-              }}
-            >
-              <div style={{ minWidth: 0, flex: '1 1 240px' }}>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <strong style={{ overflowWrap: 'anywhere' }}>{f.name}</strong>
-                  {f.isNew && <Pill tone="accent">New</Pill>}
-                </div>
-                <small>
+              title={f.name}
+              badge={f.isNew ? <Pill tone="accent">New</Pill> : undefined}
+              meta={
+                <>
                   {f.updatedAt
                     ? `Updated ${dateText(f.updatedAt)}`
                     : `Shared ${dateText(f.sharedAt)}`}
                   {f.taxYear ? ` · ${f.taxYear}` : ''} · {sizeText(f.size)}
-                </small>
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {f.preview && (
-                  <Link
-                    to={`/files/${f.id}`}
-                    state={{ file: f }}
+                </>
+              }
+              actions={
+                <Actions>
+                  {f.preview && (
+                    <ActionLink
+                      to={`/files/${f.id}`}
+                      state={{ file: f }}
+                      onClick={() => opened(f.id)}
+                      ariaLabel={`Open ${f.name}`}
+                      icon={<Eye size={16} />}
+                      label="Open"
+                    />
+                  )}
+                  <ActionDownload
+                    href={contentUrl(f.id, 'download')}
+                    filename={f.name}
                     onClick={() => opened(f.id)}
-                    aria-label={`Open ${f.name}`}
-                  >
-                    Open
-                  </Link>
-                )}
-                <a
-                  href={contentUrl(f.id, 'download')}
-                  download={f.name}
-                  onClick={() => opened(f.id)}
-                  aria-label={`Download ${f.name}`}
-                >
-                  Download
-                </a>
-                {onSend && (
-                  <button
-                    type="button"
-                    onClick={() => onSend(f)}
-                    aria-label={`Send ${f.name} to someone outside`}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: 0,
-                      color: 'inherit',
-                      textDecoration: 'underline',
-                      cursor: 'pointer',
-                      font: 'inherit',
-                    }}
-                  >
-                    Send securely…
-                  </button>
-                )}
-              </div>
-            </li>
+                    ariaLabel={`Download ${f.name}`}
+                    icon={<Download size={16} />}
+                    label="Download"
+                  />
+                  {onSend && (
+                    <ActionButton
+                      onClick={() => onSend(f)}
+                      ariaLabel={`Send ${f.name} to someone outside`}
+                      icon={<ShareIcon size={16} />}
+                      label="Share"
+                    />
+                  )}
+                </Actions>
+              }
+            />
           ))}
         </ul>
       )}

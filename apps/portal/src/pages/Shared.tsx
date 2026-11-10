@@ -5,8 +5,9 @@
 // page shows nothing about the documents until that code is given.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Button, Input } from '@vibe/ui';
+import { Button, Download, Eye, Input } from '@vibe/ui';
 
+import { ActionButton, ActionDownload, Actions, ItemRow } from '../components/Action';
 import { FirmAuthLayout, FirmLogo } from '../branding';
 import { api, ApiError, say, tokenFromHash } from '../api';
 import { ProtectedPdfViewer } from '../components/ProtectedPdfViewer';
@@ -306,42 +307,43 @@ export function Shared(): JSX.Element {
       {list.length === 0 && (
         <p role="status">{info.firmName} has taken down the documents in this link.</p>
       )}
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {list.map((f) => (
-          <li
+          <ItemRow
             key={f.id}
-            style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}
-          >
-            <span style={{ overflowWrap: 'anywhere', flex: '1 1 200px' }}>
-              {f.name} · {sizeText(f.size)}
-            </span>
-            {f.available === false && (
-              <span style={{ fontSize: 13 }}>
-                Not available: this document has changed. Ask {info.firmName} to send it again.
-              </span>
-            )}
-            {f.available !== false && f.preview && (
-              <Button
-                size="sm"
-                variant={viewing === f.id ? 'primary' : 'secondary'}
-                aria-label={`View ${f.name}`}
-                aria-pressed={viewing === f.id}
-                onClick={() => setViewing(f.id)}
-              >
-                View
-              </Button>
-            )}
-            {f.available !== false && canDl && (
-              <a
-                href={url(f, 'download')}
-                download={f.name}
-                aria-label={`Download ${f.name}`}
-                onClick={() => setTook((t) => t + 1)}
-              >
-                Download
-              </a>
-            )}
-          </li>
+            title={f.name}
+            meta={
+              f.available === false
+                ? `Not available: this document has changed. Ask ${info.firmName} to send it again.`
+                : sizeText(f.size)
+            }
+            actions={
+              f.available === false ? undefined : (
+                <Actions>
+                  {f.preview && (
+                    <ActionButton
+                      tone={viewing === f.id ? 'primary' : 'default'}
+                      pressed={viewing === f.id}
+                      ariaLabel={`View ${f.name}`}
+                      onClick={() => setViewing(f.id)}
+                      icon={<Eye size={16} />}
+                      label="View"
+                    />
+                  )}
+                  {canDl && (
+                    <ActionDownload
+                      href={url(f, 'download')}
+                      filename={f.name}
+                      ariaLabel={`Download ${f.name}`}
+                      onClick={() => setTook((t) => t + 1)}
+                      icon={<Download size={16} />}
+                      label="Download"
+                    />
+                  )}
+                </Actions>
+              )
+            }
+          />
         ))}
       </ul>
       {shown?.preview === 'pdf' && (

@@ -158,7 +158,8 @@ describe('a secure link (P49)', () => {
     arrive();
     await screen.findByRole('link', { name: 'Download letter.docx' });
     expect(screen.queryByRole('button', { name: 'View letter.docx' })).toBeNull();
-    expect(screen.getByText(/letter\.docx · 4\.8 MB/)).toBeTruthy();
+    expect(screen.getByText('letter.docx')).toBeTruthy();
+    expect(screen.getByText('4.8 MB')).toBeTruthy();
   });
 
   it('a file that changed into one the link does not allow is listed, but does not open', async () => {

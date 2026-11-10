@@ -312,7 +312,7 @@ describe('portal', () => {
     at('/');
     fireEvent.click(await screen.findByRole('button', { name: 'Remove W-2.pdf' }));
     expect(screen.queryByRole('button', { name: 'Remove 1099.pdf' })).toBeNull();
-    expect(screen.getByText('Received by the firm')).toBeTruthy();
+    expect(screen.getByText(/received by the firm/)).toBeTruthy();
     await waitFor(() => expect(calls.find((c) => c.path === '/uploads/u1')?.method).toBe('DELETE'));
   });
 

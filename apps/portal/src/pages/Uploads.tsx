@@ -5,7 +5,10 @@
 // removed until the firm has received it (P32).
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Button } from '@vibe/ui';
+import { Button, tokens, Trash } from '@vibe/ui';
+
+import { ActionButton, Actions, ItemRow } from '../components/Action';
+import { Select, TextArea } from '../components/Field';
 
 import { api, ApiError, say } from '../api';
 
@@ -163,8 +166,19 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
     <section aria-label="Send files to the firm" style={{ display: 'grid', gap: 12 }}>
       <h2 style={{ fontSize: 16, margin: 0 }}>Send files to the firm</h2>
       <form onSubmit={send} style={{ display: 'grid', gap: 8 }}>
-        <label style={{ display: 'grid', gap: 4 }}>
-          <span>Files (up to {BATCH_MAX}: PDF, photos, Word, Excel, CSV or text)</span>
+        <label
+          style={{
+            display: 'grid',
+            gap: 8,
+            padding: 16,
+            border: `1px dashed ${tokens.color.border}`,
+            borderRadius: tokens.radius.md,
+            background: tokens.color.bg,
+          }}
+        >
+          <span style={{ fontSize: 12, color: tokens.color.textMuted }}>
+            Files (up to {BATCH_MAX}: PDF, photos, Word, Excel, CSV or text)
+          </span>
           <input
             ref={input}
             type="file"
@@ -172,29 +186,33 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
             accept={ACCEPT}
             onChange={(e) => setChosen(Array.from(e.target.files ?? []))}
           />
+          {chosen.length > 1 && (
+            <small style={{ color: tokens.color.textMuted, overflowWrap: 'anywhere' }}>
+              {chosen.map((c) => c.name).join(', ')}
+            </small>
+          )}
         </label>
         {tooMany && <p role="alert">Choose at most {BATCH_MAX} files at a time.</p>}
-        <label style={{ display: 'grid', gap: 4 }}>
-          <span>Note for the firm (optional)</span>
-          <textarea
-            value={note}
-            maxLength={1000}
-            rows={2}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </label>
+        <TextArea
+          label="Note for the firm (optional)"
+          value={note}
+          maxLength={1000}
+          rows={2}
+          onChange={(e) => setNote(e.target.value)}
+        />
         {staff.length > 0 && (
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span>Let someone at the firm know (optional)</span>
-            <select value={tell} onChange={(e) => setTell(e.target.value)}>
-              <option value="">No one in particular</option>
-              {staff.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Let someone at the firm know (optional)"
+            value={tell}
+            onChange={(e) => setTell(e.target.value)}
+          >
+            <option value="">No one in particular</option>
+            {staff.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
         )}
         <Button type="submit" disabled={busy || chosen.length === 0 || tooMany}>
           {chosen.length > 1 ? `Send ${chosen.length} files` : 'Send'}
@@ -219,27 +237,27 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
       ) : uploads.length === 0 ? (
         <p>You have not sent any files yet.</p>
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 6 }}>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
           {uploads.map((u) => (
-            <li
+            <ItemRow
               key={u.id}
-              style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}
-            >
-              <span style={{ overflowWrap: 'anywhere' }}>{u.name}</span>
-              <small>{new Date(u.uploadedAt).toLocaleDateString()}</small>
-              {u.received ? (
-                <small>Received by the firm</small>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void remove(u.id)}
-                  aria-label={`Remove ${u.name}`}
-                >
-                  Remove
-                </Button>
-              )}
-            </li>
+              title={u.name}
+              meta={`Sent ${new Date(u.uploadedAt).toLocaleDateString()} · ${
+                u.received ? 'received by the firm' : 'waiting for the firm'
+              }`}
+              actions={
+                u.received ? undefined : (
+                  <Actions>
+                    <ActionButton
+                      onClick={() => void remove(u.id)}
+                      ariaLabel={`Remove ${u.name}`}
+                      icon={<Trash size={16} />}
+                      label="Remove"
+                    />
+                  </Actions>
+                )
+              }
+            />
           ))}
         </ul>
       )}

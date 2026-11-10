@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom';
 
 import { ErrorBoundary } from '@vibe/ui';
 import '@vibe/ui/theme.css';
+import './portal.css';
 
 import { App } from './App';
 

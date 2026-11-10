@@ -1,0 +1,76 @@
+/* SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
+ *
+ * Vibe Portal's own finishing on top of the design system's theme.css (which stays as copied
+ * from Time & Billing) (P59): controls the browser draws by default look like the design
+ * system's inputs, and links take the firm colour.
+ */
+
+a {
+  color: var(--vibe-color-accent);
+  text-underline-offset: 2px;
+}
+
+select,
+textarea,
+input[type='search'],
+input[type='text']:not([class]),
+input[type='email']:not([class]) {
+  box-sizing: border-box;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--vibe-color-border);
+  border-radius: 8px;
+  background: var(--vibe-color-surface);
+  color: var(--vibe-color-text);
+  font: inherit;
+  font-size: 14px;
+}
+
+textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--vibe-color-accent);
+  outline-offset: 1px;
+}
+
+input[type='file'] {
+  font: inherit;
+  font-size: 14px;
+  color: var(--vibe-color-text-muted);
+  max-width: 100%;
+}
+
+input[type='file']::file-selector-button {
+  margin-right: 12px;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--vibe-color-border);
+  border-radius: 8px;
+  background: var(--vibe-color-surface);
+  color: var(--vibe-color-text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--vibe-color-accent);
+}
+
+/* The colour setting: a swatch, not a line. */
+input[type='color'] {
+  width: 64px;
+  height: 40px;
+  padding: 2px;
+  border: 1px solid var(--vibe-color-border);
+  border-radius: 8px;
+  background: var(--vibe-color-surface);
+  cursor: pointer;
+}

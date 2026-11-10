@@ -22,9 +22,23 @@ const listeners = new Set<(b: Branding | null) => void>();
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
 /** The firm colour on buttons, links and focus rings (the theme's accent). */
+/** Black or white, whichever reads better on `color` (WCAG relative luminance). */
+export function textOn(color: string): '#000' | '#fff' {
+  const ch = [1, 3, 5].map((i) => {
+    const c = parseInt(color.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const lum = 0.2126 * (ch[0] ?? 0) + 0.7152 * (ch[1] ?? 0) + 0.0722 * (ch[2] ?? 0);
+  // Contrast with white vs with black: pick the larger.
+  return 1.05 / (lum + 0.05) >= (lum + 0.05) / 0.05 ? '#fff' : '#000';
+}
+
 function applyAccent(color: string): void {
   if (typeof document === 'undefined' || !HEX.test(color)) return;
-  document.documentElement.style.setProperty('--vibe-color-accent', color);
+  const root = document.documentElement.style;
+  root.setProperty('--vibe-color-accent', color);
+  // P59: text on the firm colour stays readable, whatever colour the firm chose.
+  root.setProperty('--vibe-on-accent', textOn(color));
 }
 
 async function fetchBranding(): Promise<Branding | null> {

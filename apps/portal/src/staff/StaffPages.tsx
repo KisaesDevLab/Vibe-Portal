@@ -198,7 +198,7 @@ function Table({ head, children }: { head: string[]; children: ReactNode }): JSX
   );
 }
 
-const td = { padding: '6px 8px', borderTop: '1px solid var(--vibe-border, #ddd)' };
+const td = { padding: '6px 8px', borderTop: '1px solid var(--vibe-color-border)' };
 
 function Clients({ limited }: { limited: boolean }): JSX.Element {
   const load = useLoad<{ clients: ClientRow[] }>('/v1/clients');
@@ -1060,7 +1060,7 @@ function Requests(): JSX.Element {
           <div
             key={r.id}
             style={{
-              borderTop: '1px solid var(--vibe-border, #ddd)',
+              borderTop: '1px solid var(--vibe-color-border)',
               padding: '8px 0',
               display: 'grid',
               gap: 6,
@@ -1940,7 +1940,7 @@ function StaffAccess({
         gap: 8,
         margin: '12px 0',
         padding: 12,
-        border: '1px solid var(--vibe-border, #ddd)',
+        border: '1px solid var(--vibe-color-border)',
         borderRadius: 6,
       }}
       onSubmit={(e) => {

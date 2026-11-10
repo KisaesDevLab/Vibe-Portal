@@ -5,7 +5,10 @@
 // that address. Always watermarked, at most 30 days. The firm sees every link and can end it.
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Button, Input } from '@vibe/ui';
+import { Button, CloseIcon, Input, tokens } from '@vibe/ui';
+
+import { ActionButton, Actions, ItemRow } from '../components/Action';
+import { Select, TextArea } from '../components/Field';
 
 import { api, say } from '../api';
 import { usePages } from '../paging';
@@ -102,8 +105,8 @@ export function SendLinkForm({
         display: 'grid',
         gap: 8,
         padding: 12,
-        border: '1px solid var(--vibe-color-border)',
-        borderRadius: 8,
+        border: `1px solid ${tokens.color.border}`,
+        borderRadius: tokens.radius.md,
       }}
     >
       <strong>Send “{file.name}” to someone outside</strong>
@@ -131,20 +134,27 @@ export function SendLinkForm({
         value={f.organization}
         onChange={(e) => setF({ ...f, organization: e.target.value })}
       />
-      <label style={{ display: 'grid', gap: 4 }}>
-        <span>They may</span>
-        <select
+      <div
+        style={{
+          display: 'grid',
+          gap: 12,
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        }}
+      >
+        <Select
+          label="They may"
           value={f.canDownload ? 'download' : 'view'}
           disabled={!file.preview}
           onChange={(e) => setF({ ...f, canDownload: e.target.value === 'download' })}
         >
           {file.preview && <option value="view">View it only</option>}
           <option value="download">View and download it</option>
-        </select>
-      </label>
-      <label style={{ display: 'grid', gap: 4 }}>
-        <span>The link works for</span>
-        <select value={f.days} onChange={(e) => setF({ ...f, days: Number(e.target.value) })}>
+        </Select>
+        <Select
+          label="The link works for"
+          value={f.days}
+          onChange={(e) => setF({ ...f, days: Number(e.target.value) })}
+        >
           {[7, 14, 30]
             .filter((d) => d <= maxDays)
             .map((d) => (
@@ -152,19 +162,17 @@ export function SendLinkForm({
                 {d} days
               </option>
             ))}
-        </select>
-      </label>
-      <label style={{ display: 'grid', gap: 4 }}>
-        <span>Message (optional)</span>
-        <textarea
-          rows={2}
-          maxLength={1000}
-          value={f.message}
-          onChange={(e) => setF({ ...f, message: e.target.value })}
-        />
-      </label>
+        </Select>
+      </div>
+      <TextArea
+        label="Message (optional)"
+        rows={2}
+        maxLength={1000}
+        value={f.message}
+        onChange={(e) => setF({ ...f, message: e.target.value })}
+      />
       {error && <p role="alert">{error}</p>}
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button type="submit" disabled={busy || !f.email.trim()}>
           Send secure link
         </Button>
@@ -201,25 +209,17 @@ export function ClientLinksList({
     <section aria-label="Links you sent" style={{ display: 'grid', gap: 8 }}>
       <h2 style={{ fontSize: 16, margin: 0 }}>Links you sent</h2>
       {error && <p role="alert">{error}</p>}
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
+      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {slice.map((l) => (
-          <li
+          <ItemRow
             key={l.id}
-            style={{
-              display: 'flex',
-              gap: 12,
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              padding: '8px 0',
-              borderBottom: '1px solid var(--vibe-border, #ddd)',
-            }}
-          >
-            <div>
-              <strong>{l.files.join(', ')}</strong> to {l.name ? `${l.name} ` : ''}
-              {l.organization ? `(${l.organization}) ` : ''}
-              {l.email}
-              <br />
-              <small>
+            title={l.files.join(', ')}
+            meta={
+              <>
+                To {l.name ? `${l.name} ` : ''}
+                {l.organization ? `(${l.organization}) ` : ''}
+                {l.email}
+                <br />
                 {STATUS[l.status]}
                 {l.status === 'opened' || l.status === 'sent'
                   ? ` · works until ${day(l.expiresAt)}`
@@ -229,14 +229,21 @@ export function ClientLinksList({
                     ? ` · downloaded ${l.downloads} of ${l.downloadLimit} times`
                     : ' · view and download'
                   : ' · view only'}
-              </small>
-            </div>
-            {(l.status === 'sent' || l.status === 'opened') && (
-              <Button size="sm" variant="secondary" onClick={() => void stop(l)}>
-                End link
-              </Button>
-            )}
-          </li>
+              </>
+            }
+            actions={
+              l.status === 'sent' || l.status === 'opened' ? (
+                <Actions>
+                  <ActionButton
+                    onClick={() => void stop(l)}
+                    ariaLabel={`End the link sent to ${l.email}`}
+                    icon={<CloseIcon size={16} />}
+                    label="End link"
+                  />
+                </Actions>
+              ) : undefined
+            }
+          />
         ))}
       </ul>
       {pager}
