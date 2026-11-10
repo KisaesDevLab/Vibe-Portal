@@ -1410,9 +1410,9 @@ function Settings(): JSX.Element {
           <strong>Access</strong>.
         </p>
         <p>
-          <strong>Clients may notify</strong>: a client sending files can choose to have this
-          person emailed, with the file names and their note. Clients see the names of those
-          ticked who can see their client, never their email addresses.
+          <strong>Clients may notify</strong>: a client sending files can choose to have this person
+          emailed, with the file names and their note. Clients see the names of those ticked who can
+          see their client, never their email addresses.
         </p>
         <Table
           head={['Name', 'Email', 'State', 'Sees', 'Clients may notify', 'Last sign-in', 'Actions']}
