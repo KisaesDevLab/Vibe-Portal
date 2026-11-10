@@ -8,8 +8,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthLayout, Button } from '@vibe/ui';
+import { Button } from '@vibe/ui';
 
+import { FirmAuthLayout } from '../branding';
 import { api, say, tokenFromHash } from '../api';
 
 export function VerifyLink(): JSX.Element {
@@ -35,23 +36,23 @@ export function VerifyLink(): JSX.Element {
 
   if (error) {
     return (
-      <AuthLayout brand="Client Portal" title="Sign-in link not valid">
+      <FirmAuthLayout brand="Client portal" title="Sign-in link not valid">
         <p role="alert">
           {error === 'missing' ? 'This sign-in link is not complete. Ask for a new one.' : error}
         </p>
         <Link to="/login">Sign in again</Link>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
   return (
-    <AuthLayout brand="Client Portal" title="Sign in">
+    <FirmAuthLayout brand="Client portal" title="Sign in">
       <div style={{ display: 'grid', gap: 12 }}>
         <p>Press the button to finish signing in.</p>
         <Button onClick={() => void signIn()} disabled={busy}>
           Sign in
         </Button>
       </div>
-    </AuthLayout>
+    </FirmAuthLayout>
   );
 }

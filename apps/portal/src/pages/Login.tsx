@@ -4,8 +4,9 @@
 
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthLayout, Button, Input } from '@vibe/ui';
+import { Button, Input } from '@vibe/ui';
 
+import { FirmAuthLayout } from '../branding';
 import { api, say } from '../api';
 import { KeepSignedIn } from './KeepSignedIn';
 
@@ -53,20 +54,20 @@ export function Login(): JSX.Element {
 
   if (step.at === 'email') {
     return (
-      <AuthLayout brand="Client Portal" title="Check your email">
+      <FirmAuthLayout brand="Client portal" title="Check your email">
         <p role="status">
           If that email has access, a sign-in link is on its way. It works once, for 15 minutes.
         </p>
         <Button variant="ghost" onClick={() => setStep({ at: 'ask' })}>
           Use a different email or phone
         </Button>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
   if (step.at === 'code') {
     return (
-      <AuthLayout brand="Client Portal" title="Enter your code">
+      <FirmAuthLayout brand="Client portal" title="Enter your code">
         <form onSubmit={verify} style={{ display: 'grid', gap: 12 }}>
           <p>
             If that number has access, a 6-digit code is on its way by text. It works for 5 minutes.
@@ -89,13 +90,13 @@ export function Login(): JSX.Element {
             Send a new code
           </Button>
         </form>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
   return (
-    <AuthLayout
-      brand="Client Portal"
+    <FirmAuthLayout
+      brand="Client portal"
       title="Sign in"
       footer={
         <span>
@@ -118,6 +119,6 @@ export function Login(): JSX.Element {
           Continue
         </Button>
       </form>
-    </AuthLayout>
+    </FirmAuthLayout>
   );
 }

@@ -4,9 +4,10 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthLayout, Button, Input } from '@vibe/ui';
+import { Button, Input } from '@vibe/ui';
 import QRCode from 'qrcode';
 
+import { FirmAuthLayout } from '../branding';
 import { ApiError, tokenFromHash } from '../api';
 import { staffApi, staffSay } from './api';
 
@@ -159,7 +160,7 @@ export function StaffLogin(): JSX.Element {
   }
 
   return (
-    <AuthLayout brand="Portal staff" title="Staff sign in">
+    <FirmAuthLayout brand="Portal staff" title="Staff sign in">
       {setupNeeded ? (
         <FirstAccount first={first} />
       ) : (
@@ -198,7 +199,7 @@ export function StaffLogin(): JSX.Element {
           </Button>
         </form>
       )}
-    </AuthLayout>
+    </FirmAuthLayout>
   );
 }
 
@@ -278,24 +279,24 @@ export function StaffSetup(): JSX.Element {
 
   if (step.at === 'loading') {
     return (
-      <AuthLayout brand="Portal staff" title="Staff account">
+      <FirmAuthLayout brand="Portal staff" title="Staff account">
         <p role="status">One moment.</p>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
   if (step.at === 'error') {
     return (
-      <AuthLayout brand="Portal staff" title="Setup link not valid">
+      <FirmAuthLayout brand="Portal staff" title="Setup link not valid">
         <p role="alert">{step.message}</p>
         <Link to="/staff/login">Staff sign in</Link>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
   if (step.at === 'authenticator') {
     // The secret groups of four are easier to type.
     const grouped = step.secret.replace(/(.{4})/g, '$1 ').trim();
     return (
-      <AuthLayout brand="Portal staff" title="Add the portal to your authenticator app">
+      <FirmAuthLayout brand="Portal staff" title="Add the portal to your authenticator app">
         <form onSubmit={confirm} style={{ display: 'grid', gap: 12 }}>
           <p style={{ margin: 0 }}>
             Open your authenticator app (Microsoft Authenticator, Google Authenticator, 1Password,
@@ -327,11 +328,11 @@ export function StaffSetup(): JSX.Element {
             Finish
           </Button>
         </form>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
   return (
-    <AuthLayout
+    <FirmAuthLayout
       brand={step.firm}
       title={step.first ? 'Make the first staff account' : 'Finish your staff account'}
     >
@@ -383,6 +384,6 @@ export function StaffSetup(): JSX.Element {
           Next
         </Button>
       </form>
-    </AuthLayout>
+    </FirmAuthLayout>
   );
 }

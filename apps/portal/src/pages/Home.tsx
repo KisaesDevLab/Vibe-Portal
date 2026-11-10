@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Button, Card } from '@vibe/ui';
 
+import { FirmLogo } from '../branding';
 import { api, ApiError, say, type Me } from '../api';
 import { Files } from './Files';
 import { PhoneSignIn, type Pending } from './PhoneSignIn';
@@ -96,7 +97,10 @@ export function Home(): JSX.Element {
   return (
     <main style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 20, margin: 0 }}>{me.firmName}</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <FirmLogo height={40} />
+          <h1 style={{ fontSize: 20, margin: 0 }}>{me.firmName}</h1>
+        </div>
         <Button variant="secondary" size="sm" onClick={() => void signOut()}>
           Sign out
         </Button>

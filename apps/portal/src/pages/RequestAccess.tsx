@@ -4,8 +4,9 @@
 
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { AuthLayout, Button, Input } from '@vibe/ui';
+import { Button, Input } from '@vibe/ui';
 
+import { FirmAuthLayout } from '../branding';
 import { api, say } from '../api';
 
 type Step = { at: 'form' } | { at: 'confirm'; id: string; sentTo: string } | { at: 'done' };
@@ -76,16 +77,16 @@ export function RequestAccess(): JSX.Element {
 
   if (step.at === 'done') {
     return (
-      <AuthLayout brand="Client Portal" title="Request sent">
+      <FirmAuthLayout brand="Client portal" title="Request sent">
         <p role="status">Thank you. The firm will confirm your access and let you know.</p>
         <Link to="/login">Back to sign in</Link>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
   if (step.at === 'confirm') {
     return (
-      <AuthLayout brand="Client Portal" title="Confirm it is you">
+      <FirmAuthLayout brand="Client portal" title="Confirm it is you">
         <form onSubmit={confirm} style={{ display: 'grid', gap: 12 }}>
           <p>We sent a 6-digit code to {step.sentTo}. Enter it to send your request to the firm.</p>
           <Input
@@ -106,13 +107,13 @@ export function RequestAccess(): JSX.Element {
             Send a new code
           </Button>
         </form>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
   return (
-    <AuthLayout
-      brand="Client Portal"
+    <FirmAuthLayout
+      brand="Client portal"
       title="Request access"
       footer={
         <span>
@@ -149,6 +150,6 @@ export function RequestAccess(): JSX.Element {
           Send request
         </Button>
       </form>
-    </AuthLayout>
+    </FirmAuthLayout>
   );
 }

@@ -4,8 +4,9 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthLayout, Button, Input } from '@vibe/ui';
+import { Button, Input } from '@vibe/ui';
 
+import { FirmAuthLayout } from '../branding';
 import { api, say, tokenFromHash } from '../api';
 import { KeepSignedIn } from './KeepSignedIn';
 
@@ -70,8 +71,8 @@ export function AcceptInvitation(): JSX.Element {
 
   if (!preview) {
     return (
-      <AuthLayout
-        brand="Client Portal"
+      <FirmAuthLayout
+        brand="Client portal"
         title={error ? 'Invitation not valid' : 'Opening your invitation…'}
       >
         {error ? (
@@ -82,12 +83,12 @@ export function AcceptInvitation(): JSX.Element {
         ) : (
           <p role="status">One moment.</p>
         )}
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
   return (
-    <AuthLayout brand={preview.firmName} title="Accept your invitation">
+    <FirmAuthLayout brand={preview.firmName} title="Accept your invitation">
       <form onSubmit={accept} style={{ display: 'grid', gap: 12 }}>
         <p>
           {preview.firmName} invites you to its client portal for{' '}
@@ -120,6 +121,6 @@ export function AcceptInvitation(): JSX.Element {
           Accept and sign in
         </Button>
       </form>
-    </AuthLayout>
+    </FirmAuthLayout>
   );
 }

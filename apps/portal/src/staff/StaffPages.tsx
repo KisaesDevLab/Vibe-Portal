@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
 import { Button, Card, Input } from '@vibe/ui';
 
+import { FirmLogo, reloadBranding } from '../branding';
 import { ApiError } from '../api';
 import {
   staffApi,
@@ -150,6 +151,7 @@ export function StaffHome(): JSX.Element {
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}>
       <header style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <FirmLogo height={32} />
         <strong>{me.data.firmName} · portal staff</strong>
         <nav aria-label="Staff" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           {nav.map((n) => (
@@ -928,6 +930,8 @@ function Settings(): JSX.Element {
                   // Shown as saved (trimmed), and in the header.
                   setForm(null);
                   window.dispatchEvent(new Event(ME_CHANGED));
+                  // The new name and colour on every page now, not after a reload.
+                  reloadBranding();
                 }
               });
             }}
@@ -987,7 +991,10 @@ function Settings(): JSX.Element {
                   e.target.value = '';
                   if (f) {
                     void act('/v1/settings/logo', { method: 'PUT', raw: f }).then((r) => {
-                      if (r) setLogoV((v) => v + 1);
+                      if (r) {
+                        setLogoV((v) => v + 1);
+                        reloadBranding();
+                      }
                     });
                   }
                 }}
@@ -999,9 +1006,10 @@ function Settings(): JSX.Element {
                 variant="secondary"
                 disabled={busy}
                 onClick={() =>
-                  void act('/v1/settings/logo', { method: 'DELETE' }).then(() =>
-                    setLogoV((v) => v + 1),
-                  )
+                  void act('/v1/settings/logo', { method: 'DELETE' }).then(() => {
+                    setLogoV((v) => v + 1);
+                    reloadBranding();
+                  })
                 }
               >
                 Remove logo

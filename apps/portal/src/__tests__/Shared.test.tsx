@@ -109,7 +109,7 @@ describe('a secure link (P49)', () => {
     fireEvent.click(verify);
 
     await screen.findByRole('heading', { name: 'Shared documents (2)' });
-    expect(calls.map((c) => [c.path, c.body])).toEqual([
+    expect(calls.filter((c) => c.path !== '/branding').map((c) => [c.path, c.body])).toEqual([
       [`${BASE}/open`, { key: KEY }],
       [`${BASE}/code`, { key: KEY }],
       [`${BASE}/verify`, { key: KEY, code: '123456' }],

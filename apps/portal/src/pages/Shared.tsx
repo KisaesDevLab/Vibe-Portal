@@ -5,8 +5,9 @@
 // page shows nothing about the documents until that code is given.
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { AuthLayout, Button, Input } from '@vibe/ui';
+import { Button, Input } from '@vibe/ui';
 
+import { FirmAuthLayout, FirmLogo } from '../branding';
 import { api, ApiError, say, tokenFromHash } from '../api';
 import { ProtectedPdfViewer } from '../components/ProtectedPdfViewer';
 import { sizeText } from './Files';
@@ -182,15 +183,15 @@ export function Shared(): JSX.Element {
 
   if (ended) {
     return (
-      <AuthLayout brand={info?.firmName ?? 'Secure documents'} title={ENDED[ended].title}>
+      <FirmAuthLayout brand={info?.firmName ?? 'Secure documents'} title={ENDED[ended].title}>
         <p role="alert">{ENDED[ended].text}</p>
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
   if (!info) {
     return (
-      <AuthLayout brand="Secure documents" title={error ? 'Link not opened' : 'Opening…'}>
+      <FirmAuthLayout brand="Secure documents" title={error ? 'Link not opened' : 'Opening…'}>
         {error ? (
           <>
             <p role="alert">{error}</p>
@@ -206,14 +207,14 @@ export function Shared(): JSX.Element {
         ) : (
           <p role="status">One moment.</p>
         )}
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
   if (!info.verified) {
     const what = info.count === 1 ? 'a document' : `${info.count} documents`;
     return (
-      <AuthLayout
+      <FirmAuthLayout
         brand={info.firmName}
         title="Secure documents"
         footer={<span>This link expires {dayText(info.expiresAt)}.</span>}
@@ -260,7 +261,7 @@ export function Shared(): JSX.Element {
             )}
           </div>
         )}
-      </AuthLayout>
+      </FirmAuthLayout>
     );
   }
 
@@ -273,6 +274,7 @@ export function Shared(): JSX.Element {
   return (
     <main style={{ maxWidth: 960, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}>
       <header>
+        <FirmLogo height={40} />
         <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
           {info.firmName}
         </div>
