@@ -202,6 +202,56 @@ cannot be reached at that moment, a daily check deletes it later. That check del
 it finds more than a tenth of the stored files named by no file or upload: the database is then
 older than the files (an old backup restored), and Settings > Storage says so.
 
+## Staff sign-in with Vibe Auth (optional)
+
+Vibe Auth is the appliance's single sign-on. When it is installed, the appliance console
+registers the portal with it, gives the portal its settings and restarts it. Until an admin
+turns it on, staff sign in with their email, password and authenticator code as before.
+
+To turn it on, an admin opens **Settings › Sign-in with Vibe Auth** on the staff page, presses
+**Test connection** (it signs them in through Vibe Auth once), then picks Sign-in mode **both**
+and saves. Then:
+
+- The staff sign-in page shows **Sign in with** and the firm's Vibe Auth name. Staff passwords
+  still work beside it.
+- **Who gets in**: anyone with a Vibe Auth account. The first time someone signs in, a staff
+  account is made for them with their Vibe Auth email. It sees every client; an admin can limit
+  it on Settings › Staff › Access, as for anyone else. Someone who already has a staff account
+  with the same email is joined to it.
+- **Who is an admin**: Vibe Auth's groups decide, at every sign-in. Members of vibe-admin,
+  vibe-it or vibe-partner are admins; vibe-manager, vibe-staff and everyone else are staff.
+  The portal never takes admin away from its last admin.
+- **The second step**: Vibe Auth asks for it (its own authenticator setup), so the portal does
+  not ask for another code.
+- **Signing out** of the staff page also signs out of Vibe Auth. Signing out of Vibe Auth
+  elsewhere, or an IT person ending the session there, ends the portal session within seconds.
+
+An admin chooses how staff sign in under **Sign-in mode** on **Settings › Sign-in with Vibe Auth**:
+
+| Sign-in mode | What staff see                                 |
+| ------------ | ---------------------------------------------- |
+| local        | No Vibe Auth button (the default)              |
+| both         | The button, and the password sign-in under it  |
+| oidc_only    | Only the button. A password sign-in is refused |
+
+**oidc_only** needs two things first: a successful **Test connection** on that page, and
+the emergency account (`vibe-breakglass`) the appliance makes when it registers the portal. Its
+password is kept by the appliance console. If Vibe Auth is ever down, open
+`https://files.yourfirm.com/staff/login?local=1` and sign in with the email
+`vibe-breakglass@vibe-auth.local` and that password; it needs no authenticator code. The portal
+refuses to start in oidc_only without that account, so the firm is never locked out.
+
+If Vibe Auth cannot be reached when the portal starts, the portal still starts; the button says
+Vibe Auth cannot be reached, and password sign-in (when allowed) works as usual.
+
+To make the emergency account by hand, on the appliance:
+
+```sh
+sudo docker exec vibe-files-portal node_modules/.bin/tsx node_modules/@kisaesdevlab/vibe-auth/dist/cli.js breakglass ensure --json
+```
+
+It prints the password once. `breakglass status`, `rotate` and `verify` work too.
+
 ## Backups
 
 `sudo vibe backup portal` writes a snapshot under `/var/lib/vibe/portal/backups/` with the

@@ -98,6 +98,16 @@ Files are kept on the appliance unless you move them. To keep them in a Backblaz
 instead, see **Settings › Storage** on the staff page and
 [docs/firm-setup.md](docs/firm-setup.md#storing-files-in-backblaze-b2-optional).
 
+### Optional: staff sign in with Vibe Auth
+
+When Vibe Auth is installed on the appliance, the console registers the portal with it. An
+admin then turns it on: **Settings › Sign-in with Vibe Auth**, **Test connection**, and Sign-in
+mode **both**. The staff sign-in page gets a **Sign in with …** button beside the password
+sign-in. Anyone in Vibe Auth can then sign in to the staff page; an account is made the first
+time. Vibe Auth's groups decide who is an admin (vibe-admin, vibe-it and vibe-partner are
+admins; others are staff), and Vibe Auth asks for the second step, not the portal. See
+[docs/firm-setup.md](docs/firm-setup.md#staff-sign-in-with-vibe-auth-optional).
+
 ### If something is wrong
 
 | What you see                                | What to do                                                                                                          |
@@ -107,6 +117,8 @@ instead, see **Settings › Storage** on the staff page and
 | The page says the email could not be sent   | **Send a test email** (Settings › Apps › Vibe Portal › Actions) says what is wrong                                  |
 | A staff member lost their phone             | An admin presses **New setup link** for them on the staff page (Settings › Staff), or the console's **Reset a staff member's sign-in** |
 | No admin can sign in                        | **Reset a staff member's sign-in** in the console makes them admin when no other admin has an account; otherwise the command below with `--admin` |
+| No **Sign in with …** button                | An admin has not set Sign-in mode **both** (Settings › Sign-in with Vibe Auth), or Vibe Auth is not installed |
+| Vibe Auth is down and nobody can sign in    | Open `https://files.<your domain>/staff/login?local=1` and sign in as `vibe-breakglass@vibe-auth.local` with the password the console keeps |
 | Vibe Files' **Test** says the key is wrong  | Make a new key on the staff page (Settings › Portal keys)                                                           |
 
 ### Commands on the appliance
