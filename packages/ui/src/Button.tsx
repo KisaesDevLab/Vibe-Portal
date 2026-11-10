@@ -3,6 +3,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 import { tokens } from './tokens';
+import { useIsNarrow } from './useIsNarrow';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
@@ -40,14 +41,27 @@ export function Button({
   style,
   ...rest
 }: ButtonProps): JSX.Element {
-  const padding = size === 'sm' ? '6px 10px' : '10px 16px';
-  const fontSize = size === 'sm' ? 12 : 14;
+  // Vibe Portal (P59): a small button is the same as the portal's row actions: 36 px tall (44
+  // on a phone, for fingers), 14 px text, icon and label centred.
+  const narrow = useIsNarrow();
+  const padding = size === 'sm' ? '0 12px' : '10px 16px';
+  const fontSize = 14;
   return (
     <button
       type={rest.type ?? 'button'}
       style={{
         padding,
         fontSize,
+        ...(size === 'sm'
+          ? {
+              minHeight: narrow ? 44 : 36,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              whiteSpace: 'nowrap',
+            }
+          : {}),
         borderRadius: tokens.radius.md,
         fontFamily: tokens.font.body,
         fontWeight: 500,

@@ -14,7 +14,17 @@ import {
   type ReactNode,
 } from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
-import { Button, Card, CloseIcon, Input, MenuIcon, tokens, useIsNarrow } from '@vibe/ui';
+import {
+  Button,
+  Card,
+  CloseIcon,
+  Input,
+  MenuIcon,
+  ShareIcon,
+  tokens,
+  Trash,
+  useIsNarrow,
+} from '@vibe/ui';
 
 import { FirmLogo, reloadBranding } from '../branding';
 import { usePages } from '../paging';
@@ -666,11 +676,12 @@ function ClientFiles({
         />
       </td>
       <td style={td}>
-        {f.name}
-        {f.contentUpdatedAt && ` (updated ${when(f.contentUpdatedAt)})`}
-      </td>
-      <td style={td}>
-        {when(f.sharedAt)} by {f.sharedBy}
+        <div style={{ fontWeight: 500, overflowWrap: 'anywhere' }}>{f.name}</div>
+        <small style={{ color: tokens.color.textMuted }}>
+          {f.contentUpdatedAt
+            ? `Updated ${when(f.contentUpdatedAt)}`
+            : `Shared ${when(f.sharedAt)} by ${f.sharedBy}`}
+        </small>
       </td>
       <td style={td}>
         {f.users.filter((x) => x.visible).length === 0 && 'nobody'}
@@ -684,7 +695,7 @@ function ClientFiles({
                 {x.viewedAt ? `opened ${when(x.viewedAt)}` : 'not opened'})
                 <Button
                   size="sm"
-                  variant="ghost"
+                  variant="secondary"
                   disabled={off}
                   aria-label={`Hide ${f.name} from ${u ? label(u) : 'this person'}`}
                   onClick={() =>
@@ -706,9 +717,10 @@ function ClientFiles({
           variant="secondary"
           disabled={off}
           aria-label={`Send ${f.name} securely`}
-          style={{ marginRight: 6 }}
+          style={{ marginRight: 6, marginBottom: 4 }}
           onClick={() => onSend(f.fileId)}
         >
+          <ShareIcon size={16} />
           Send securely…
         </Button>
         <Button
@@ -724,6 +736,7 @@ function ClientFiles({
             }
           }}
         >
+          <Trash size={16} />
           Remove
         </Button>
       </td>
@@ -861,9 +874,7 @@ function ClientFiles({
                 {g.files.length} {g.files.length === 1 ? 'file' : 'files'}
               </span>
             </summary>
-            <Table head={['', 'File', 'Shared', 'Who sees it', 'Actions']}>
-              {g.files.map(row)}
-            </Table>
+            <Table head={['', 'File', 'Who sees it', 'Actions']}>{g.files.map(row)}</Table>
           </details>
         );
       })}
@@ -1123,6 +1134,7 @@ function SecureLinks({
                     aria-label={`Revoke the link sent to ${s.email}`}
                     onClick={() => onRevoke(s)}
                   >
+                    <CloseIcon size={16} />
                     Revoke
                   </Button>
                 )}
@@ -1559,6 +1571,7 @@ function Settings(): JSX.Element {
                       }
                     }}
                   >
+                    <CloseIcon size={16} />
                     Revoke
                   </Button>
                 )}
