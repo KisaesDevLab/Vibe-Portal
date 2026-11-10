@@ -107,7 +107,7 @@ describe('staff page', () => {
     serve({ '/auth/status': { body: { setupNeeded: true, firstAdmin: null } } });
     at('/staff/login');
     expect(await screen.findByText(/no staff account yet/)).toBeTruthy();
-    expect(screen.getByText(/enter the first admin/)).toBeTruthy();
+    expect(screen.getByText(/First admin.s email/)).toBeTruthy();
     // No command line for the firm to type.
     expect(document.body.textContent).not.toMatch(/sudo|docker/);
   });

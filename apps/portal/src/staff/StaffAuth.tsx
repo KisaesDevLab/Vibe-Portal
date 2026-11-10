@@ -39,9 +39,10 @@ function FirstAccount({ first }: { first: FirstAdmin | null }): JSX.Element {
         </p>
         <p style={{ margin: 0 }}>
           Whoever looks after the Vibe appliance can set one up: in the appliance console, open{' '}
-          <strong>Settings › Vibe Portal</strong>, enter the first admin&rsquo;s email under{' '}
-          <strong>First admin</strong>, and save. The portal then emails that person a link to make
-          their account.
+          <strong>Settings › Apps › Vibe Portal</strong>, fill in{' '}
+          <strong>First admin&rsquo;s email</strong> under <strong>Application</strong>, and save.
+          The portal then emails that person a link to make their account. (Or, at the bottom of
+          that page, <strong>Get a staff setup link</strong> shows one on the screen.)
         </p>
       </div>
     );
@@ -79,7 +80,8 @@ function FirstAccount({ first }: { first: FirstAdmin | null }): JSX.Element {
             ? `The setup email to ${state.to} could not be sent.`
             : `A setup email to ${state.to} has not been sent yet.`}{' '}
           Check the portal&rsquo;s email settings in the appliance console (
-          <strong>Settings › Vibe Portal › Email &amp; SMS</strong>), then press{' '}
+          <strong>Settings › Apps › Vibe Portal › Email &amp; SMS</strong>; its{' '}
+          <strong>Send a test email</strong> button says what is wrong), then press{' '}
           <strong>Send again</strong>.
         </p>
       )}

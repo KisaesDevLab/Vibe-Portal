@@ -16,13 +16,9 @@ About 20 minutes. You need:
   1Password, …). Staff sign in with a password and a code from the app.
 - **Vibe Files** on the office PCs.
 
-### 1. Turn the portal on
+### 1. Email settings
 
-In the appliance console, enable **Vibe Portal**.
-
-### 2. Email settings
-
-In the appliance console, open **Settings › Vibe Portal › Email & SMS** and fill in:
+In the appliance console, open **Settings › Apps › Vibe Portal › Email & SMS** and fill in:
 
 | Setting            | What to enter                    | Office 365 example                    |
 | ------------------ | -------------------------------- | ------------------------------------- |
@@ -36,10 +32,19 @@ In the appliance console, open **Settings › Vibe Portal › Email & SMS** and 
 Office 365: the mailbox must be allowed to send by SMTP (Microsoft 365 admin center › the user ›
 Mail › Manage email apps › **Authenticated SMTP** on).
 
-### 3. The first admin
+### 2. The first admin
 
-In **Settings › Vibe Portal**, enter **your own email** as the first admin, and **Save**. The
-portal starts and emails you a link to make the first staff account.
+On the same page, **Settings › Apps › Vibe Portal**, under **Application**, fill in **First
+admin's email** with your own email, and **Save**.
+
+To check the email settings now, use **Send a test email** in the **Actions** section at the
+bottom of that page once the portal is running (step 3). If it fails, it says what is wrong.
+
+### 3. Turn the portal on
+
+On the console's **Apps** page, press **Enable** on the **Vibe Portal** tile. It refuses, and says
+which, while the SMTP host or From address is empty. Once it starts, the portal emails you a link
+to make the first staff account.
 
 ### 4. Make your staff account
 
@@ -52,7 +57,11 @@ You are now signed in to the staff page at `https://files.<your domain>/staff`. 
 
 **No email?** Look in the junk or spam folder. Then open `https://files.<your domain>/staff`:
 it says where the link was sent and has a **Send again** button. If it says the email could not
-be sent, the email settings in step 2 need fixing; correct them, save, and press **Send again**.
+be sent, the email settings in step 1 need fixing: **Send a test email** (Settings › Apps › Vibe
+Portal › Actions) says what is wrong. Correct them, save, and press **Send again**.
+
+Email not working at all? **Get a staff setup link** in the same **Actions** section shows a link
+on the screen instead.
 
 ### 5. Set up the firm
 
@@ -93,17 +102,18 @@ instead, see **Settings › Storage** on the staff page and
 
 | What you see                                | What to do                                                                                                          |
 | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| The portal does not start after enabling it | Fill in the email settings (step 2) and save: it needs an SMTP host and From address                                |
+| **Enable** refuses                          | Fill in the SMTP host and From address (step 1) and save                                                            |
 | The setup email never arrives               | Junk folder; then `https://files.<your domain>/staff` › **Send again**; check the email settings                    |
-| The page says the email could not be sent   | The SMTP username, password or port is wrong, or the mailbox may not send by SMTP (Office 365: Authenticated SMTP)  |
-| A staff member lost their phone             | An admin opens Settings › Staff on the staff page and presses **New setup link** for them                           |
-| No admin can sign in                        | See "Commands on the appliance" below                                                                               |
+| The page says the email could not be sent   | **Send a test email** (Settings › Apps › Vibe Portal › Actions) says what is wrong                                  |
+| A staff member lost their phone             | An admin presses **New setup link** for them on the staff page (Settings › Staff), or the console's **Reset a staff member's sign-in** |
+| No admin can sign in                        | **Reset a staff member's sign-in** in the console makes them admin when no other admin has an account; otherwise the command below with `--admin` |
 | Vibe Files' **Test** says the key is wrong  | Make a new key on the staff page (Settings › Portal keys)                                                           |
 
 ### Commands on the appliance
 
-Only needed when the steps above cannot be used, for example when email is not working yet. Run
-them on the appliance (over SSH), and copy them exactly:
+The **Actions** buttons on Settings › Apps › Vibe Portal do the same as these. The commands are
+only needed when the console cannot be used, or to make someone an admin (`--admin`). Run them on
+the appliance (over SSH), and copy them exactly:
 
 ```sh
 # A link to make the first staff account (while there is none), printed on the screen:
