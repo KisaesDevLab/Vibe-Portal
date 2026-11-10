@@ -13,6 +13,7 @@ import { accessRequestsRouter } from './portal/access-requests';
 import { clientFilesRouter } from './portal/files';
 import { clientUploadsRouter, type HeicConverter } from './portal/uploads';
 import { invitationsRouter } from './portal/invitations';
+import { serveClient } from './lib/static';
 import { VERSION } from './version';
 
 export interface AppDeps {
@@ -22,6 +23,8 @@ export interface AppDeps {
   ctx?: Ctx;
   /** HEIC to JPG (P33); tests may pass their own. */
   convertHeic?: HeicConverter;
+  /** The built client portal, served at / (the container). */
+  staticDir?: string;
 }
 
 export function createApp(deps: AppDeps): Express {
@@ -68,6 +71,9 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api', (_req, res) => {
     res.status(404).json({ error: 'not_found' });
   });
+  if (deps.staticDir) {
+    serveClient(app, deps.staticDir, deps.ctx?.portalUrl.startsWith('https://') ?? false);
+  }
   app.use(errorHandler(deps.ctx?.log ?? console));
 
   return app;

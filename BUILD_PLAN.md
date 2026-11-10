@@ -200,8 +200,10 @@ Each phase ends with its tests green and a ship gate.
 - **Gate:** two concurrent fetchers → one 200, one 409; over-size and wrong-type uploads refused
 
 ### Phase 5 — Appliance app
+- [x] Container image (API serves the built portal; strict CSP), CI and tag-release workflows
+  publishing ghcr.io/kisaesdevlab/vibe-portal (P40)
 - [ ] `vibe-installer/apps/portal`, Caddy fragment, admin config, firm key creation
-- [ ] Real email and SMS from the appliance's Email & SMS settings. The console notifier logs
+- [x] Real email (SMTP) and SMS (Twilio) from /etc/vibe/portal/.env (P38). The console notifier logs
   sign-in links and codes, so the API must refuse it when `NODE_ENV=production`
 - [ ] Cloudflare Tunnel path verified; Vibe Vault discovery. Backups must include
   `DATA_DIR/.firm-key.seal`: without it no stored file can be read (QUESTIONS P28)

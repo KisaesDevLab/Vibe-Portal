@@ -10,14 +10,51 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createApp } from './app';
-import { loadConfig } from './config';
+import { loadConfig, type Config } from './config';
 import type { Ctx } from './context';
 import { BlobStore } from './files/blobs';
 import { openKeyring } from './files/keyring';
 import { flush } from './files/notify-queue';
 import { purgeUploads } from './firm/uploads';
-import { consoleNotifier } from './lib/notify';
+import { consoleNotifier, type Notifier } from './lib/notify';
+import { routedNotifier, smtpSender, twilioSender } from './lib/providers';
 import { VERSION } from './version';
+
+/** Email by SMTP and texts by Twilio (P38); "console" only logs, and never in production. */
+function buildNotifier(config: Config, log: pino.Logger): Notifier {
+  const consoleSend = consoleNotifier(log, { redact: config.NODE_ENV === 'production' });
+  const email =
+    config.EMAIL_PROVIDER === 'smtp'
+      ? smtpSender(
+          {
+            host: config.SMTP_HOST ?? '',
+            port: config.SMTP_PORT,
+            secure: config.SMTP_SECURE,
+            ...(config.SMTP_USER ? { user: config.SMTP_USER } : {}),
+            ...(config.SMTP_PASS ? { pass: config.SMTP_PASS } : {}),
+            from: config.EMAIL_FROM ?? '',
+          },
+          log,
+        )
+      : (m: Parameters<Notifier['send']>[0]) => consoleSend.send(m);
+  const sms =
+    config.SMS_PROVIDER === 'twilio'
+      ? twilioSender(
+          {
+            accountSid: config.TWILIO_ACCOUNT_SID ?? '',
+            authToken: config.TWILIO_AUTH_TOKEN ?? '',
+            ...(config.TWILIO_FROM_NUMBER ? { from: config.TWILIO_FROM_NUMBER } : {}),
+            ...(config.TWILIO_MESSAGING_SERVICE_SID
+              ? { messagingServiceSid: config.TWILIO_MESSAGING_SERVICE_SID }
+              : {}),
+          },
+          log,
+        )
+      : config.SMS_PROVIDER === 'console'
+        ? (m: Parameters<Notifier['send']>[0]) => consoleSend.send(m)
+        : undefined;
+  return routedNotifier({ email, ...(sms ? { sms } : {}) }, log);
+}
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -55,10 +92,7 @@ async function main(): Promise<void> {
   const ctx: Ctx = {
     db,
     log,
-    // Real email and SMS come from the appliance's Email & SMS settings (Phase 5). Until then
-    // the console notifier; in production it leaves out the message text, which holds
-    // sign-in links and codes.
-    notifier: consoleNotifier(log, { redact: config.NODE_ENV === 'production' }),
+    notifier: buildNotifier(config, log),
     now: () => new Date(),
     portalUrl,
     cookie: { secure: portalUrl.startsWith('https://') },
@@ -66,7 +100,11 @@ async function main(): Promise<void> {
     keyring,
     blobs,
   };
-  const app = createApp({ pingDb: ping, ctx });
+  const app = createApp({
+    pingDb: ping,
+    ctx,
+    ...(config.STATIC_DIR ? { staticDir: config.STATIC_DIR } : {}),
+  });
   // P18: send gathered "new files" notices every minute.
   setInterval(() => {
     flush(ctx).catch((err: unknown) => log.error({ err }, 'notification flush failed'));
