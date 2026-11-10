@@ -202,9 +202,12 @@ Each phase ends with its tests green and a ship gate.
 ### Phase 5 — Appliance app
 - [x] Container image (API serves the built portal; strict CSP), CI and tag-release workflows
   publishing ghcr.io/kisaesdevlab/vibe-portal (P40)
-- [ ] `vibe-installer/apps/portal`, Caddy fragment, admin config, firm key creation
+- [x] `vibe-installer/apps/portal` (branch `feat/portal-app`): own-hostname Caddy site (P37),
+  `vibe install portal --host`, SMTP/Twilio settings, `vibe portal key`; settings move to the
+  staff page (P36, Phase 6b)
 - [x] Real email (SMTP) and SMS (Twilio) from /etc/vibe/portal/.env (P38). The console notifier logs
   sign-in links and codes, so the API must refuse it when `NODE_ENV=production`
+- [ ] Publish the first image (tag v0.1.0; set the GHCR package public, P40)
 - [ ] Cloudflare Tunnel path verified; Vibe Vault discovery. Backups must include
   `DATA_DIR/.firm-key.seal`: without it no stored file can be read (QUESTIONS P28)
 - **Gate:** clean install on the appliance test VM, reached over the tunnel from a phone
