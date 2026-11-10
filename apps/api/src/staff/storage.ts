@@ -10,7 +10,7 @@
 //   POST   /api/staff/v1/settings/storage/test   checks the saved bucket and key
 //   POST   /api/staff/v1/settings/storage/move   { to: 'b2' | 'local' }  runs in the background
 
-import express, { type Request, type Router } from 'express';
+import express, { type Request, type Response, type Router } from 'express';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -19,9 +19,12 @@ import { parseEndpoint, validBucket, type B2Settings } from '../files/b2';
 import {
   applyStorage,
   b2Settings,
+  BucketRefused,
+  checkBucket,
+  checkMove,
   isMoving,
+  NoRoom,
   openB2,
-  probe,
   runMove,
   storageState,
 } from '../files/storage';
@@ -48,6 +51,14 @@ const actor = (req: Request): Actor => ({
 function why(err: unknown): string {
   const m = err instanceof Error ? err.message : String(err);
   return m.slice(0, 300);
+}
+
+/** A bucket or move that cannot be used: the portal's own reason, or B2's answer. */
+function refuse(res: Response, err: unknown): void {
+  if (err instanceof NoRoom) res.status(409).json({ error: 'no_room', detail: why(err) });
+  else if (err instanceof BucketRefused) {
+    res.status(400).json({ error: 'b2_refused', detail: why(err) });
+  } else res.status(400).json({ error: 'b2_check_failed', detail: why(err) });
 }
 
 export function storageRouter(ctx: Ctx): Router {
@@ -81,9 +92,9 @@ export function storageRouter(ctx: Ctx): Router {
       if (!appKey) throw new HttpError(400, 'b2_app_key');
       const next: B2Settings = { endpoint, bucket: input.bucket, keyId: input.keyId, appKey };
       try {
-        await probe(openB2(ctx, next));
+        await checkBucket(openB2(ctx, next), f.installId);
       } catch (err) {
-        res.status(400).json({ error: 'b2_check_failed', detail: why(err) });
+        refuse(res, err);
         return;
       }
       await ctx.db.update(schema.firm).set({
@@ -132,11 +143,11 @@ export function storageRouter(ctx: Ctx): Router {
     h(async (_req, res) => {
       const [f] = await ctx.db.select().from(schema.firm);
       const s = f ? b2Settings(ctx, f) : null;
-      if (!s) throw new HttpError(400, 'b2_not_set_up');
+      if (!f || !s) throw new HttpError(400, 'b2_not_set_up');
       try {
-        await probe(openB2(ctx, s));
+        await checkBucket(openB2(ctx, s), f.installId);
       } catch (err) {
-        res.status(400).json({ error: 'b2_check_failed', detail: why(err) });
+        refuse(res, err);
         return;
       }
       res.json({ ok: true });
@@ -158,13 +169,13 @@ export function storageRouter(ctx: Ctx): Router {
       }
       // Already there, and nothing left in the other place.
       if (f.storage === to && !f.storageOther) throw new HttpError(409, 'already_there');
-      const s = b2Settings(ctx, f);
-      if (!s) throw new HttpError(400, 'b2_not_set_up');
-      // The bucket must work before a single file is pointed at it (or read back from it).
+      if (!b2Settings(ctx, f)) throw new HttpError(400, 'b2_not_set_up');
+      // The bucket must work before a single file is pointed at it (or read back from it), and
+      // the appliance must have room for the files a move back brings.
       try {
-        await probe(openB2(ctx, s));
+        await checkMove(ctx, f, to);
       } catch (err) {
-        res.status(400).json({ error: 'b2_check_failed', detail: why(err) });
+        refuse(res, err);
         return;
       }
       const who = actor(req);

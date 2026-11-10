@@ -13,14 +13,16 @@ import { Readable } from 'node:stream';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  GetObjectLockConfigurationCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
   ListObjectVersionsCommand,
+  PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 
-import { checkKey, NotFound, type ObjectStore } from './objects';
+import { checkKey, checkNote, NotFound, type Bucket, type Listed } from './objects';
 
 export interface B2Settings {
   /** The bucket's S3 endpoint, as B2 shows it: s3.<region>.backblazeb2.com */
@@ -34,6 +36,8 @@ const ENDPOINT = /^(?:https:\/\/)?(s3\.([a-z0-9-]+)\.backblazeb2\.com)\/?$/;
 /** B2 bucket names: 6 to 63 letters, digits and hyphens. */
 const BUCKET = /^[A-Za-z0-9-]{6,63}$/;
 const PREFIX = 'blobs/';
+/** The portal's own notes (its mark on the bucket, database snapshots), apart from files. */
+const NOTES = 'portal/';
 
 /** The endpoint's host and region, or null unless it is a Backblaze S3 endpoint. */
 export function parseEndpoint(endpoint: string): { host: string; region: string } | null {
@@ -45,12 +49,22 @@ export function validBucket(bucket: string): boolean {
   return BUCKET.test(bucket);
 }
 
-function missing(err: unknown): boolean {
-  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
-  return e?.name === 'NoSuchKey' || e?.name === 'NotFound' || e?.$metadata?.httpStatusCode === 404;
+function status(err: unknown): number | undefined {
+  return (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
 }
 
-export class B2Objects implements ObjectStore {
+function missing(err: unknown): boolean {
+  const e = err as { name?: string };
+  return e?.name === 'NoSuchKey' || e?.name === 'NotFound' || status(err) === 404;
+}
+
+async function drain(body: Readable): Promise<Buffer> {
+  const parts: Buffer[] = [];
+  for await (const c of body) parts.push(c as Buffer);
+  return Buffer.concat(parts);
+}
+
+export class B2Objects implements Bucket {
   readonly kind = 'b2' as const;
   private readonly s3: S3Client;
   private readonly bucket: string;
@@ -66,6 +80,11 @@ export class B2Objects implements ObjectStore {
       credentials: { accessKeyId: s.keyId, secretAccessKey: s.appKey },
       forcePathStyle: true,
       maxAttempts: 5,
+      // A B2 that stops answering must not hang a download or a move for good: give up on a
+      // connection after 10 s, and on a socket with nothing moving for 60 s (an idle limit, not
+      // a cap on the whole transfer, so a large file on a slow line still gets through). With
+      // five attempts the longest wait is about five minutes.
+      requestHandler: { connectionTimeout: 10_000, socketTimeout: 60_000 },
     });
   }
 
@@ -103,7 +122,10 @@ export class B2Objects implements ObjectStore {
   }
 
   async remove(key: string): Promise<void> {
-    const name = this.name(key);
+    await this.removeAll(this.name(key));
+  }
+
+  private async removeAll(name: string): Promise<void> {
     // Every version and delete marker of this one file (the prefix also matches longer names).
     let keyMarker: string | undefined;
     let versionMarker: string | undefined;
@@ -138,17 +160,69 @@ export class B2Objects implements ObjectStore {
     }
   }
 
-  async *list(): AsyncIterable<string> {
+  private async *listed(prefix: string): AsyncIterable<Listed> {
     let token: string | undefined;
     do {
       const page = await this.s3.send(
-        new ListObjectsV2Command({ Bucket: this.bucket, Prefix: PREFIX, ContinuationToken: token }),
+        new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, ContinuationToken: token }),
       );
       for (const o of page.Contents ?? []) {
-        const k = o.Key?.slice(PREFIX.length);
-        if (k && /^[0-9a-f-]{36}$/.test(k)) yield k;
+        if (!o.Key?.startsWith(prefix)) continue;
+        yield {
+          key: o.Key.slice(prefix.length),
+          size: o.Size ?? 0,
+          modified: o.LastModified ?? new Date(0),
+        };
       }
       token = page.IsTruncated ? page.NextContinuationToken : undefined;
     } while (token);
+  }
+
+  async *list(): AsyncIterable<Listed> {
+    for await (const o of this.listed(PREFIX)) if (/^[0-9a-f-]{36}$/.test(o.key)) yield o;
+  }
+
+  async objectLock(): Promise<boolean | null> {
+    try {
+      const out = await this.s3.send(
+        new GetObjectLockConfigurationCommand({ Bucket: this.bucket }),
+      );
+      return out.ObjectLockConfiguration?.ObjectLockEnabled === 'Enabled';
+    } catch (err) {
+      const name = (err as { name?: string })?.name ?? '';
+      if (name === 'ObjectLockConfigurationNotFoundError' || status(err) === 404) return false;
+      // A key limited to the bucket may not be allowed to ask: unknown, not a refusal. The
+      // check's own delete still finds a retention rule that would stop removes.
+      if (status(err) === 403 || name === 'AccessDenied') return null;
+      throw err;
+    }
+  }
+
+  async putNote(name: string, body: Buffer): Promise<void> {
+    await this.s3.send(
+      new PutObjectCommand({ Bucket: this.bucket, Key: `${NOTES}${checkNote(name)}`, Body: body }),
+    );
+  }
+
+  async getNote(name: string): Promise<Buffer | null> {
+    try {
+      const out = await this.s3.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: `${NOTES}${checkNote(name)}` }),
+      );
+      return await drain(out.Body as Readable);
+    } catch (err) {
+      if (missing(err)) return null;
+      throw err;
+    }
+  }
+
+  async *notes(prefix: string): AsyncIterable<{ name: string; size: number; modified: Date }> {
+    for await (const o of this.listed(`${NOTES}${prefix}`)) {
+      yield { name: `${prefix}${o.key}`, size: o.size, modified: o.modified };
+    }
+  }
+
+  async removeNote(name: string): Promise<void> {
+    await this.removeAll(`${NOTES}${checkNote(name)}`);
   }
 }

@@ -172,24 +172,31 @@ whether it was opened and how often. **Revoke** ends a link at once, even while 
 Shared files and client uploads are kept on the appliance unless you move them to a B2 bucket.
 They are encrypted on the appliance first, so B2 only ever holds files it cannot read.
 
-1. In Backblaze, make a **private bucket for the portal alone**, and an **application key** limited
-   to that bucket that may read, write, list and delete files.
+1. In Backblaze, make a **private bucket for the portal alone**, without Object Lock, and an
+   **application key** limited to that bucket that may read, write, list and delete files.
 2. On the staff page, **Settings > Storage**: enter the bucket's **Endpoint** (on the bucket's
    page, like `s3.us-west-004.backblazeb2.com`), the **Bucket name**, the **Key ID** and the
    **Application key**, and press **Check and save**. The portal writes, reads and deletes a small
-   test file first. The application key is not shown again.
+   test file first, and refuses a bucket with Object Lock (files removed from the portal could not
+   be deleted from it). The application key is not shown again. The portal leaves its mark in the
+   bucket, and another portal is refused the same bucket.
 3. Press **Move files to B2**. The portal keeps working while it runs; the page shows how far it
-   is. Files are deleted from the appliance only once every one is in the bucket. If the move stops
-   (the connection, a restart), nothing is lost: each file is in the bucket or still on the
-   appliance, and opens from there while the appliance can reach the bucket. Press it again to
-   finish.
+   is. Files are deleted from the appliance only once every one is in the bucket. If the move stops,
+   nothing is lost: each file is in the bucket or still on the appliance, and opens from there
+   while the appliance can reach the bucket. A move cut off by a restart starts again by itself
+   when the portal is back (up to three times); one stopped by the connection waits for you to
+   press it again.
 
-**Move files back to the appliance** does the reverse; check the appliance has room first. While
+**Move files back to the appliance** does the reverse. It does not start unless the appliance has
+room for every file with a margin. While
 files are in the bucket it cannot be changed or removed; a new application key for it can be
 saved at any time. The portal also has a `storage-move` command (`status`, `b2`, `local`) for the
 appliance; it is not yet offered as `vibe portal storage-move` by the installer.
 
-A file removed from the portal is deleted from the bucket with all its versions.
+A file removed from the portal is deleted from the bucket with all its versions. If the bucket
+cannot be reached at that moment, a daily check deletes it later. That check deletes nothing when
+it finds more than a tenth of the stored files named by no file or upload: the database is then
+older than the files (an old backup restored), and Settings > Storage says so.
 
 ## Backups
 

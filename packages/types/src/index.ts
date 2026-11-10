@@ -62,5 +62,7 @@ export const EVENT_KINDS = [
   'storage_b2_removed',
   'storage_move',
   'storage_moved',
+  'storage_swept',
+  'storage_sweep_refused',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];

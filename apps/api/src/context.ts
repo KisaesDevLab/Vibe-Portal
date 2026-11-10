@@ -10,7 +10,7 @@ import type { CookieOptions } from './auth/sessions';
 import type { B2Settings } from './files/b2';
 import type { BlobStore } from './files/blobs';
 import type { Keyring } from './files/keyring';
-import type { ObjectStore } from './files/objects';
+import type { Bucket } from './files/objects';
 import type { Message, Notifier } from './lib/notify';
 
 /** The largest file a client may send or Vibe Files may share: under Cloudflare's 100 MB
@@ -33,7 +33,7 @@ export interface Ctx {
   /** Encrypted file storage, on the data volume or in B2 (P51). */
   blobs: BlobStore;
   /** Opens a B2 bucket (P51); tests put a bucket kept in memory in its place. */
-  openB2?: (s: B2Settings) => ObjectStore;
+  openB2?: (s: B2Settings) => Bucket;
   /** No text messages are set up (SMS_PROVIDER=none): nobody is offered signing in by text
    *  with a number added later (P50). Unset means texts can be sent. */
   textsOff?: boolean;

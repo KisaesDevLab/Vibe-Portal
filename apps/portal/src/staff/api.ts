@@ -98,6 +98,10 @@ export function staffSay(err: unknown): string {
     move_running: 'A move is already under way.',
     already_there: 'The files are already there.',
   };
+  // The portal's own reason (Object Lock, another portal's bucket, no room), in full.
+  if ((code === 'b2_refused' || code === 'no_room') && err instanceof StaffApiError && err.detail) {
+    return err.detail;
+  }
   if (code === 'b2_check_failed') {
     const why = err instanceof StaffApiError && err.detail ? ` B2 said: ${err.detail}` : '';
     return `The bucket could not be used with that key.${why}`;

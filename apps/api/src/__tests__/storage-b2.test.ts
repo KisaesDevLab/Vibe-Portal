@@ -18,7 +18,7 @@ import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MemoryObjects, NotFound } from '../files/objects';
-import { noteInterrupted, runMove } from '../files/storage';
+import { resumeInterrupted, runMove, sweep } from '../files/storage';
 import { createFirmKey } from '../firm/keys';
 import { createSetupLink } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
@@ -153,9 +153,12 @@ describe('Settings > Storage (P51)', () => {
         hasKey: true,
       },
       move: null,
+      note: null,
     });
-    // The check left nothing behind in the bucket.
+    // The check left no file behind in the bucket, only this portal's mark.
     expect(bucket.items.size).toBe(0);
+    const [me] = await w.t.db.select().from(schema.firm);
+    expect(bucket.noteItems.get('install-id')?.body.toString()).toBe(me?.installId);
     await boss.post('/api/staff/v1/settings/storage/test').expect(200);
 
     // The key: wrapped in the database, nowhere in a reply or the history.
@@ -370,7 +373,7 @@ describe('moving stored files (P51)', () => {
     }
   });
 
-  it('the appliance command asks; the server moves; a restart mid-move says so', async () => {
+  it('the appliance command asks; the server moves; a restart mid-move starts it again', async () => {
     const boss = await admin();
     await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
     await shared('a.pdf', Buffer.from('%PDF a'));
@@ -385,12 +388,29 @@ describe('moving stored files (P51)', () => {
       'appliance',
     ]);
 
+    // Cut off by a restart: it starts again by itself, and finishes.
     await w.t.db.update(schema.firm).set({
       storageMove: { to: 'local', state: 'running', by: 'kurt', requestedAt: 'x' },
+      storageOther: true,
     });
-    await noteInterrupted(w.ctx);
-    const after = await boss.get('/api/staff/v1/settings/storage').expect(200);
-    expect(after.body.move.state).toBe('interrupted');
+    await resumeInterrupted(w.ctx);
+    let after = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect([after.body.move.state, after.body.move.attempts]).toEqual(['requested', 1]);
+    await runMove(w.ctx);
+    after = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect([after.body.storage, after.body.bothInUse, after.body.move.state]).toEqual([
+      'local',
+      false,
+      'done',
+    ]);
+
+    // Cut off three times over: it waits for someone to move again.
+    await w.t.db.update(schema.firm).set({
+      storageMove: { to: 'b2', state: 'running', by: 'kurt', requestedAt: 'x', attempts: 3 },
+    });
+    await resumeInterrupted(w.ctx);
+    after = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect([after.body.move.state, after.body.move.attempts]).toEqual(['interrupted', 4]);
   });
 
   it('a bucket that stops working is found out before any file is pointed at it', async () => {
@@ -402,5 +422,116 @@ describe('moving stored files (P51)', () => {
     expect(res.body).toEqual({ error: 'b2_check_failed', detail: 'network down' });
     const s = await boss.get('/api/staff/v1/settings/storage').expect(200);
     expect([s.body.storage, s.body.bothInUse, s.body.move]).toEqual(['local', false, null]);
+  });
+});
+
+describe('looking after the bucket (P51 follow-ups)', () => {
+  it('refuses a bucket with Object Lock, or one marked by another portal', async () => {
+    const boss = await admin();
+    bucket.locked = true;
+    const locked = await boss.put('/api/staff/v1/settings/storage/b2').send(B2);
+    expect(locked.status).toBe(400);
+    expect(locked.body.error).toBe('b2_refused');
+    expect(locked.body.detail).toContain('Object Lock is on');
+    // A key that may not ask about Object Lock is not refused for that.
+    bucket.locked = null;
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+
+    // Another installation (a new portal, an empty database) is refused the same bucket.
+    bucket.noteItems.set('install-id', { body: Buffer.from(randomUUID()), modified: new Date() });
+    const theirs = await boss.post('/api/staff/v1/settings/storage/move').send({ to: 'b2' });
+    expect(theirs.status).toBe(400);
+    expect(theirs.body.error).toBe('b2_refused');
+    expect(theirs.body.detail).toContain("another portal's files");
+    expect(bucket.items.size).toBe(0);
+  });
+
+  it('a move back waits for room on the appliance', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    await shared('a.pdf', Buffer.from('%PDF a'));
+    await move(boss, 'b2');
+    w.ctx.blobs.local.freeBytes = async () => 100 * 1024 * 1024;
+    const res = await boss.post('/api/staff/v1/settings/storage/move').send({ to: 'local' });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('no_room');
+    expect(res.body.detail).toContain('Free some space first');
+    // The appliance command skips the page: the server checks too, and keeps every file.
+    await w.t.db.update(schema.firm).set({
+      storageMove: { to: 'local', state: 'requested', by: 'appliance', requestedAt: 'x' },
+    });
+    await runMove(w.ctx);
+    const s = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect([s.body.storage, s.body.bothInUse, s.body.move.state]).toEqual(['b2', false, 'failed']);
+    expect(bucket.items.size).toBe(1);
+  });
+
+  it('sweeps up stored files whose delete failed, and nothing else', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    const a = await shared('a.pdf', Buffer.from('%PDF a'));
+    await move(boss, 'b2');
+    // Written by an earlier run, whose delete failed (B2 down): no row names it any more.
+    const left = randomUUID();
+    bucket.items.set(left, Buffer.from('a removed file'));
+    const rowB = { blobKey: left };
+    const fresh = randomUUID();
+    bucket.items.set(fresh, Buffer.from('written moments ago'));
+    // The portal's clock in these tests is fixed: date the stored files by it.
+    const now = w.ctx.now().getTime();
+    for (const k of bucket.items.keys()) bucket.modified.set(k, new Date(now - 3_600_000));
+    bucket.modified.set(fresh, new Date(now));
+
+    // Less than a day old: kept.
+    await sweep(w.ctx, true);
+    expect(bucket.items.has(rowB?.blobKey as string)).toBe(true);
+    // A day on: the leftover goes; the file in use and the new one stay.
+    const old = new Date(now - 25 * 3_600_000);
+    for (const k of bucket.items.keys()) if (k !== fresh) bucket.modified.set(k, old);
+    await sweep(w.ctx, true);
+    expect(bucket.items.has(rowB?.blobKey as string)).toBe(false);
+    expect(bucket.items.has(fresh)).toBe(true);
+    expect(await readFile(a)).toBe('%PDF a');
+    const kinds = (await w.t.db.select().from(schema.events)).map((e) => e.kind);
+    expect(kinds).toContain('storage_swept');
+  });
+
+  it('a bucket full of files the database does not know is never swept', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    await move(boss, 'b2');
+    const old = new Date(w.ctx.now().getTime() - 30 * 3_600_000);
+    for (let i = 0; i < 30; i++) {
+      const k = randomUUID();
+      bucket.items.set(k, Buffer.from(`file ${i}`));
+      bucket.modified.set(k, old);
+    }
+    // Same portal, but a database that does not match (an old backup restored): none removed.
+    await sweep(w.ctx, true);
+    expect(bucket.items.size).toBe(30);
+    let s = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect(s.body.note.refused).toEqual(expect.objectContaining({ count: 30, total: 30 }));
+
+    // Another portal's bucket (a new install with an empty database): not even looked at.
+    bucket.noteItems.set('install-id', { body: Buffer.from(randomUUID()), modified: new Date() });
+    await sweep(w.ctx, true);
+    expect(bucket.items.size).toBe(30);
+    s = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect(s.body.note.otherBucket).toBe(true);
+  });
+
+  it('tells Vibe Files where the files are', async () => {
+    const boss = await admin();
+    let st = await w.firm('get', '/status').expect(200);
+    expect([st.body.storage, st.body.storageMoving]).toEqual(['local', false]);
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    await w.t.db.update(schema.firm).set({
+      storageMove: { to: 'b2', state: 'requested', by: 'kurt', requestedAt: 'x' },
+    });
+    st = await w.firm('get', '/status').expect(200);
+    expect([st.body.storage, st.body.storageMoving]).toEqual(['local', true]);
+    await runMove(w.ctx);
+    st = await w.firm('get', '/status').expect(200);
+    expect([st.body.storage, st.body.storageMoving]).toEqual(['b2', false]);
   });
 });

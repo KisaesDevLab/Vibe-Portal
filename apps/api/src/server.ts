@@ -17,7 +17,7 @@ import { openKeyring } from './files/keyring';
 import { flush } from './files/notify-queue';
 import { purgeUploads } from './firm/uploads';
 import { purgeMarks } from './files/marks';
-import { applyStorage, noteInterrupted, runMove } from './files/storage';
+import { applyStorage, resumeInterrupted, runMove, sweep } from './files/storage';
 import { purgeStale } from './lib/housekeeping';
 import { consoleNotifier, type Notifier } from './lib/notify';
 import {
@@ -112,12 +112,14 @@ async function main(): Promise<void> {
     textsOff: config.SMS_PROVIDER === 'none',
   };
   // P51: stored files on the data volume or in B2, as Settings > Storage says. A move the last
-  // run did not finish is marked interrupted; one the appliance command asked for starts.
-  await noteInterrupted(ctx);
+  // run did not finish starts again; one the appliance command asked for starts.
+  await resumeInterrupted(ctx);
   await applyStorage(ctx);
-  setInterval(() => {
+  const moveNow = (): void => {
     runMove(ctx).catch((err: unknown) => log.error({ err }, 'storage move failed'));
-  }, 30_000).unref();
+  };
+  moveNow();
+  setInterval(moveNow, 30_000).unref();
   const app = createApp({
     pingDb: ping,
     ctx,
@@ -135,6 +137,8 @@ async function main(): Promise<void> {
     );
     // P49: watermarked copies of a day gone by, an ended link, or a changed file.
     purgeMarks(ctx).catch((err: unknown) => log.error({ err }, 'mark purge failed'));
+    // P51: once a day, stored files whose delete failed (D9).
+    sweep(ctx).catch((err: unknown) => log.error({ err }, 'stored file sweep failed'));
   }, 3_600_000).unref();
   if (config.EMAIL_PROVIDER === 'smtp') {
     // Said at startup, not discovered when a client cannot sign in (QA 2026-11-09).

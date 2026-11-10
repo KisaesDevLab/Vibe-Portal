@@ -1237,6 +1237,12 @@ interface StorageData {
     copied?: number;
     total?: number;
     error?: string;
+    attempts?: number;
+  } | null;
+  note: {
+    sweptAt?: string;
+    refused?: { at: string; count: number; total: number } | null;
+    otherBucket?: boolean;
   } | null;
 }
 
@@ -1283,7 +1289,8 @@ function Storage(): JSX.Element {
           </p>
           {d.move && (
             <p role="status" style={{ margin: 0 }}>
-              {d.move.state === 'requested' && `Moving ${PLACE[d.move.to]}: starting…`}
+              {d.move.state === 'requested' &&
+                `Moving ${PLACE[d.move.to]}: ${d.move.attempts ? 'starting again after a restart' : 'starting'}…`}
               {d.move.state === 'running' &&
                 `Moving ${PLACE[d.move.to]}: ${d.move.copied ?? 0} of ${d.move.total ?? '…'} files checked.`}
               {d.move.state === 'done' &&
@@ -1291,7 +1298,21 @@ function Storage(): JSX.Element {
               {d.move.state === 'failed' &&
                 `The move ${PLACE[d.move.to]} stopped: ${d.move.error ?? 'unknown'}. Nothing is lost; move again to finish.`}
               {d.move.state === 'interrupted' &&
-                `The move ${PLACE[d.move.to]} was cut off by a restart. Nothing is lost; move again to finish.`}
+                `The move ${PLACE[d.move.to]} was cut off by restarts ${d.move.attempts ?? 1} times, so it no longer starts again by itself. Nothing is lost; move again to finish.`}
+            </p>
+          )}
+          {d.note?.refused && (
+            <p role="alert" style={{ margin: 0 }}>
+              The daily check found {d.note.refused.count} of {d.note.refused.total} stored files
+              named by no file or upload, too many to be leftovers, so none was deleted. This
+              happens when the database is older than the files (a backup restored): ask for help
+              before moving files.
+            </p>
+          )}
+          {d.note?.otherBucket && (
+            <p role="alert" style={{ margin: 0 }}>
+              The bucket carries another portal&rsquo;s mark, so the daily check for leftover files
+              does not run on it.
             </p>
           )}
           <form

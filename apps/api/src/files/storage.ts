@@ -9,8 +9,14 @@
 //   4. Only then are the old copies deleted.
 //
 // A move that fails part-way leaves both places in use (nothing is lost, every file still
-// opens); moving again picks up where it stopped. A restart during a move marks it interrupted.
-// The appliance command (`storage-move`) asks the server to move; it does not move files itself.
+// opens); moving again picks up where it stopped. A restart during a move starts it again by
+// itself, up to three times. The appliance command (`storage-move`) asks the server to move; it
+// does not move files itself.
+//
+// The bucket carries this installation's mark (portal/install-id): a bucket marked by another
+// is refused, and the daily sweep for leftover stored files (a file whose row went but whose
+// delete failed, D9) runs only where the mark is this portal's own. A new portal with an empty
+// database pointed at a full bucket must never take every file in it for a leftover.
 
 import { createHash, randomUUID } from 'node:crypto';
 import { pipeline as pipe, Readable, Transform } from 'node:stream';
@@ -21,10 +27,11 @@ import { schema } from '@vibe-portal/db';
 import type { Ctx } from '../context';
 import { record } from '../lib/events';
 import { B2Objects, type B2Settings } from './b2';
-import { NotFound, type ObjectStore } from './objects';
+import { NotFound, type Bucket, type ObjectStore } from './objects';
 
 type FirmRow = typeof schema.firm.$inferSelect;
 type StorageMove = schema.StorageMove;
+type StorageNote = schema.StorageNote;
 export type Place = 'local' | 'b2';
 
 const other = (p: Place): Place => (p === 'b2' ? 'local' : 'b2');
@@ -42,8 +49,62 @@ export function b2Settings(ctx: Ctx, f: FirmRow): B2Settings | null {
   return { endpoint: f.b2Endpoint, bucket: f.b2Bucket, keyId: f.b2KeyId, appKey };
 }
 
-export function openB2(ctx: Ctx, s: B2Settings): ObjectStore {
+export function openB2(ctx: Ctx, s: B2Settings): Bucket {
   return ctx.openB2 ? ctx.openB2(s) : new B2Objects(s);
+}
+
+/** The bucket names the installation that uses it. */
+const MARK = 'install-id';
+
+/** Refused before any file is pointed at it; the message is shown on Settings as B2's answer. */
+export class BucketRefused extends Error {}
+
+/** The data volume has too little room for the files a move back would bring. */
+export class NoRoom extends Error {}
+
+/** Probe, Object Lock, and this installation's mark (written when the bucket has none). */
+export async function checkBucket(bucket: Bucket, installId: string): Promise<void> {
+  await probe(bucket);
+  if ((await bucket.objectLock()) === true) {
+    throw new BucketRefused(
+      'Object Lock is on for this bucket, so files removed from the portal could not be ' +
+        'deleted from it. Use a bucket without Object Lock.',
+    );
+  }
+  const mark = (await bucket.getNote(MARK))?.toString('utf8').trim();
+  if (mark && mark !== installId) {
+    throw new BucketRefused(
+      "This bucket holds another portal's files. Use a new, empty bucket for this portal.",
+    );
+  }
+  if (!mark) await bucket.putNote(MARK, Buffer.from(installId, 'utf8'));
+}
+
+const GB = 1024 ** 3;
+const gb = (n: number): string => `${(n / GB).toFixed(1)} GB`;
+
+/** Room on the data volume for every file in `src` not already there, with a margin. */
+async function checkRoom(ctx: Ctx, src: ObjectStore): Promise<void> {
+  let need = 0;
+  for await (const o of src.list()) {
+    if (!(await ctx.blobs.local.exists(o.key))) need += o.size;
+  }
+  const free = await ctx.blobs.local.freeBytes();
+  const want = need * 1.1 + 0.5 * GB;
+  if (free < want) {
+    throw new NoRoom(
+      `The appliance has ${gb(free)} free; the files need about ${gb(want)}. Free some space first.`,
+    );
+  }
+}
+
+/** Checks a move can start: the bucket, and room on the appliance for a move back. */
+export async function checkMove(ctx: Ctx, f: FirmRow, to: Place): Promise<void> {
+  const s = b2Settings(ctx, f);
+  if (!s) throw new Error('B2 is not set up');
+  const bucket = openB2(ctx, s);
+  await checkBucket(bucket, f.installId);
+  if (to === 'local') await checkRoom(ctx, bucket);
 }
 
 function storeFor(ctx: Ctx, f: FirmRow, place: Place): ObjectStore {
@@ -74,7 +135,15 @@ export async function probe(store: ObjectStore): Promise<void> {
   await store.put(key, Readable.from([data]));
   const back: Buffer[] = [];
   for await (const c of store.get(key)) back.push(c as Buffer);
-  await store.remove(key);
+  try {
+    await store.remove(key);
+  } catch (err) {
+    throw new BucketRefused(
+      `The test file could not be deleted (${err instanceof Error ? err.message : String(err)}). ` +
+        'The key must be allowed to delete files, and the bucket must have no Object Lock or ' +
+        'retention rule.',
+    );
+  }
   if (!Buffer.concat(back).equals(data)) throw new Error('the file read back was different');
   if (await store.exists(key)) throw new Error('a deleted file was still there');
 }
@@ -123,6 +192,7 @@ async function copyOne(from: ObjectStore, to: ObjectStore, key: string): Promise
   }
 }
 
+/** A move or a sweep is running: one at a time. */
 let moving = false;
 
 async function saveMove(ctx: Ctx, m: StorageMove): Promise<void> {
@@ -150,9 +220,9 @@ async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void>
   try {
     const dst = storeFor(ctx, start, to);
     const src = storeFor(ctx, start, from);
-    // The bucket must work before a single new file is sent to it (the appliance command asks
-    // without checking; Settings checks too).
-    await probe(dst.kind === 'b2' ? dst : src);
+    // The bucket must work before a single new file is sent to it, and a move back needs room
+    // (the appliance command and a restart ask without checking; Settings checks too).
+    await checkMove(ctx, start, to);
     // 1. New files go to the new place from now on; reads fall back to the old one.
     await ctx.db.update(schema.firm).set({ storage: to, storageOther: true, storageMove: m });
     ctx.blobs.use(dst, src);
@@ -163,7 +233,7 @@ async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void>
 
     // 2. Copy what is still in use.
     const keys: string[] = [];
-    for await (const k of src.list()) keys.push(k);
+    for await (const o of src.list()) keys.push(o.key);
     m.total = keys.length;
     m.copied = 0;
     await saveMove(ctx, m);
@@ -193,7 +263,7 @@ async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void>
     // 4. Only now are the old copies deleted: those that are in the new place, and those no
     // longer in use. One in use and not in the new place stops the move (both stay in use).
     let left = 0;
-    for await (const k of src.list()) {
+    for await (const { key: k } of src.list()) {
       if ((await dst.exists(k)) || !(await needed(k))) await src.remove(k);
       else left += 1;
     }
@@ -228,11 +298,106 @@ async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void>
   }
 }
 
-/** At startup: a move the last run did not finish is marked interrupted (move again to finish). */
-export async function noteInterrupted(ctx: Ctx): Promise<void> {
+/** How many times a move cut off by a restart starts again by itself. */
+const RESUMES = 3;
+
+/** At startup: a move the last run did not finish starts again by itself (owner 2026-11-10), up
+ *  to three times; one that keeps being cut off (the move itself may be what stops the portal)
+ *  is marked interrupted and waits for someone to move again. */
+export async function resumeInterrupted(ctx: Ctx): Promise<void> {
   const f = await firmRow(ctx);
-  if (f.storageMove?.state === 'running') {
-    await saveMove(ctx, { ...f.storageMove, state: 'interrupted' });
+  const m = f.storageMove;
+  if (m?.state !== 'running') return;
+  const attempts = (m.attempts ?? 0) + 1;
+  const again = attempts <= RESUMES;
+  await saveMove(ctx, { ...m, state: again ? 'requested' : 'interrupted', attempts });
+  ctx.log.warn({ to: m.to, attempts, again }, 'stored files: a move was cut off by a restart');
+}
+
+/** Stored files older than this, named nowhere, are leftovers. A day, not minutes: the clock
+ *  of B2 and of the appliance differ, and what the server remembers is gone after a restart. */
+const LEFTOVER_AGE_MS = 24 * 3_600_000;
+const SWEEP_EVERY_MS = 23 * 3_600_000;
+
+async function saveNote(ctx: Ctx, n: StorageNote): Promise<void> {
+  await ctx.db.update(schema.firm).set({ storageNote: n });
+}
+
+/**
+ * Once a day: removes stored files that no file, upload or marked copy names any more (their
+ * row went but the delete failed: B2 down at that moment). Not while a move is under way; in a
+ * bucket only when it carries this installation's mark; and never more than a tenth of the
+ * files at once: more than that is not leftovers but a database that does not match (an old
+ * backup restored), so nothing is removed and Settings says so.
+ */
+export async function sweep(ctx: Ctx, force = false): Promise<void> {
+  if (moving) return;
+  moving = true;
+  try {
+    const f = await firmRow(ctx);
+    const state = f.storageMove?.state;
+    if (f.storageOther || state === 'requested' || state === 'running') return;
+    const now = ctx.now();
+    const note: StorageNote = { ...(f.storageNote ?? {}) };
+    if (!force && note.sweptAt && now.getTime() - Date.parse(note.sweptAt) < SWEEP_EVERY_MS) {
+      return;
+    }
+    note.sweptAt = now.toISOString();
+    const store = ctx.blobs.where.primary;
+    if (store.kind === 'b2') {
+      const mark = (await (store as Bucket).getNote(MARK))?.toString('utf8').trim();
+      if (mark !== f.installId) {
+        note.otherBucket = true;
+        await saveNote(ctx, note);
+        ctx.log.warn('stored files: the bucket does not carry this portal mark; no sweep');
+        return;
+      }
+    }
+    note.otherBucket = false;
+    const cutoff = now.getTime() - LEFTOVER_AGE_MS;
+    let total = 0;
+    const leftovers: string[] = [];
+    for await (const o of store.list()) {
+      total += 1;
+      if (o.modified.getTime() >= cutoff || ctx.blobs.isRecent(o.key)) continue;
+      if (!(await inUse(ctx, o.key))) leftovers.push(o.key);
+    }
+    if (leftovers.length > Math.max(20, Math.floor(total / 10))) {
+      note.refused = { at: note.sweptAt, count: leftovers.length, total };
+      await saveNote(ctx, note);
+      ctx.log.error(
+        { count: leftovers.length, total },
+        'stored files: too many named nowhere to be leftovers; none removed',
+      );
+      await record(
+        ctx.db,
+        'storage_sweep_refused',
+        { kind: 'system', name: 'portal' },
+        { detail: { count: leftovers.length, total } },
+      );
+      return;
+    }
+    let removed = 0;
+    for (const k of leftovers) {
+      // Asked again just before: named since the list was made, it stays.
+      if (await inUse(ctx, k)) continue;
+      await store.remove(k);
+      removed += 1;
+    }
+    note.removed = removed;
+    note.refused = null;
+    await saveNote(ctx, note);
+    if (removed > 0) {
+      ctx.log.info({ removed }, 'stored files: leftovers removed');
+      await record(
+        ctx.db,
+        'storage_swept',
+        { kind: 'system', name: 'portal' },
+        { detail: { removed, place: store.kind } },
+      );
+    }
+  } finally {
+    moving = false;
   }
 }
 
@@ -253,5 +418,18 @@ export async function storageState(ctx: Ctx) {
       hasKey: f.b2AppKeyEnc !== null,
     },
     move: f.storageMove,
+    note: f.storageNote,
+  };
+}
+
+/** For Vibe Files' Admin > Portal > Test (GET /api/firm/v1/status). */
+export async function storageSummary(
+  ctx: Ctx,
+): Promise<{ storage: Place; storageMoving: boolean }> {
+  const f = await firmRow(ctx);
+  const state = f.storageMove?.state;
+  return {
+    storage: f.storage,
+    storageMoving: f.storageOther || state === 'requested' || state === 'running',
   };
 }

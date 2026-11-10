@@ -34,6 +34,19 @@ export interface StorageMove {
   copied?: number;
   total?: number;
   error?: string;
+  /** Starts after a restart cut it off; past three it waits for someone to move again. */
+  attempts?: number;
+}
+
+/** What the daily sweep for leftover stored files found (P51). */
+export interface StorageNote {
+  sweptAt?: string;
+  /** Leftovers removed by the last sweep. */
+  removed?: number;
+  /** The last sweep found too many to be leftovers and removed none. */
+  refused?: { at: string; count: number; total: number } | null;
+  /** The bucket carries another installation's mark: no sweep runs. */
+  otherBucket?: boolean;
 }
 
 export const firm = pgTable('firm', {
@@ -57,6 +70,9 @@ export const firm = pgTable('firm', {
   /** The B2 application key, wrapped by the firm key. Never sent back to the page. */
   b2AppKeyEnc: bytea('b2_app_key_enc'),
   storageMove: jsonb('storage_move').$type<StorageMove>(),
+  /** This installation; written into the bucket it uses (P51). */
+  installId: uuid('install_id').notNull().defaultRandom(),
+  storageNote: jsonb('storage_note').$type<StorageNote>(),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });

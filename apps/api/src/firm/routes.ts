@@ -28,6 +28,7 @@ import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { randomToken, sha256 } from '../lib/secrets';
 import { inScope, mustSee, requireAllClients } from '../staff/scope';
+import { storageSummary } from '../files/storage';
 import { VERSION } from '../version';
 import { firmFilesRouter } from './files';
 import { requireFirmKey } from './keys';
@@ -133,7 +134,13 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   r.get(
     '/status',
     h(async (_req, res) => {
-      res.json({ version: VERSION, firmName: await firmName(ctx), portalUrl: ctx.portalUrl });
+      // P51: where stored files are, for Vibe Files' Admin > Portal > Test.
+      res.json({
+        version: VERSION,
+        firmName: await firmName(ctx),
+        portalUrl: ctx.portalUrl,
+        ...(await storageSummary(ctx)),
+      });
     }),
   );
 
