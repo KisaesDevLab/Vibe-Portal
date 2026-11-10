@@ -120,6 +120,23 @@ export const staffUsers = pgTable('staff_users', {
   admin: boolean('admin').notNull().default(false),
   /** False: sees only the clients in `staff_client` (P48). */
   allClients: boolean('all_clients').notNull().default(true),
+  /** Clients sending files may ask that this person be told (P56). */
+  notifyUploads: boolean('notify_uploads').notNull().default(false),
+});
+
+/** Each batch a client asked to tell a staff member about, once (P56). */
+export const uploadNotice = pgTable('upload_notice', {
+  batchId: uuid('batch_id').primaryKey(),
+  identityId: uuid('identity_id')
+    .notNull()
+    .references(() => portalIdentity.id),
+  clientId: uuid('client_id')
+    .notNull()
+    .references(() => clients.id),
+  staffId: uuid('staff_id')
+    .notNull()
+    .references(() => staffUsers.id),
+  sentAt: ts('sent_at').notNull().defaultNow(),
 });
 
 export const staffSetupToken = pgTable('staff_setup_token', {

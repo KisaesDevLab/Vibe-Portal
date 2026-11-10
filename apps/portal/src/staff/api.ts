@@ -132,6 +132,8 @@ export interface StaffRow {
   admin: boolean;
   /** The only clients they see; null for every client. */
   clientIds: string[] | null;
+  /** Clients sending files may ask that this person be told (P56). */
+  notifyUploads: boolean;
 }
 
 export interface ClientRow {

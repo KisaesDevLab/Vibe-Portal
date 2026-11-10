@@ -69,6 +69,19 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const input = useRef<HTMLInputElement>(null);
+  /** Staff the client may tell about what they send (P56); none: the choice is not shown. */
+  const [staff, setStaff] = useState<{ id: string; name: string }[]>([]);
+  const [tell, setTell] = useState('');
+  const [told, setTold] = useState('');
+
+  useEffect(() => {
+    setTell('');
+    api<{ staff: { id: string; name: string }[] }>(
+      `/uploads/notify-options?clientId=${encodeURIComponent(clientId)}`,
+    )
+      .then((r) => setStaff(r.staff))
+      .catch(() => setStaff([]));
+  }, [clientId]);
 
   const load = useCallback(() => {
     api<{ uploads: Upload[]; limitBytes?: number }>('/uploads')
@@ -85,6 +98,7 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
     if (chosen.length === 0 || chosen.length > BATCH_MAX) return;
     setBusy(true);
     setResults([]);
+    setTold('');
     const batchId = newBatchId();
     const done: { name: string; error?: string }[] = [];
     for (const [i, file] of chosen.entries()) {
@@ -114,6 +128,19 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
       setResults([...done]);
     }
     setProgress('');
+    // P56: tell the chosen person once, if anything arrived.
+    const who = staff.find((p) => p.id === tell);
+    if (who && done.some((d) => !d.error)) {
+      try {
+        await api('/uploads/notify', {
+          method: 'POST',
+          body: { clientId, batchId, staffId: who.id },
+        });
+        setTold(`${who.name} has been told.`);
+      } catch (err) {
+        setTold(`Your files were sent, but ${who.name} could not be told: ${say(err)}`);
+      }
+    }
     setBusy(false);
     setChosen([]);
     setNote('');
@@ -156,10 +183,24 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
             onChange={(e) => setNote(e.target.value)}
           />
         </label>
+        {staff.length > 0 && (
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span>Let someone at the firm know (optional)</span>
+            <select value={tell} onChange={(e) => setTell(e.target.value)}>
+              <option value="">No one in particular</option>
+              {staff.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <Button type="submit" disabled={busy || chosen.length === 0 || tooMany}>
           {chosen.length > 1 ? `Send ${chosen.length} files` : 'Send'}
         </Button>
         {progress && <p role="status">{progress}</p>}
+        {told && <p role="status">{told}</p>}
         {results.length > 0 && (
           <ul aria-label="Sent" style={{ margin: 0 }}>
             {results.map((r, i) => (

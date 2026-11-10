@@ -21,6 +21,7 @@ export const EVENT_KINDS = [
   'view',
   'download',
   'upload',
+  'upload_notice',
   'fetch',
   'invite',
   'invite_revoked',

@@ -61,6 +61,8 @@ const StaffChange = z
     active: z.boolean().optional(),
     admin: z.boolean().optional(),
     clientIds: ClientIds.optional(),
+    /** Clients sending files may ask that this person be told (P56). */
+    notifyUploads: z.boolean().optional(),
   })
   .refine((c) => Object.values(c).some((v) => v !== undefined), 'nothing to change');
 
@@ -221,6 +223,7 @@ export function staffSettingsRouter(ctx: Ctx): Router {
           admin: u.admin,
           // The only clients they see; null for every client.
           clientIds: u.admin || u.allClients ? null : (limits.get(u.id) ?? []),
+          notifyUploads: u.notifyUploads,
         })),
       });
     }),
@@ -316,7 +319,12 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         if (admin && limited) throw new HttpError(400, 'admin_sees_all');
         await tx
           .update(schema.staffUsers)
-          .set({ active: change.active ?? u.active, admin, allClients: !limited })
+          .set({
+            active: change.active ?? u.active,
+            admin,
+            allClients: !limited,
+            notifyUploads: change.notifyUploads ?? u.notifyUploads,
+          })
           .where(eq(schema.staffUsers.id, id));
         if (change.clientIds !== undefined) await setClients(tx, id, change.clientIds);
         else if (!limited) await setClients(tx, id, null);
@@ -330,6 +338,11 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         }
         await record(ctx.db, change.active ? 'staff_on' : 'staff_off', a, {
           detail: { staffId: id },
+        });
+      }
+      if (change.notifyUploads !== undefined && change.notifyUploads !== after.was.notifyUploads) {
+        await record(ctx.db, 'staff_access', a, {
+          detail: { staffId: id, notifyUploads: change.notifyUploads },
         });
       }
       if (change.admin !== undefined || change.clientIds !== undefined) {

@@ -1409,7 +1409,14 @@ function Settings(): JSX.Element {
           An admin uses Settings. Other staff see every client unless you limit them to some with{' '}
           <strong>Access</strong>.
         </p>
-        <Table head={['Name', 'Email', 'State', 'Sees', 'Last sign-in', 'Actions']}>
+        <p>
+          <strong>Clients may notify</strong>: a client sending files can choose to have this
+          person emailed, with the file names and their note. Clients see the names of those
+          ticked who can see their client, never their email addresses.
+        </p>
+        <Table
+          head={['Name', 'Email', 'State', 'Sees', 'Clients may notify', 'Last sign-in', 'Actions']}
+        >
           {(staff.data?.staff ?? []).map((u) => {
             const self = u.email === me.data?.email;
             // No buttons until it is known which row is yours.
@@ -1427,6 +1434,21 @@ function Settings(): JSX.Element {
                     : u.clientIds
                       ? `${u.clientIds.length} ${u.clientIds.length === 1 ? 'client' : 'clients'}`
                       : 'Every client'}
+                </td>
+                <td style={td}>
+                  {/* P56: clients sending files may ask that this person be told. */}
+                  <input
+                    type="checkbox"
+                    aria-label={`Clients may notify ${u.name}`}
+                    checked={u.notifyUploads}
+                    disabled={busy || !u.active || me.data === null}
+                    onChange={(e) =>
+                      void act(`/v1/staff/${u.id}`, {
+                        method: 'PATCH',
+                        body: { notifyUploads: e.target.checked },
+                      })
+                    }
+                  />
                 </td>
                 <td style={td}>{when(u.lastSignInAt)}</td>
                 <td style={td}>

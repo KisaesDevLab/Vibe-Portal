@@ -10,6 +10,8 @@
 //          the proxy's access log; ?name and ?note are still read)
 //   GET    /api/portal/uploads                                this person's uploads, active client
 //   DELETE /api/portal/uploads/:id
+//   GET    /api/portal/uploads/notify-options?clientId    staff the client may tell (P56)
+//   POST   /api/portal/uploads/notify   { clientId, batchId, staffId }  once, after a batch
 
 import express, { type Router } from 'express';
 import { Readable } from 'node:stream';
@@ -28,7 +30,8 @@ import { peek } from '../files/send';
 import { allowedKind, SNIFF_BYTES } from '../files/sniff';
 import { cleanName, contentTypeOf } from '../files/types';
 import { record } from '../lib/events';
-import { h, HttpError, queryWithText } from '../lib/http';
+import { listOptions, notifyBatch, NotifySchema } from './upload-notice';
+import { body, h, HttpError, queryWithText } from '../lib/http';
 import { hit, LIMITS } from '../lib/rate-limit';
 
 export const BATCH_MAX = 20;
@@ -52,6 +55,24 @@ export function clientUploadsRouter(
 ): Router {
   const r = express.Router();
   r.use(requireClient(ctx));
+
+  // P56: tell someone at the firm about a batch just sent.
+  r.get(
+    '/notify-options',
+    h(async (req, res) => {
+      const q = z.object({ clientId: z.string().uuid() }).safeParse(req.query);
+      if (!q.success) throw new HttpError(400, 'bad_query');
+      const s = req.clientSession as ClientSession;
+      res.json({ staff: await listOptions(ctx, s, q.data.clientId) });
+    }),
+  );
+  r.post(
+    '/notify',
+    h(async (req, res) => {
+      await notifyBatch(ctx, req.clientSession as ClientSession, body(NotifySchema, req));
+      res.json({ ok: true });
+    }),
+  );
 
   r.post(
     '/',
