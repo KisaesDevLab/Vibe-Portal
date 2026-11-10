@@ -10,5 +10,5 @@
 | P6 | 2026-11-09 | Encrypt files at rest on the appliance | Yes, TB's firm master key envelope | Owner 2026-11-09: as assumed |
 | P7 | 2026-11-09 | Address when TB is also installed | Own path | Owner 2026-11-09: own hostname (e.g. files.yourfirm.com) through its own Cloudflare Tunnel hostname |
 | P8 | 2026-11-09 | Are fetched client uploads kept on the portal? | Kept 30 days after fetch, then purged; the client still sees "Received by the firm" | Owner 2026-11-09: as assumed |
-| P9 | 2026-11-09 | How staff sign in to the staff page | Vibe Auth single sign-on when the appliance has it; otherwise staff accounts made in the appliance admin screen, password + authenticator code (TB's TOTP) | |
-| P10 | 2026-11-09 | Can the staff page download client uploads without them leaving the Intake queue? | Yes: downloading on the page is logged, but only Vibe Files' fetch marks an upload fetched, so it still reaches Intake | |
+| P9 | 2026-11-09 | How staff sign in to the staff page | Vibe Auth single sign-on when the appliance has it; otherwise staff accounts made in the appliance admin screen, password + authenticator code (TB's TOTP) | Owner 2026-11-09: as assumed |
+| P10 | 2026-11-09 | Can the staff page download client uploads without them leaving the Intake queue? | Yes: downloading on the page is logged, but only Vibe Files' fetch marks an upload fetched, so it still reaches Intake | Owner 2026-11-09: as assumed |
