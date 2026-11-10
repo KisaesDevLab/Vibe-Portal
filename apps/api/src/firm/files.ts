@@ -40,8 +40,13 @@ const AddQuery = z.object({
 const ReplaceQuery = z.object({ sha256: Sha, name: z.string().min(1).max(400).optional() });
 const VisibilitySchema = z.object({ users: z.record(Uuid, z.boolean()) });
 const ListQuery = z
-  .object({ clientId: Uuid.optional(), vfDocumentId: z.string().min(1).max(200).optional() })
-  .refine((q) => q.clientId || q.vfDocumentId, 'clientId or vfDocumentId');
+  .object({
+    clientId: Uuid.optional(),
+    vfDocumentId: z.string().min(1).max(200).optional(),
+    /** Every live file (Vibe Files' marks in Browse). */
+    all: z.literal('1').optional(),
+  })
+  .refine((q) => q.clientId || q.vfDocumentId || q.all, 'clientId, vfDocumentId or all=1');
 
 function actorOf(req: Request): Actor {
   return req.firmActor ?? { kind: 'firm_key', name: 'Vibe Files' };

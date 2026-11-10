@@ -459,3 +459,37 @@ describe('a failed notice is retried (QA 2026-11-09)', () => {
     expect(w.notes.sent.slice(before)).toEqual([expect.objectContaining({ to: 'a@example.test' })]);
   });
 });
+
+describe('for Vibe Files (Phase 6)', () => {
+  it('lists every live file with all=1, and needs some filter', async () => {
+    const a = await w.member('a@example.test');
+    const f1 = (await add(Buffer.from('1'), '1.pdf').expect(201)).body.fileId as string;
+    const f2 = (await add(Buffer.from('2'), '2.pdf', {}, OTHER).expect(201)).body.fileId as string;
+    await show(f1, { [a.id]: true });
+    await w.firm('delete', `/files/${f2}`).expect(200);
+    const all = await w.firm('get', '/files?all=1').expect(200);
+    expect(all.body.files.map((f: { fileId: string }) => f.fileId)).toEqual([f1]);
+    await w.firm('get', '/files').expect(400);
+  });
+
+  it('gives the history after an id, with the cabinet document of each file event', async () => {
+    const a = await w.member('a@example.test');
+    const f = (await add(Buffer.from('%PDF'), 'r.pdf', { vfDocumentId: 'doc-77' }).expect(201)).body
+      .fileId as string;
+    await show(f, { [a.id]: true });
+    await a.agent.get(`/api/portal/files/${f}/content?mode=view`).expect(200);
+    const all = await w.firm('get', '/events?since=0').expect(200);
+    const view = all.body.events.find((e: { kind: string }) => e.kind === 'view');
+    expect(view).toMatchObject({
+      fileId: f,
+      vfDocumentId: 'doc-77',
+      identityId: a.id,
+      actorKind: 'client',
+    });
+    const later = await w.firm('get', `/events?since=${view.id}`).expect(200);
+    expect(later.body.events.every((e: { id: number }) => e.id > view.id)).toBe(true);
+    const page = await w.firm('get', '/events?since=0&limit=2').expect(200);
+    expect(page.body.events).toHaveLength(2);
+    expect(page.body.events[0].id).toBeLessThan(page.body.events[1].id);
+  });
+});
