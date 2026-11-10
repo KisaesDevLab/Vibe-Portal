@@ -123,14 +123,15 @@ describe.skipIf(!process.env.LOAD)('load (Phase 7)', () => {
     expect(list.ms).toBeLessThan(5_000);
   }, 120_000);
 
-  it('a 100 MB upload streams through without holding it all in memory', async () => {
+  it('a 90 MB upload streams through without holding it all in memory', async () => {
     const m = await w.member('big@load.test');
-    const size = 100 * 1024 * 1024;
+    const size = 90 * 1024 * 1024;
     const body = Buffer.alloc(size, 7);
     body.write('%PDF-1.7\n', 0, 'latin1');
     const sha = createHash('sha256').update(body).digest('hex');
     const before = process.memoryUsage().rss;
-    const up = await timed('client upload 100 MB', () =>
+    const peak = process.resourceUsage().maxRSS * 1024;
+    const up = await timed('client upload 90 MB', () =>
       m.agent
         .post(
           `/api/portal/uploads?clientId=11111111-1111-4111-8111-111111111111&batchId=${randomUUID()}&name=big.pdf`,
@@ -140,7 +141,12 @@ describe.skipIf(!process.env.LOAD)('load (Phase 7)', () => {
     );
     expect(up.r.status, JSON.stringify(up.r.body)).toBe(201);
     console.log(`  rss grew by ${Math.round((process.memoryUsage().rss - before) / 1048576)} MB`);
-    const got = await timed('firm download 100 MB', () =>
+    // The peak resident memory may not grow by anything like the file (the test's own copy of
+    // it is already counted in `peak`).
+    const grew = process.resourceUsage().maxRSS * 1024 - peak;
+    console.log(`  peak rss grew by ${Math.round(grew / 1048576)} MB`);
+    expect(grew).toBeLessThan(size / 2);
+    const got = await timed('firm download 90 MB', () =>
       w
         .firm('get', `/uploads/${up.r.body.uploadId}/content`)
         .buffer(true)

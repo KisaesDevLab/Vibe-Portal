@@ -456,7 +456,6 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         const granted = await grantAccess(tx, {
           clientId: input.clientId,
           proved: request.confirmedContact,
-          other: null,
           name: request.name,
           roleLabel: input.roleLabel,
           by: actor.name,

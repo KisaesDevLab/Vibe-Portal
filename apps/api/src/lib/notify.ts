@@ -45,9 +45,23 @@ export function recordingNotifier(): Notifier & { sent: Message[]; last(to: stri
   };
 }
 
+const SMS_MAX = 300;
+
+/** A text of at most SMS_MAX characters. A link in it is never cut (it would not work): the
+ *  words around it are shortened instead. */
+export function shortText(body: string): string {
+  if (body.length <= SMS_MAX) return body;
+  const link = /https?:\/\/\S+/.exec(body);
+  if (!link) return `${body.slice(0, SMS_MAX - 3)}...`;
+  const url = link[0];
+  const room = Math.max(0, SMS_MAX - url.length - 4);
+  const before = body.slice(0, link.index).trimEnd();
+  return `${before.length > room ? `${before.slice(0, room)}...` : before} ${url}`;
+}
+
 /** Sends to an email address or an E.164 phone, whichever `to` is. */
 export function messageTo(to: string, subject: string, body: string): Message {
   return to.includes('@')
     ? { channel: 'email', to, subject, body }
-    : { channel: 'sms', to, body: body.length > 300 ? `${body.slice(0, 297)}...` : body };
+    : { channel: 'sms', to, body: shortText(body) };
 }

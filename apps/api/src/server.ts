@@ -16,6 +16,7 @@ import { BlobStore } from './files/blobs';
 import { openKeyring } from './files/keyring';
 import { flush } from './files/notify-queue';
 import { purgeUploads } from './firm/uploads';
+import { purgeStale } from './lib/housekeeping';
 import { consoleNotifier, type Notifier } from './lib/notify';
 import {
   checkSmtp,
@@ -119,6 +120,9 @@ async function main(): Promise<void> {
   // P8: fetched client uploads leave the portal after the keep period.
   setInterval(() => {
     purgeUploads(ctx).catch((err: unknown) => log.error({ err }, 'upload purge failed'));
+    purgeStale(ctx.db, ctx.now()).catch((err: unknown) =>
+      log.error({ err }, 'housekeeping failed'),
+    );
   }, 3_600_000).unref();
   if (config.EMAIL_PROVIDER === 'smtp') {
     // Said at startup, not discovered when a client cannot sign in (QA 2026-11-09).
@@ -128,9 +132,12 @@ async function main(): Promise<void> {
       else log.info({ host: config.SMTP_HOST }, 'SMTP check ok');
     });
   }
-  app.listen(config.PORT, () => {
+  const server = app.listen(config.PORT, () => {
     log.info({ port: config.PORT, version: VERSION }, 'vibe-portal api listening');
   });
+  // A 95 MB upload over a slow line takes longer than Node's 5-minute default; Caddy allows
+  // 15 minutes (Phase 7).
+  server.requestTimeout = 15 * 60_000;
 }
 
 main().catch((err: unknown) => {

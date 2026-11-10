@@ -290,7 +290,7 @@ describe('staff page', () => {
         body: {
           firmName: 'Example CPA',
           accentColor: '#0f6cbd',
-          uploadLimitMb: 100,
+          uploadLimitMb: 95,
           uploadKeepDays: 30,
           hasLogo: false,
           portalUrl: 'https://portal.example.test',

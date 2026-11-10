@@ -11,6 +11,10 @@ import type { BlobStore } from './files/blobs';
 import type { Keyring } from './files/keyring';
 import type { Message, Notifier } from './lib/notify';
 
+/** The largest file a client may send or Vibe Files may share: under Cloudflare's 100 MB
+ *  request limit (Free and Pro plans), which a file of 100 MiB would break. */
+export const MAX_UPLOAD_BYTES = 95 * 1024 * 1024;
+
 export interface Ctx {
   db: Database;
   notifier: Notifier;
@@ -46,5 +50,5 @@ export async function firmName(ctx: Ctx): Promise<string> {
 /** The firm's per-file size limit (P1, P23). */
 export async function uploadLimit(ctx: Ctx): Promise<number> {
   const [row] = await ctx.db.select({ limit: schema.firm.uploadLimitBytes }).from(schema.firm);
-  return row?.limit ?? 100 * 1024 * 1024;
+  return row?.limit ?? MAX_UPLOAD_BYTES;
 }

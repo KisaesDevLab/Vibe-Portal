@@ -19,7 +19,7 @@ async function main(): Promise<void> {
     if (cmd === 'create') {
       const { id, key } = await createFirmKey(db, arg || 'Firm key');
       console.warn(
-        `Key ${id} created. Paste it into Vibe Files > Setup > Portal; it is shown once:`,
+        `Key ${id} created. Paste it into Vibe Files > Admin > Portal; it is shown once:`,
       );
       process.stdout.write(`${key}\n`);
     } else if (cmd === 'list') {

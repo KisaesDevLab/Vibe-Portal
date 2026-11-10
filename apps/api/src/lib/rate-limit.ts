@@ -11,13 +11,17 @@ export interface Limit {
 }
 
 export const LIMITS = {
-  /** Sign-in requests for one email or phone. */
+  /** Sign-in requests for one email or phone from one address. Counted per address too, so
+   *  a stranger asking for someone's sign-in cannot use up theirs (Phase 7). */
   loginPerContact: { max: 5, windowSeconds: 15 * 60 },
+  /** Sign-in messages to one email or phone from every address: stops a flood of mail. */
+  loginPerContactAll: { max: 20, windowSeconds: 15 * 60 },
   /** Sign-in requests from one address. */
   loginPerIp: { max: 30, windowSeconds: 15 * 60 },
   /** Code and link checks from one address. */
   verifyPerIp: { max: 30, windowSeconds: 15 * 60 },
-  /** Code checks for one email or phone, across all its codes. */
+  /** Code checks for one phone from one address, across all its codes (each code also allows
+   *  only 5 tries). Per address, so wrong codes from elsewhere cannot lock the person out. */
   verifyPerContact: { max: 10, windowSeconds: 15 * 60 },
   /** Access requests from one address. */
   requestPerIp: { max: 5, windowSeconds: 60 * 60 },

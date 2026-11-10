@@ -22,7 +22,7 @@ import { asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
-import { firmName, type Ctx } from '../context';
+import { firmName, MAX_UPLOAD_BYTES, type Ctx } from '../context';
 import { createFirmKey, revokeFirmKey } from '../firm/keys';
 import { normalizeEmail } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
@@ -36,7 +36,11 @@ const LOGO_MAX = 512 * 1024;
 const SettingsSchema = z.object({
   firmName: z.string().trim().min(1).max(120),
   accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-  uploadLimitMb: z.number().int().min(1).max(100),
+  uploadLimitMb: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_UPLOAD_BYTES / MB),
   uploadKeepDays: z.number().int().min(0).max(3650),
 });
 const KeySchema = z.object({ label: z.string().trim().min(1).max(60) });
@@ -73,7 +77,7 @@ export function staffSettingsRouter(ctx: Ctx): Router {
       res.json({
         firmName: f?.name ?? '',
         accentColor: f?.accentColor ?? '#0f6cbd',
-        uploadLimitMb: Math.round((f?.uploadLimitBytes ?? 100 * MB) / MB),
+        uploadLimitMb: Math.round((f?.uploadLimitBytes ?? MAX_UPLOAD_BYTES) / MB),
         uploadKeepDays: f?.uploadKeepDays ?? 30,
         hasLogo: Boolean(f?.logo),
         portalUrl: ctx.portalUrl,

@@ -233,9 +233,11 @@ Each phase ends with its tests green and a ship gate.
   a file removed on the page shows as not on the portal in Vibe Files
 
 ### Phase 7 — Hardening
-- [ ] Security review (auth, firm key handling, upload parsing, path handling, headers/CSP)
-- [ ] Load: 500 clients, 20,000 files; large uploads over the tunnel
-- [ ] Docs: firm setup guide (appliance + Cloudflare + Vibe Files)
+- [x] Security review (auth, firm key handling, upload parsing, path handling, headers/CSP);
+  fixes in P45-P46
+- [x] Load: 500 clients, 20,000 files (`LOAD=1` test); 95 MB uploads stream (P46). Over the real
+  tunnel: owner's check on the appliance
+- [x] Docs: firm setup guide (`docs/firm-setup.md`)
 
 ---
 

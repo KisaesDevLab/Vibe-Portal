@@ -95,7 +95,6 @@ export function invitationsRouter(ctx: Ctx): Router {
         const granted = await grantAccess(tx, {
           clientId: inv.clientId,
           proved,
-          other: inv.email ? inv.phone : null,
           name: input.name || inv.name,
           roleLabel: inv.roleLabel,
           by: inv.invitedBy,

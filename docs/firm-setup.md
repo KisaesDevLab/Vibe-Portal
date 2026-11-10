@@ -15,8 +15,10 @@ the appliance's own hostname.
 
 - **Appliance behind the Cloudflare Tunnel** (the usual case): nothing to do in DNS yet; step 3
   adds it to the tunnel.
-- **Appliance with its own certificate (Let's Encrypt or internal)**: point the hostname's DNS
-  record at the appliance before installing.
+- **Appliance with a Let's Encrypt certificate**: point the hostname's DNS record at the
+  appliance before installing, and let ports 80 and 443 reach it from the internet.
+- An appliance with an **internal** (self-signed) certificate does not suit the portal: clients'
+  phones and Vibe Files will not trust it. Use the Cloudflare Tunnel.
 
 ## 2. Install it on the appliance
 
@@ -35,15 +37,23 @@ Then, on the appliance:
 sudo vibe install portal --host files.yourfirm.com
 ```
 
-It asks for the email settings (or reads `VIBE_PORTAL_SMTP_HOST`, `VIBE_PORTAL_SMTP_PORT`,
-`VIBE_PORTAL_SMTP_USER`, `VIBE_PORTAL_SMTP_PASS`, `VIBE_PORTAL_SMTP_SECURE` and
-`VIBE_PORTAL_EMAIL_FROM` from the environment). The portal checks the email server when it
-starts; a wrong password shows in `sudo vibe logs portal`.
+It asks for the email settings. The portal checks the email server when it starts; a wrong
+password shows in `sudo vibe logs portal`.
 
-**Text messages (optional).** To let clients sign in with a code sent to their phone, set
-`VIBE_PORTAL_TWILIO_ACCOUNT_SID`, `VIBE_PORTAL_TWILIO_AUTH_TOKEN` and
-`VIBE_PORTAL_TWILIO_FROM_NUMBER` before installing. Without them clients sign in by email only.
-US numbers need A2P 10DLC registration with Twilio first.
+**Text messages (optional).** To let clients sign in with a code sent to their phone, give the
+Twilio settings on the same line as the install (`sudo` does not pass on variables set with
+`export`):
+
+```sh
+sudo VIBE_PORTAL_TWILIO_ACCOUNT_SID=AC… VIBE_PORTAL_TWILIO_AUTH_TOKEN=… \
+     VIBE_PORTAL_TWILIO_FROM_NUMBER=+15551234567 \
+     vibe install portal --host files.yourfirm.com
+```
+
+Without them clients sign in by email only. US numbers need A2P 10DLC registration with
+Twilio first. To add texts later, set `SMS_PROVIDER=twilio` and the `TWILIO_*` lines in
+`/etc/vibe/portal/.env`, then run `sudo vibe upgrade portal` (it starts the portal again with
+the new settings).
 
 ## 3. Cloudflare Tunnel
 
@@ -72,12 +82,15 @@ staff page at `https://files.yourfirm.com/staff`.
 
 On the staff page, **Settings**:
 
-- **Firm**: the name and colour clients see, the largest file clients may send (up to 100 MB),
-  and how long files Vibe Files has collected stay on the portal.
+- **Firm**: the name and colour clients see, the largest file (up to 95 MB, under Cloudflare's
+  limit; it applies both to what clients send and to what Vibe Files shares), and how long
+  files Vibe Files has collected stay on the portal.
 - **Logo**: a PNG or JPEG up to 512 KB.
 - **Staff**: add the other staff who should use the staff page; each gets a setup link by
-  email. **New setup link** helps someone who lost their phone or is locked out (also
-  `sudo vibe portal staff-reset <email>` on the appliance).
+  email. **New setup link** helps someone who lost their phone: it clears their password and
+  authenticator, and they set both again from the link (also
+  `sudo vibe portal staff-reset <email>` on the appliance, which also turns a turned-off
+  account back on).
 - **Portal keys**: **Make a key** for Vibe Files (next step). It is shown once.
 
 ## 5. Connect Vibe Files
@@ -89,8 +102,9 @@ On any office PC, in Vibe Files › **Admin › Portal** (admin password needed)
 3. Press **Test**, then **Save**.
 
 The settings are kept in the cabinet, so every PC uses them. Saving adds the `_Portal inbox`
-folder to Intake; press **Reload Intake** when it asks. Each PC collects client uploads every 5
-minutes; only one PC collects each upload.
+folder to Intake; press **Reload Intake** when it asks. While Vibe Files is open, each PC
+collects client uploads every few minutes (**Fetch client uploads every**, 5 minutes unless you
+change it); only one PC collects each upload. With every PC closed, uploads wait on the portal.
 
 ## 6. Try it
 
@@ -103,8 +117,9 @@ minutes; only one PC collects each upload.
 
 ## Backups
 
-`sudo vibe backup portal` saves the database and `data/.firm-key.seal`. Keep both: the seal
-file unlocks every stored file, and without it they cannot be read. The cabinet keeps the
+`sudo vibe backup portal` writes a snapshot under `/var/lib/vibe/portal/backups/` with the
+database (also as a `pg_dump` file) and `data/.firm-key.seal`. Copy it off the appliance, and
+keep the seal file with it: it unlocks every stored file, and without it they cannot be read. The cabinet keeps the
 original of everything you share, so the portal's files can always be shared again; client
 uploads not yet collected by Vibe Files exist only on the portal.
 
@@ -115,5 +130,5 @@ uploads not yet collected by Vibe Files exist only on the portal.
 | Cloudflare 502 on the portal address | **No TLS Verify** on the tunnel's public hostname (step 3) |
 | Clients get no email | `sudo vibe logs portal` for the SMTP error; the mailbox may need SMTP AUTH turned on (Office 365: Admin center › user › Mail › Manage email apps) |
 | Vibe Files' **Test** says the key is not accepted | The key was revoked or mistyped: make a new one on the staff page |
-| Uploads do not arrive | In Vibe Files › Admin › Portal, press **Fetch uploads now** and read the message it shows; the staff page's **Uploads** lists what is still waiting |
-| Staff locked out | Wait 15 minutes, or `sudo vibe portal staff-reset <email>` |
+| Uploads do not arrive | Is Vibe Files open on some PC? In Admin › Portal press **Fetch uploads now**; a problem shows in the bar at the top of Browse. The staff page's **Uploads** lists what is still waiting |
+| Staff locked out after wrong tries | Wait 15 minutes. Lost phone: another staff member sends **New setup link**, or `sudo vibe portal staff-reset <email>` |

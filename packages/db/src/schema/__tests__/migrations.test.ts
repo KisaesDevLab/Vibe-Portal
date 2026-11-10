@@ -55,7 +55,8 @@ describe('migrations', () => {
       'SELECT upload_limit_bytes, upload_keep_days FROM firm',
     );
     expect(r.rows).toHaveLength(1);
-    expect(Number(r.rows[0]?.upload_limit_bytes)).toBe(100 * 1024 * 1024);
+    // 95 MiB: under Cloudflare's 100 MB request limit (0007).
+    expect(Number(r.rows[0]?.upload_limit_bytes)).toBe(95 * 1024 * 1024);
     expect(r.rows[0]?.upload_keep_days).toBe(30);
     await expect(db.exec('INSERT INTO firm (id) VALUES (2)')).rejects.toThrow();
   });

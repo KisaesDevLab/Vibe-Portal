@@ -7,11 +7,12 @@
 // apps/api/src/portal-invites/grant.ts, over this repo's tables.)
 //
 // QA 2026-11-09: an identity is never matched by a contact that was not proved, or someone who
-// knows another person's phone could take over their account. A second, unproved contact (only
-// from an invitation, where staff typed it) is stored only on an identity that lacks one, and
-// only when no other identity has it.
+// knows another person's phone could take over their account.
+// Phase 7 (P45): nor is an unproved contact ever stored on one. A phone staff typed beside an
+// email became a way to sign in as that person, so a wrong digit gave a stranger their files,
+// and a later invitation to that phone joined the stranger to this person's account.
 
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { schema, type Database } from '@vibe-portal/db';
 
 /** The database or a transaction on it. */
@@ -21,8 +22,6 @@ export interface GrantArgs {
   clientId: string;
   /** The normalised email or E.164 phone the person proved they receive. */
   proved: string;
-  /** A second contact staff typed (invitations only); never used to match. */
-  other: string | null;
   name: string;
   roleLabel: string;
   by: string;
@@ -60,12 +59,6 @@ export async function grantAccess(
 
   const patch: Partial<typeof schema.portalIdentity.$inferInsert> = {};
   if (!found.name && args.name) patch.name = args.name;
-  if (args.other && args.other !== args.proved) {
-    const otherField = isEmail(args.other) ? 'email' : 'phone';
-    if (otherField !== provedField && !found[otherField]) {
-      if (!(await taken(db, otherField, args.other, identityId))) patch[otherField] = args.other;
-    }
-  }
   if (Object.keys(patch).length) {
     await db
       .update(schema.portalIdentity)
@@ -87,20 +80,6 @@ export async function grantAccess(
       set: { active: true, roleLabel: args.roleLabel, invitedBy: args.by },
     });
   return { identityId, created };
-}
-
-async function taken(
-  db: Executor,
-  field: 'email' | 'phone',
-  value: string,
-  except: string,
-): Promise<boolean> {
-  const col = schema.portalIdentity[field];
-  const rows = await db
-    .select({ id: schema.portalIdentity.id })
-    .from(schema.portalIdentity)
-    .where(and(eq(col, value), ne(schema.portalIdentity.id, except)));
-  return rows.length > 0;
 }
 
 /** The clients an identity can sign in to: an active identity with active access to an active client. */

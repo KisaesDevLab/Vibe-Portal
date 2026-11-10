@@ -119,7 +119,11 @@ export function clientAuthRouter(ctx: Ctx): Router {
       const value = kind === 'email' ? normalizeEmail(contact) : normalizePhone(contact);
       if (kind === 'unknown' || !value) throw new HttpError(400, 'invalid_contact');
       // Over the per-contact limit: answer as usual but send nothing.
-      if (!(await hit(ctx.db, `login:contact:${value}`, LIMITS.loginPerContact, now))) {
+      const ip = clientIp(req);
+      if (
+        !(await hit(ctx.db, `login:contact:${value}:ip:${ip}`, LIMITS.loginPerContact, now)) ||
+        !(await hit(ctx.db, `login:contact:${value}`, LIMITS.loginPerContactAll, now))
+      ) {
         res.json({ ...GENERIC_LOGIN, kind });
         return;
       }
@@ -201,7 +205,14 @@ export function clientAuthRouter(ctx: Ctx): Router {
       }
       const phone = normalizePhone(input.phone);
       if (!phone) throw new HttpError(400, 'code_wrong');
-      if (!(await hit(ctx.db, `verify:contact:${phone}`, LIMITS.verifyPerContact, now))) {
+      if (
+        !(await hit(
+          ctx.db,
+          `verify:contact:${phone}:ip:${clientIp(req)}`,
+          LIMITS.verifyPerContact,
+          now,
+        ))
+      ) {
         throw new HttpError(429, 'too_many_requests');
       }
       const ch = await checkCode(

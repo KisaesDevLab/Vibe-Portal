@@ -657,11 +657,11 @@ function Settings(): JSX.Element {
               onChange={(e) => setForm({ ...form, accentColor: e.target.value })}
             />
             <Input
-              label="Largest file clients may send (MB, at most 100)"
+              label="Largest file clients may send, and Vibe Files may share (MB, at most 95)"
               name="limit"
               type="number"
               min={1}
-              max={100}
+              max={95}
               value={form.uploadLimitMb}
               onChange={(e) => setForm({ ...form, uploadLimitMb: Number(e.target.value) })}
             />

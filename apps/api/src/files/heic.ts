@@ -33,6 +33,28 @@ convert({ buffer: workerData.buf, format: 'JPEG', quality: workerData.quality })
 
 const TIMEOUT_MS = 60_000;
 
+/** A phone photo is a few MB; a larger "photo" is held in memory for nothing (Phase 7). */
+export const HEIC_MAX_BYTES = 30 * 1024 * 1024;
+
+/** Conversions at once: each holds the photo and its decoded image in memory. */
+const AT_ONCE = 2;
+let running = 0;
+const waiting: (() => void)[] = [];
+
+/** Converts at most AT_ONCE photos at a time; the rest wait their turn. */
+export async function convertHeicQueued(body: Buffer, quality = 0.9): Promise<Buffer> {
+  // A finishing conversion hands its place straight to the next waiting one.
+  if (running >= AT_ONCE) await new Promise<void>((go) => waiting.push(go));
+  else running += 1;
+  try {
+    return await convertHeicOffThread(body, quality);
+  } finally {
+    const next = waiting.shift();
+    if (next) next();
+    else running -= 1;
+  }
+}
+
 export function convertHeicOffThread(body: Buffer, quality = 0.9): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(HEIC_WORKER_SRC, {

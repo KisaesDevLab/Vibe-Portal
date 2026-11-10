@@ -41,10 +41,11 @@ const Schema = z
     /** The built client portal (apps/portal/dist), served by the API in the container. */
     STATIC_DIR: opt(),
     /**
-     * Count rate limits by Cloudflare's CF-Connecting-IP (the portal is reached through the
-     * Cloudflare Tunnel). Turn off only when the portal is reached some other way.
+     * Count rate limits by the CF-Connecting-IP header. Only behind a proxy that always sets it
+     * (the appliance's Caddy does, and its env file turns this on); elsewhere a client could
+     * send any address and get around every per-address limit (Phase 7).
      */
-    TRUST_CF_CONNECTING_IP: flag(true),
+    TRUST_CF_CONNECTING_IP: flag(false),
 
     // P38: email by SMTP, texts by Twilio. "console" only logs (development).
     EMAIL_PROVIDER: z.enum(['smtp', 'console']).default('console'),

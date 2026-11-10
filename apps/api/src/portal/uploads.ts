@@ -21,7 +21,7 @@ import { activeClientsOf } from '../auth/grant';
 import type { ClientSession } from '../auth/sessions';
 import { uploadLimit, type Ctx } from '../context';
 import { TooLarge } from '../files/blobs';
-import { convertHeicOffThread } from '../files/heic';
+import { convertHeicQueued, HEIC_MAX_BYTES } from '../files/heic';
 import { peek } from '../files/send';
 import { allowedKind, SNIFF_BYTES } from '../files/sniff';
 import { cleanName, contentTypeOf } from '../files/types';
@@ -43,7 +43,7 @@ export type HeicConverter = (body: Buffer) => Promise<Buffer>;
 
 export function clientUploadsRouter(
   ctx: Ctx,
-  convertHeic: HeicConverter = convertHeicOffThread,
+  convertHeic: HeicConverter = convertHeicQueued,
 ): Router {
   const r = express.Router();
   r.use(requireClient(ctx));
@@ -81,9 +81,10 @@ export function clientUploadsRouter(
         // P33: a phone photo, converted to JPG. Held in memory (within the size limit).
         const parts: Buffer[] = [];
         let size = 0;
+        const heicLimit = Math.min(limit, HEIC_MAX_BYTES);
         for await (const c of all) {
           size += (c as Buffer).length;
-          if (size > limit) throw new HttpError(413, 'too_large');
+          if (size > heicLimit) throw new HttpError(413, 'too_large');
           parts.push(c as Buffer);
         }
         let jpeg: Buffer;
