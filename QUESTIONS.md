@@ -19,3 +19,10 @@
 | P15 | 2026-11-09 | Which PC did it, with one shared key | Vibe Files sends PC name + Windows user on each call; stored in the event (shows who in practice, not proof) | Owner 2026-11-09: as assumed |
 | P16 | 2026-11-09 | Must "Request access" confirm email/phone first | Yes, by a code; only confirmed requests reach staff | Owner 2026-11-09: as assumed |
 | P17 | 2026-11-09 | Can a client user see the other users of the same client | No | Owner 2026-11-09: as assumed |
+| P18 | 2026-11-09 | Messages when staff share several files at once | One message per batch: shares to the same person within 5 minutes gathered into one | Owner 2026-11-09: as assumed |
+| P19 | 2026-11-09 | How the client's Files page is organised | Newest shared first, a year filter (tax year sent by Vibe Files) and a search box | Owner 2026-11-09: as assumed |
+| P20 | 2026-11-09 | What the client sees after "Update on portal" | Same row, content replaced, marked "Updated <date>" and new again; old content not kept | Owner 2026-11-09: as assumed |
+| P21 | 2026-11-09 | Do staff see who opened a shared file | Yes: the Share window shows "Opened <date>" / "Not opened yet" per user; every view and download in the audit trail | Owner 2026-11-09: as assumed |
+| P22 | 2026-11-09 | Which files open in the browser | PDF (PDF.js viewer) and JPG/PNG; others download | Owner 2026-11-09: as assumed |
+| P23 | 2026-11-09 | Largest file staff can share | The firm's upload limit (default 100 MB, Cloudflare free-plan cap) | Owner 2026-11-09: as assumed |
+| P24 | 2026-11-09 | Can a client hide a shared file from their own list | No; only staff decide what is on the portal | Owner 2026-11-09: as assumed |
