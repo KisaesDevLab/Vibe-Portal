@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../App';
+import { screenWidth } from './setup';
 
 type Reply = { status?: number; body: unknown };
 type Calls = { path: string; method: string; body: unknown }[];
@@ -618,6 +619,26 @@ describe('staff page', () => {
     serve({});
     at('/staff/setup');
     expect((await screen.findByRole('alert')).textContent).toMatch(/Open the setup link again/);
+  });
+
+  it('on a phone the menu folds behind a button, and tables become labelled cards (P59)', async () => {
+    screenWidth(390);
+    try {
+      serve({ '/auth/me': ME, '/v1/clients': { body: { clients: [CLIENT] } } });
+      at('/staff');
+      const menu = await screen.findByRole('button', { name: 'Menu' });
+      expect(screen.queryByRole('navigation', { name: 'Staff' })).toBeNull();
+      expect(document.documentElement.dataset['narrow']).toBe('1');
+      // Each cell carries its column's name for the card.
+      const link = await screen.findByRole('link', { name: 'Smith, John' });
+      expect(link.closest('td')?.dataset['label']).toBe('Client');
+      fireEvent.click(menu);
+      const nav = screen.getByRole('navigation', { name: 'Staff' });
+      expect(within(nav).getByRole('link', { name: 'Uploads' })).toBeTruthy();
+      expect(within(nav).getByRole('button', { name: 'Sign out' })).toBeTruthy();
+    } finally {
+      screenWidth(1280);
+    }
   });
 
   it('long client lists come a page at a time (P57)', async () => {

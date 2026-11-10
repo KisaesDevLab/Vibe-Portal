@@ -74,3 +74,59 @@ input[type='color'] {
   background: var(--vibe-color-surface);
   cursor: pointer;
 }
+
+/* Staff tables on a phone (P59): each row a card, each value under its column's name. The
+ * design system marks a narrow screen on <html data-narrow="1">. Cell styles are inline, hence
+ * !important. */
+html[data-narrow='1'] table.staff-table thead {
+  display: none;
+}
+
+html[data-narrow='1'] table.staff-table,
+html[data-narrow='1'] table.staff-table tbody {
+  display: block;
+}
+
+html[data-narrow='1'] table.staff-table tr {
+  display: block;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--vibe-color-border);
+  border-radius: 10px;
+  background: var(--vibe-color-surface);
+}
+
+html[data-narrow='1'] table.staff-table td {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+  padding: 6px 0 !important;
+  border: 0 !important;
+  overflow-wrap: anywhere;
+}
+
+html[data-narrow='1'] table.staff-table td::before {
+  content: attr(data-label);
+  flex: 0 0 104px;
+  color: var(--vibe-color-text-muted);
+  font-size: 12px;
+}
+
+html[data-narrow='1'] table.staff-table td[data-label='']::before {
+  content: none;
+}
+
+/* A cell with nothing in it (no actions for this row) takes no room. */
+html[data-narrow='1'] table.staff-table td:empty {
+  display: none;
+}
+
+/* The first column is the card's title. */
+html[data-narrow='1'] table.staff-table td[data-first='1'] {
+  font-weight: 600;
+}
+
+html[data-narrow='1'] table.staff-table td button {
+  min-height: 40px;
+}

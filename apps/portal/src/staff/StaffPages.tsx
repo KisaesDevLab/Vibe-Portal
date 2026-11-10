@@ -4,9 +4,17 @@
 // the history, and Settings (P36). Sharing new files stays in Vibe Files; sending a file that
 // is already here to someone outside the client, by a secure link, is done here (P49).
 
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
-import { Button, Card, Input } from '@vibe/ui';
+import { Button, Card, CloseIcon, Input, MenuIcon, tokens, useIsNarrow } from '@vibe/ui';
 
 import { FirmLogo, reloadBranding } from '../branding';
 import { usePages } from '../paging';
@@ -124,6 +132,9 @@ function Status({ load, what }: { load: Load<unknown>; what: string }): JSX.Elem
 export function StaffHome(): JSX.Element {
   const me = useLoad<StaffMe>('/auth/me');
   const navigate = useNavigate();
+  // P59: on a phone the menu folds behind a button.
+  const narrow = useIsNarrow();
+  const [menuOpen, setMenuOpen] = useState(false);
   const reloadMe = me.reload;
   useEffect(() => {
     window.addEventListener(ME_CHANGED, reloadMe);
@@ -149,22 +160,91 @@ export function StaffHome(): JSX.Element {
     'History',
     ...(admin ? ['Settings'] : []),
   ];
+  const links = nav.map((n) => (
+    <NavLink
+      key={n}
+      to={n === 'Clients' ? '/staff' : `/staff/${n.toLowerCase()}`}
+      end={n === 'Clients' ? false : true}
+      onClick={() => setMenuOpen(false)}
+      style={({ isActive }) => ({
+        padding: narrow ? '12px 12px' : '8px 12px',
+        borderRadius: tokens.radius.md,
+        textDecoration: 'none',
+        fontWeight: 500,
+        color: isActive ? 'var(--vibe-on-accent, #fff)' : tokens.color.text,
+        background: isActive ? tokens.color.accent : 'transparent',
+      })}
+    >
+      {n}
+    </NavLink>
+  ));
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}>
-      <header style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <FirmLogo height={32} />
-        <strong>{me.data.firmName} · portal staff</strong>
-        <nav aria-label="Staff" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {nav.map((n) => (
-            <NavLink key={n} to={n === 'Clients' ? '/staff' : `/staff/${n.toLowerCase()}`} end>
-              {n}
-            </NavLink>
-          ))}
-        </nav>
-        <span style={{ marginLeft: 'auto' }}>{me.data.name}</span>
-        <Button size="sm" variant="secondary" onClick={() => void signOut()}>
-          Sign out
-        </Button>
+    <div
+      style={{
+        maxWidth: 1100,
+        margin: '0 auto',
+        padding: narrow ? 12 : 16,
+        display: 'grid',
+        gap: 16,
+      }}
+    >
+      <header
+        style={{
+          display: 'grid',
+          gap: 8,
+          padding: '8px 0 12px',
+          borderBottom: `1px solid ${tokens.color.border}`,
+        }}
+      >
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <FirmLogo height={32} />
+          <strong style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
+            {me.data.firmName}
+            {!narrow && ' · portal staff'}
+          </strong>
+          {!narrow && (
+            <nav aria-label="Staff" style={{ display: 'flex', gap: 4, marginLeft: 16 }}>
+              {links}
+            </nav>
+          )}
+          <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {!narrow && <span>{me.data.name}</span>}
+            {narrow ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-expanded={menuOpen}
+                aria-label="Menu"
+                onClick={() => setMenuOpen((o) => !o)}
+              >
+                {menuOpen ? <CloseIcon size={18} /> : <MenuIcon size={18} />}
+              </Button>
+            ) : (
+              <Button size="sm" variant="secondary" onClick={() => void signOut()}>
+                Sign out
+              </Button>
+            )}
+          </span>
+        </div>
+        {narrow && menuOpen && (
+          <nav aria-label="Staff" style={{ display: 'grid', gap: 2 }}>
+            {links}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '8px 12px',
+                borderTop: `1px solid ${tokens.color.border}`,
+              }}
+            >
+              <span>{me.data.name}</span>
+              <Button size="sm" variant="secondary" onClick={() => void signOut()}>
+                Sign out
+              </Button>
+            </div>
+          </nav>
+        )}
       </header>
       <Routes>
         <Route index element={<Clients limited={!allClients} />} />
@@ -180,13 +260,39 @@ export function StaffHome(): JSX.Element {
 }
 
 function Table({ head, children }: { head: string[]; children: ReactNode }): JSX.Element {
+  const ref = useRef<HTMLTableElement>(null);
+  // P59: each cell carries its column's name, shown beside it when the row is a card (phone).
+  useLayoutEffect(() => {
+    const rows = ref.current?.tBodies[0]?.rows ?? [];
+    for (const tr of Array.from(rows)) {
+      Array.from(tr.cells).forEach((td, i) => {
+        td.dataset['label'] = head[i] ?? '';
+        if (i === 0 || (i === 1 && head[0] === '')) td.dataset['first'] = '1';
+      });
+    }
+  });
   return (
     <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <table
+        ref={ref}
+        className="staff-table"
+        style={{ width: '100%', borderCollapse: 'collapse' }}
+      >
         <thead>
           <tr>
-            {head.map((h) => (
-              <th key={h} style={{ textAlign: 'left', padding: '6px 8px' }}>
+            {head.map((h, i) => (
+              <th
+                key={`${i}-${h}`}
+                style={{
+                  textAlign: 'left',
+                  padding: '8px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: tokens.color.textMuted,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                }}
+              >
                 {h}
               </th>
             ))}

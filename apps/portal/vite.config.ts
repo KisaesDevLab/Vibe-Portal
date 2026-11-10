@@ -33,5 +33,7 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // A desktop-sized screen unless a test says otherwise (jsdom reports a width of 0).
+    setupFiles: ['./src/__tests__/setup.ts'],
   },
 });
