@@ -12,3 +12,10 @@
 | P8 | 2026-11-09 | Are fetched client uploads kept on the portal? | Kept 30 days after fetch, then purged; the client still sees "Received by the firm" | Owner 2026-11-09: as assumed |
 | P9 | 2026-11-09 | How staff sign in to the staff page | Vibe Auth single sign-on when the appliance has it; otherwise staff accounts made in the appliance admin screen, password + authenticator code (TB's TOTP) | Owner 2026-11-09: as assumed |
 | P10 | 2026-11-09 | Can the staff page download client uploads without them leaving the Intake queue? | Yes: downloading on the page is logged, but only Vibe Files' fetch marks an upload fetched, so it still reaches Intake | Owner 2026-11-09: as assumed |
+| P11 | 2026-11-09 | How long a client stays signed in on a device | 30 days with "remember this device" | Owner 2026-11-09: 7 days |
+| P12 | 2026-11-09 | Idle sign-out within that | 30 minutes idle unless "Keep me signed in on this device" | Owner 2026-11-09: as assumed |
+| P13 | 2026-11-09 | How long a portal invitation is valid | 7 days; Vibe Files offers Resend | Owner 2026-11-09: as assumed |
+| P14 | 2026-11-09 | Firm key: one per PC or one per firm | One per PC | Owner 2026-11-09: **one for the firm**, pasted on every PC like the B2 sync key. `firm_keys` keeps old rows so a key can be rotated (new key, then revoke the old) |
+| P15 | 2026-11-09 | Which PC did it, with one shared key | Vibe Files sends PC name + Windows user on each call; stored in the event (shows who in practice, not proof) | Owner 2026-11-09: as assumed |
+| P16 | 2026-11-09 | Must "Request access" confirm email/phone first | Yes, by a code; only confirmed requests reach staff | Owner 2026-11-09: as assumed |
+| P17 | 2026-11-09 | Can a client user see the other users of the same client | No | Owner 2026-11-09: as assumed |

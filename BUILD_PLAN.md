@@ -82,7 +82,7 @@ copy log lives in `VENDORED.md`, as Vibe Files does for Filer.
 | Table | Purpose |
 |---|---|
 | `firm` | One row. Name, branding (logo, colour), portal URL, firm key hash(es) |
-| `firm_keys` | `id`, `label` (e.g. PC name), `key_hash`, `created_at`, `last_used_at`, `revoked_at`. Several so each PC or a lost key can be revoked |
+| `firm_keys` | `id`, `label`, `key_hash`, `created_at`, `last_used_at`, `revoked_at`. One key for the firm, pasted on every PC (P14); old rows stay so a key can be rotated. Each call also sends the PC name and Windows user, kept in `events` (P15) |
 | `clients` | `id` (Vibe Files client UUID), `client_code` (the firm's client ID), `display_name`, `active` |
 | `portal_identity` | A person: `id`, `email`, `phone`, `name`, `status` |
 | `client_access` | Identity ↔ client: `identity_id`, `client_id`, `role_label` (e.g. "Spouse"), `active`, `invited_by` |
