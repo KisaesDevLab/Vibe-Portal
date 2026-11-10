@@ -30,6 +30,9 @@ export interface Ctx {
   keyring: Keyring;
   /** Encrypted file storage on the data volume. */
   blobs: BlobStore;
+  /** No text messages are set up (SMS_PROVIDER=none): nobody is offered signing in by text
+   *  with a number added later (P50). Unset means texts can be sent. */
+  textsOff?: boolean;
 }
 
 /**

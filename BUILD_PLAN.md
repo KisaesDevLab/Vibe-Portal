@@ -184,6 +184,9 @@ Each phase ends with its tests green and a ship gate.
 - [x] Portal identities, magic link + SMS code, sessions (TB's flow, Postgres-backed). No separate
   new-device challenge: every sign-in already needs a link or code sent to the person
 - [x] Invitations and accept flow; public access request
+- [x] Sign in by text with a number added later (P50): a person signed in by email adds a mobile
+  number, stored only after a code texted to it (`phone_confirm`, never a sign-in code), or
+  removes it; the invitation offers the number staff typed beside the email the same way
 - [x] Firm key auth, key table, rate limits; `/status`, `/clients`, invites, users, access requests
 - **Gate:** invite → accept → sign in → sign out, by email and by SMS (mock providers); request →
   approve → sign in; revoked firm key refused

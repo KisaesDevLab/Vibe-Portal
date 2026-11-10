@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
-// Signed-in home: which client, its files, sign out.
+// Signed-in home: which client, its files, sign out, and signing in by text (P50).
 
 import { useCallback, useEffect, useState } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Button, Card } from '@vibe/ui';
 
 import { api, ApiError, say, type Me } from '../api';
 import { Files } from './Files';
+import { PhoneSignIn, type Pending } from './PhoneSignIn';
 import { Uploads } from './Uploads';
 
 type State = 'loading' | 'ready' | 'signed_out' | 'error';
 
 export function Home(): JSX.Element {
   const navigate = useNavigate();
+  // A code texted when the invitation was accepted with "also sign in by text".
+  const pending = (useLocation().state as { phoneCode?: Pending } | null)?.phoneCode ?? null;
   const [me, setMe] = useState<Me | null>(null);
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState('');
@@ -100,6 +103,13 @@ export function Home(): JSX.Element {
       </Card>
       <Card>
         <Uploads clientId={me.activeClientId} />
+      </Card>
+      <Card>
+        <PhoneSignIn
+          me={me}
+          pending={pending}
+          onChange={(phone) => setMe((m) => (m ? { ...m, identity: { ...m.identity, phone } } : m))}
+        />
       </Card>
     </main>
   );

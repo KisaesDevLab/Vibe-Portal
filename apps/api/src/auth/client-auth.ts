@@ -277,6 +277,8 @@ export function clientAuthRouter(ctx: Ctx): Router {
         clients: clients.map((c) => ({ id: c.id, name: c.displayName })),
         activeClientId: active,
         firmName: await firmName(ctx),
+        // Whether a mobile number can be added for signing in by text (P50).
+        textsOn: !ctx.textsOff,
       });
     }),
   );
@@ -297,7 +299,8 @@ export function clientAuthRouter(ctx: Ctx): Router {
   return r;
 }
 
-/** Ends unused sign-in challenges for a contact (e.g. when access is removed). */
+/** Ends unused sign-in challenges for a contact (e.g. when access is removed), and codes to
+ *  confirm a new mobile number (P50). */
 export async function voidChallenges(ctx: Ctx, identityId: string): Promise<void> {
   await ctx.db
     .update(schema.signInChallenge)
@@ -309,6 +312,7 @@ export async function voidChallenges(ctx: Ctx, identityId: string): Promise<void
         or(
           eq(schema.signInChallenge.kind, 'magic_link'),
           eq(schema.signInChallenge.kind, 'sms_code'),
+          eq(schema.signInChallenge.kind, 'phone_confirm'),
         ),
       ),
     );

@@ -11,6 +11,7 @@ import { firmRouter, staffApi } from './firm/routes';
 import { requireStaff, staffAuthRouter } from './staff/auth';
 import { brandingRouter, staffSettingsRouter } from './staff/settings';
 import { errorHandler, requireJson, TRUST_CF_IP } from './lib/http';
+import { accountRouter } from './portal/account';
 import { accessRequestsRouter } from './portal/access-requests';
 import { clientFilesRouter } from './portal/files';
 import { sharedRouter } from './portal/shared';
@@ -69,6 +70,8 @@ export function createApp(deps: AppDeps): Express {
     app.use('/api/portal/invitations', invitationsRouter(ctx));
     app.use('/api/portal/access-requests', accessRequestsRouter(ctx));
     app.use('/api/portal/files', clientFilesRouter(ctx));
+    // The signed-in person's own account: the mobile number they sign in with (P50).
+    app.use('/api/portal/account', accountRouter(ctx));
     app.use('/api/portal/uploads', clientUploadsRouter(ctx, deps.convertHeic));
     // Someone outside the client, with a secure link (P49): no account, no session.
     app.use('/api/portal/shared', sharedRouter(ctx));

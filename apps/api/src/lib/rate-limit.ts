@@ -45,6 +45,11 @@ export const LIMITS = {
    *  two windows cannot give two codes seconds apart), and ten a day. */
   outsideCodeMinute: { max: 1, windowSeconds: 60 },
   outsideCodeDay: { max: 10, windowSeconds: 24 * 60 * 60 },
+  /** Codes to confirm a new mobile number, asked for by one signed-in person (P50). */
+  phoneConfirmPerIdentity: { max: 5, windowSeconds: 60 * 60 },
+  /** Codes to confirm a mobile number, texted to one number by everyone: a signed-in person
+   *  cannot use the portal to flood someone's phone. */
+  phoneConfirmPerPhone: { max: 5, windowSeconds: 60 * 60 },
   /** Wrong firm keys from one address. */
   badKeyPerIp: { max: 20, windowSeconds: 15 * 60 },
 } satisfies Record<string, Limit>;

@@ -5,7 +5,12 @@
 // body, never in a URL the server logs.
 //
 //   POST /api/portal/invitations/preview  { token }          -> firm, client, masked contact
-//   POST /api/portal/invitations/accept   { token, name?, keepSignedIn? }
+//   POST /api/portal/invitations/accept   { token, name?, keepSignedIn?, addPhone? }
+//
+// P50: a mobile number staff typed beside the email is never stored unproved (P45). The page
+// offers it masked ("also sign in by text at ***-***-1234"); when ticked, accepting texts a
+// code to it, and the number is stored only when the person types the code back
+// (/api/portal/account/phone/verify). The full number never reaches the browser.
 
 import express, { type Router } from 'express';
 import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
@@ -13,9 +18,10 @@ import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
 import { grantAccess } from '../auth/grant';
+import { sendPhoneCode } from './account';
 import { signIn } from '../auth/client-auth';
 import { firmName, type Ctx } from '../context';
-import { maskContact } from '../lib/contact';
+import { isUsCanadaPhone, maskContact } from '../lib/contact';
 import { record } from '../lib/events';
 import { body, clientIp, h, HttpError } from '../lib/http';
 import { hit, LIMITS } from '../lib/rate-limit';
@@ -25,6 +31,7 @@ const TokenSchema = z.object({ token: z.string().min(20).max(200) });
 const AcceptSchema = TokenSchema.extend({
   name: z.string().trim().max(120).optional(),
   keepSignedIn: z.boolean().optional().default(false),
+  addPhone: z.boolean().optional().default(false),
 });
 
 export function invitationsRouter(ctx: Ctx): Router {
@@ -69,6 +76,11 @@ export function invitationsRouter(ctx: Ctx): Router {
         clientName: inv.client,
         name: inv.name,
         contact: maskContact(inv.email ?? inv.phone ?? ''),
+        // A number staff typed beside the email, offered for signing in by text once proved.
+        alsoPhone:
+          !ctx.textsOff && inv.email && inv.phone && isUsCanadaPhone(inv.phone)
+            ? maskContact(inv.phone)
+            : null,
       });
     }),
   );
@@ -110,7 +122,28 @@ export function invitationsRouter(ctx: Ctx): Router {
         { clientId: inv.clientId, identityId, detail: { invitationId: inv.id } },
       );
       await signIn(ctx, res, identityId, input.keepSignedIn);
-      res.json({ ok: true });
+      // Also sign in by text: a code to the number staff typed, unless the account has one.
+      let phoneCode: string | null = null;
+      if (input.addPhone && inv.email && inv.phone) {
+        const [who] = await ctx.db
+          .select({ phone: schema.portalIdentity.phone })
+          .from(schema.portalIdentity)
+          .where(eq(schema.portalIdentity.id, identityId));
+        if (!who?.phone) {
+          try {
+            await sendPhoneCode(ctx, identityId, inv.phone);
+            phoneCode = 'sent';
+          } catch (err) {
+            // The invitation is accepted either way; the page says why no code came.
+            if (!(err instanceof HttpError)) throw err;
+            phoneCode = err.code;
+          }
+        }
+      }
+      res.json({
+        ok: true,
+        ...(phoneCode && { phoneCode, phone: maskContact(inv.phone ?? '') }),
+      });
     }),
   );
 
