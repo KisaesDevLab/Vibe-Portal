@@ -155,9 +155,13 @@ whether it was opened and how often. **Revoke** ends a link at once, even while 
 
 - 15 wrong codes in a row end a link (**Locked**), in case it reached the wrong hands. Send a new
   one.
-- One recipient can hold 5 working links at a time. Revoke an old one to send another.
+- One recipient can hold 5 working links for the same client at a time. Revoke an old one to
+  send another.
 - **Remove** a file from the portal and it leaves every link. Switch a client off and its links
   stop for as long as it is off.
+- When Vibe Files updates a file, links show the new version. If the new version no longer suits
+  the link (a view-only link and a file the page cannot show, or a watermarked PDF now over
+  30 MB), the recipient sees it as **Not available**: send it again with other settings.
 - **History** shows each link sent and revoked, each code sent, and every view and download with
   the recipient's email.
 

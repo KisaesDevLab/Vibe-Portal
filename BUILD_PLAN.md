@@ -95,7 +95,7 @@ copy log lives in `VENDORED.md`, as Vibe Files does for Filer.
 | `uploads` | `id`, `client_id`, `identity_id`, `name`, `size`, `sha256`, `blob_key`, `dek_wrapped`, `note`, `uploaded_at`, `fetched_at`, `fetched_by`, `purged_at` |
 | `events` | Append-only: share, unshare, remove, view, download, upload, fetch, invite, approve, sign-in. Exposed to Vibe Files for its audit trail |
 | `sessions` | Client sessions (Postgres) |
-| `file_share`, `file_share_item`, `file_share_code`, `file_share_grant` | Secure links to someone outside the client (P49): the link (secret hash, recipient, view only or download, watermark, expiry, revoked, wrong tries, opens), its files, the emailed 6-digit codes, and the browsers that gave one (30 minutes) |
+| `file_share`, `file_share_item`, `file_share_code`, `file_share_grant`, `file_share_mark` | Secure links to someone outside the client (P49): the link (secret hash, recipient, view only or download, watermark, expiry, revoked, wrong tries, opens), its files, the emailed 6-digit codes, the browsers that gave one (30 minutes), and the watermarked copies kept for the day (encrypted; removed with the file, the link, or the day) |
 
 ---
 

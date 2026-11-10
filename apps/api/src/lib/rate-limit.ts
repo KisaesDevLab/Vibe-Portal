@@ -67,6 +67,19 @@ export async function hit(db: Database, bucket: string, limit: Limit, now: Date)
   return (row?.hits ?? 0) <= limit.max;
 }
 
+/** Takes back a hit counted for something that then did not happen (an email that failed). */
+export async function refund(db: Database, bucket: string, limit: Limit, now: Date): Promise<void> {
+  await db
+    .update(schema.rateLimit)
+    .set({ hits: sql`greatest(${schema.rateLimit.hits} - 1, 0)` })
+    .where(
+      and(
+        eq(schema.rateLimit.bucket, bucket),
+        eq(schema.rateLimit.windowStart, windowStart(limit, now)),
+      ),
+    );
+}
+
 /** Whether a bucket is already at its limit, without counting a hit. */
 export async function isBlocked(
   db: Database,

@@ -303,6 +303,26 @@ export const fileShareGrant = pgTable('file_share_grant', {
   expiresAt: ts('expires_at').notNull(),
 });
 
+/** A watermarked copy of a PDF in a secure link, kept for the day it names (P49 review). */
+export const fileShareMark = pgTable(
+  'file_share_mark',
+  {
+    shareId: uuid('share_id')
+      .notNull()
+      .references(() => fileShare.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id')
+      .notNull()
+      .references(() => files.id),
+    day: text('day').notNull(),
+    sourceBlobKey: text('source_blob_key').notNull(),
+    blobKey: text('blob_key').notNull(),
+    dekWrapped: bytea('dek_wrapped').notNull(),
+    size: bigint('size', { mode: 'number' }).notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.shareId, t.fileId, t.day] })],
+);
+
 export const sessions = pgTable('sessions', {
   idHash: text('id_hash').primaryKey(),
   kind: text('kind', { enum: ['client', 'staff'] }).notNull(),

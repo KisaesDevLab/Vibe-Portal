@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
-// Streams a stored file to a response, decrypting as it goes, and reads the start of a request
-// body without losing it.
+// Streams a stored file to a response, decrypting as it goes; reads one whole into memory; and
+// reads the start of a request body without losing it.
 
 import { Readable } from 'node:stream';
 
@@ -58,17 +58,18 @@ export async function sendStored(
   }
 }
 
-/** Sends a file already in memory (a watermarked PDF), with the headers `sendStored` sets. */
-export function sendBytes(
-  res: Response,
-  bytes: Uint8Array,
-  f: Pick<Sendable, 'name' | 'inlineType'>,
-): void {
-  res.setHeader('Content-Type', f.inlineType ?? 'application/octet-stream');
-  res.setHeader('Content-Disposition', disposition(f.inlineType ? 'inline' : 'attachment', f.name));
-  res.setHeader('Content-Length', String(bytes.byteLength));
-  res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
-  res.end(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+/** The whole plaintext of a stored file, in memory (for a PDF to check or mark); 500 when it
+ *  cannot be decrypted, as `sendStored` answers. */
+export async function readPlain(
+  ctx: Ctx,
+  f: Pick<Sendable, 'id' | 'blobKey' | 'dekWrapped'>,
+): Promise<Buffer> {
+  try {
+    return await ctx.blobs.read(f.blobKey, ctx.keyring.unwrap(new Uint8Array(f.dekWrapped)));
+  } catch (err) {
+    ctx.log.error({ err, id: f.id }, 'stored file failed to decrypt');
+    throw new HttpError(500, 'file_unreadable');
+  }
 }
 
 /** Reads at least `n` bytes (or all, if shorter) from `src`; `all` replays them and the rest. */

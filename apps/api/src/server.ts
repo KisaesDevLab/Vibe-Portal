@@ -16,6 +16,7 @@ import { BlobStore } from './files/blobs';
 import { openKeyring } from './files/keyring';
 import { flush } from './files/notify-queue';
 import { purgeUploads } from './firm/uploads';
+import { purgeMarks } from './files/marks';
 import { purgeStale } from './lib/housekeeping';
 import { consoleNotifier, type Notifier } from './lib/notify';
 import {
@@ -123,6 +124,8 @@ async function main(): Promise<void> {
     purgeStale(ctx.db, ctx.now()).catch((err: unknown) =>
       log.error({ err }, 'housekeeping failed'),
     );
+    // P49: watermarked copies of a day gone by, an ended link, or a changed file.
+    purgeMarks(ctx).catch((err: unknown) => log.error({ err }, 'mark purge failed'));
   }, 3_600_000).unref();
   if (config.EMAIL_PROVIDER === 'smtp') {
     // Said at startup, not discovered when a client cannot sign in (QA 2026-11-09).

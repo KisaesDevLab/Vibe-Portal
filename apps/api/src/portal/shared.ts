@@ -13,20 +13,21 @@
 // A wrong id or key is "not found", whatever else is wrong with the request.
 
 import express, { type Request, type Response, type Router } from 'express';
-import { and, asc, desc, eq, gt, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import { parse, serialize } from 'cookie';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
 import { firmName, type Ctx } from '../context';
-import { sendBytes, sendStored } from '../files/send';
+import { wontFit } from '../firm/shares';
+import { dropMarksOfShare, markedCopy } from '../files/marks';
+import { sendStored } from '../files/send';
 import { previewOf } from '../files/types';
-import { WATERMARK_MAX_BYTES, watermarkPdf, watermarkText } from '../files/watermark';
 import { maskContact } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
 import { clientIp, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
-import { hit, LIMITS } from '../lib/rate-limit';
+import { hit, LIMITS, refund } from '../lib/rate-limit';
 import { randomToken, sameHash, sha256, sixDigitCode } from '../lib/secrets';
 
 export const SHARE_COOKIE = '__vibe_share';
@@ -144,6 +145,9 @@ export function sharedRouter(ctx: Ctx): Router {
         name: f.name,
         size: f.size,
         preview: previewOf(f.contentType),
+        // False when the file has since changed into something this link does not allow
+        // (Vibe Files replaced its content): listed, but it does not open.
+        available: wontFit(s, f) === null,
       })),
     };
   };
@@ -187,18 +191,17 @@ export function sharedRouter(ctx: Ctx): Router {
       if (last && now.getTime() - last.createdAt.getTime() < CODE_WAIT_SECONDS * 1000) {
         throw new HttpError(429, 'code_wait');
       }
-      // Counted in one statement, so two calls at once cannot both get a code.
-      if (!(await hit(ctx.db, `outside:code:min:${s.id}`, LIMITS.outsideCodeMinute, now))) {
+      // Counted in one statement, so two calls at once cannot both get a code. Given back if
+      // the email then fails: a code never sent does not use up the minute or the day.
+      const perMinute = `outside:code:min:${s.id}`;
+      const perDay = `outside:code:day:${s.id}`;
+      if (!(await hit(ctx.db, perMinute, LIMITS.outsideCodeMinute, now))) {
         throw new HttpError(429, 'code_wait');
       }
-      if (!(await hit(ctx.db, `outside:code:day:${s.id}`, LIMITS.outsideCodeDay, now))) {
+      if (!(await hit(ctx.db, perDay, LIMITS.outsideCodeDay, now))) {
+        await refund(ctx.db, perMinute, LIMITS.outsideCodeMinute, now);
         throw new HttpError(429, 'too_many_codes');
       }
-      // One live code: the earlier ones stop working.
-      await ctx.db
-        .update(schema.fileShareCode)
-        .set({ usedAt: now })
-        .where(and(eq(schema.fileShareCode.shareId, s.id), isNull(schema.fileShareCode.usedAt)));
       const code = sixDigitCode();
       const [row] = await ctx.db
         .insert(schema.fileShareCode)
@@ -209,6 +212,7 @@ export function sharedRouter(ctx: Ctx): Router {
           expiresAt: new Date(now.getTime() + SHARE_CODE_MINUTES * 60_000),
         })
         .returning({ id: schema.fileShareCode.id });
+      if (!row) throw new Error('code not stored');
       const text = [
         `Your access code is: ${code}`,
         '',
@@ -221,11 +225,23 @@ export function sharedRouter(ctx: Ctx): Router {
         await ctx.notifier.send(messageTo(s.recipientEmail, 'Your document access code', text));
       } catch (err) {
         ctx.log.error({ err, channel: 'email' }, 'notification failed');
-        if (row) {
-          await ctx.db.delete(schema.fileShareCode).where(eq(schema.fileShareCode.id, row.id));
-        }
+        // The earlier code, if any, still works: nothing new reached the mailbox.
+        await ctx.db.delete(schema.fileShareCode).where(eq(schema.fileShareCode.id, row.id));
+        await refund(ctx.db, perMinute, LIMITS.outsideCodeMinute, now);
+        await refund(ctx.db, perDay, LIMITS.outsideCodeDay, now);
         throw new HttpError(502, 'email_failed');
       }
+      // One live code: once the new one is sent, the earlier ones stop working.
+      await ctx.db
+        .update(schema.fileShareCode)
+        .set({ usedAt: now })
+        .where(
+          and(
+            eq(schema.fileShareCode.shareId, s.id),
+            isNull(schema.fileShareCode.usedAt),
+            ne(schema.fileShareCode.id, row.id),
+          ),
+        );
       await record(ctx.db, 'outside_code_sent', recipient(s), {
         clientId: s.clientId,
         detail: { shareId: s.id },
@@ -291,6 +307,7 @@ export function sharedRouter(ctx: Ctx): Router {
             .where(and(eq(schema.fileShare.id, s.id), isNull(schema.fileShare.revokedAt)))
             .returning({ id: schema.fileShare.id });
           await ctx.db.delete(schema.fileShareGrant).where(eq(schema.fileShareGrant.shareId, s.id));
+          await dropMarksOfShare(ctx, s.id);
           if (ended.length > 0) {
             await record(
               ctx.db,
@@ -365,6 +382,8 @@ export function sharedRouter(ctx: Ctx): Router {
         );
       const f = row?.f;
       if (!f || !f.blobKey || !f.dekWrapped) throw new HttpError(404, 'not_found');
+      // The file may have changed since the link was made: the link's rules hold for it as it is.
+      if (wontFit(s, f)) throw new HttpError(409, 'not_available');
 
       const preview = previewOf(f.contentType);
       const inline = mode === 'view' && preview !== null;
@@ -383,30 +402,34 @@ export function sharedRouter(ctx: Ctx): Router {
       const inlineType = inline ? f.contentType : null;
 
       if (s.watermark && preview === 'pdf') {
-        // Marked or not sent: an unmarked copy never goes out in place of a marked one.
-        if (f.size > WATERMARK_MAX_BYTES) throw new HttpError(422, 'watermark_failed');
-        let plain: Buffer;
-        try {
-          plain = await ctx.blobs.read(blobKey, ctx.keyring.unwrap(new Uint8Array(dekWrapped)));
-        } catch (err) {
-          ctx.log.error({ err, id: f.id }, 'stored file failed to decrypt');
-          throw new HttpError(500, 'file_unreadable');
-        }
-        let marked: Uint8Array;
-        try {
-          marked = await watermarkPdf(
-            plain,
-            watermarkText(
-              { name: s.recipientName, email: s.recipientEmail, organization: s.organization },
-              ctx.now(),
-            ),
+        // Marked or not sent: an unmarked copy never goes out in place of a marked one. The
+        // marked copy is made once a day (in a worker) and kept; see files/marks.ts.
+        const source = { id: f.id, blobKey, dekWrapped, size: f.size };
+        const send = async (fresh: boolean): Promise<void> => {
+          const m = await markedCopy(ctx, s, source, fresh);
+          await sendStored(
+            ctx,
+            res,
+            {
+              id: f.id,
+              blobKey: m.blobKey,
+              dekWrapped: m.dekWrapped,
+              size: m.size,
+              name: f.name,
+              inlineType,
+            },
+            noted,
           );
+        };
+        try {
+          await send(false);
         } catch (err) {
-          ctx.log.warn({ err, id: f.id }, 'file could not be watermarked');
-          throw new HttpError(422, 'watermark_failed');
+          // A kept copy that cannot be read is made again, once, before anything was sent.
+          if (!(err instanceof HttpError) || err.code !== 'file_unreadable' || res.headersSent) {
+            throw err;
+          }
+          await send(true);
         }
-        await noted();
-        sendBytes(res, marked, { name: f.name, inlineType });
         return;
       }
 

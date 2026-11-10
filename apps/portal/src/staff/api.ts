@@ -56,7 +56,7 @@ export function staffSay(err: unknown): string {
     cannot_watermark:
       'One of those PDFs cannot be watermarked (it may be locked with a password or damaged). Send it without the watermark.',
     recipient_has_too_many:
-      'That person already has 5 secure links that still work. Revoke one first.',
+      'That person already has 5 secure links for this client that still work. Revoke one first.',
     too_many_shares: 'You have sent 50 secure links today. Try again tomorrow.',
     email_failed:
       'The email could not be sent, so no link was made. Check the address and try again.',

@@ -18,20 +18,24 @@ import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
 import { firmName, type Ctx } from '../context';
+import { dropMarksOfShare } from '../files/marks';
+import { readPlain } from '../files/send';
 import { previewOf } from '../files/types';
-import { WATERMARK_MAX_BYTES, watermarkPdf, watermarkText } from '../files/watermark';
+import { checkPdf, WATERMARK_MAX_BYTES } from '../files/watermark';
 import { normalizeEmail } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
-import { hit, LIMITS } from '../lib/rate-limit';
+import { hit, LIMITS, refund } from '../lib/rate-limit';
 import { randomToken, sha256 } from '../lib/secrets';
 import type { StaffSession } from '../staff/auth';
 import { inScope, mustSee } from '../staff/scope';
 
 export const SHARE_MAX_FILES = 20;
 export const SHARE_MAX_DAYS = 90;
-/** Links one recipient may hold at a time, across the firm (as Time & Billing). */
+/** Working links one recipient may hold for one client (Time & Billing counts across the firm;
+ *  per client here, so staff limited to some clients are never refused over links they cannot
+ *  see: P49 review). */
 export const SHARE_MAX_PER_RECIPIENT = 5;
 const LIST_MAX = 200;
 
@@ -72,6 +76,24 @@ export function shareLink(ctx: Pick<Ctx, 'portalUrl'>, id: string, secret: strin
 }
 
 type ShareRow = typeof schema.fileShare.$inferSelect;
+
+/**
+ * Why a file cannot be in a link, or null when it can. Checked when the link is made, and again
+ * each time it is opened: Vibe Files may since have replaced the file's content with something
+ * the link does not allow (P49 review).
+ */
+export function wontFit(
+  s: Pick<ShareRow, 'canDownload' | 'watermark'>,
+  f: { contentType: string; size: number },
+): 'view_only_needs_preview' | 'too_large_to_watermark' | null {
+  const preview = previewOf(f.contentType);
+  // "View only" means the page shows it: a file the page cannot show could only be saved.
+  if (!s.canDownload && preview === null) return 'view_only_needs_preview';
+  if (s.watermark && preview === 'pdf' && f.size > WATERMARK_MAX_BYTES) {
+    return 'too_large_to_watermark';
+  }
+  return null;
+}
 
 export function shareStatus(
   s: Pick<ShareRow, 'revokedAt' | 'revokedBy' | 'expiresAt' | 'opens'>,
@@ -118,61 +140,62 @@ export function firmSharesRouter(ctx: Ctx): Router {
       if (files.length !== ids.length || files.some((f) => !f.blobKey || !f.dekWrapped)) {
         throw new HttpError(400, 'file_not_found');
       }
-      // "View only" means the page shows it: a file the page cannot show could only be saved.
-      if (!input.canDownload && files.some((f) => previewOf(f.contentType) === null)) {
-        throw new HttpError(400, 'view_only_needs_preview');
-      }
-      const pdfs = input.watermark ? files.filter((f) => previewOf(f.contentType) === 'pdf') : [];
-      if (pdfs.some((f) => f.size > WATERMARK_MAX_BYTES)) {
-        throw new HttpError(400, 'too_large_to_watermark');
-      }
-
-      const now = ctx.now();
-      const [held] = await ctx.db
-        .select({ n: sql<number>`count(*)` })
-        .from(schema.fileShare)
-        .where(
-          and(
-            eq(schema.fileShare.recipientEmail, email),
-            isNull(schema.fileShare.revokedAt),
-            gt(schema.fileShare.expiresAt, now),
-          ),
-        );
-      if (Number(held?.n ?? 0) >= SHARE_MAX_PER_RECIPIENT) {
-        throw new HttpError(429, 'recipient_has_too_many');
-      }
-      if (
-        !(await hit(ctx.db, `outside-share:${staff.staffId}`, LIMITS.outsideSharePerStaff, now))
-      ) {
-        throw new HttpError(429, 'too_many_shares');
+      for (const f of files) {
+        const why = wontFit(input, f);
+        if (why) throw new HttpError(400, why);
       }
 
       // A PDF that cannot be marked (locked with a password, damaged) is found out now, by the
-      // staff member, not later by the recipient.
-      const sample = watermarkText({ name, email, organization }, now);
-      for (const f of pdfs) {
-        let plain: Buffer;
-        try {
-          plain = await ctx.blobs.read(
-            f.blobKey as string,
-            ctx.keyring.unwrap(new Uint8Array(f.dekWrapped as Buffer)),
-          );
-        } catch (err) {
-          ctx.log.error({ err, id: f.id }, 'stored file failed to decrypt');
-          throw new HttpError(500, 'file_unreadable');
+      // staff member, not later by the recipient. Only read here, in a worker: marking waits
+      // until the recipient opens it.
+      if (input.watermark) {
+        for (const f of files) {
+          if (previewOf(f.contentType) !== 'pdf') continue;
+          const plain = await readPlain(ctx, {
+            id: f.id,
+            blobKey: f.blobKey as string,
+            dekWrapped: f.dekWrapped as Buffer,
+          });
+          try {
+            await checkPdf(plain);
+          } catch {
+            throw new HttpError(400, 'cannot_watermark');
+          }
         }
-        try {
-          await watermarkPdf(plain, sample);
-        } catch {
-          throw new HttpError(400, 'cannot_watermark');
-        }
+      }
+
+      const now = ctx.now();
+      // Counted now and given back if no link goes out: a refused or failed try is not a link.
+      const quota = `outside-share:${staff.staffId}`;
+      if (!(await hit(ctx.db, quota, LIMITS.outsideSharePerStaff, now))) {
+        await refund(ctx.db, quota, LIMITS.outsideSharePerStaff, now);
+        throw new HttpError(429, 'too_many_shares');
       }
 
       const id = randomUUID();
       const secret = randomToken();
       const expiresAt = new Date(now.getTime() + input.days * 86_400_000);
       const actor = actorOf(req);
-      await ctx.db.transaction(async (tx) => {
+      const made = await ctx.db.transaction(async (tx) => {
+        // The client's row is held until the link is in, so two staff sending to the same
+        // recipient at once are counted one after the other.
+        await tx
+          .select({ id: schema.clients.id })
+          .from(schema.clients)
+          .where(eq(schema.clients.id, client.id))
+          .for('update');
+        const [held] = await tx
+          .select({ n: sql<number>`count(*)` })
+          .from(schema.fileShare)
+          .where(
+            and(
+              eq(schema.fileShare.clientId, client.id),
+              eq(schema.fileShare.recipientEmail, email),
+              isNull(schema.fileShare.revokedAt),
+              gt(schema.fileShare.expiresAt, now),
+            ),
+          );
+        if (Number(held?.n ?? 0) >= SHARE_MAX_PER_RECIPIENT) return false;
         await tx.insert(schema.fileShare).values({
           id,
           clientId: client.id,
@@ -190,7 +213,12 @@ export function firmSharesRouter(ctx: Ctx): Router {
         await tx
           .insert(schema.fileShareItem)
           .values(files.map((f) => ({ shareId: id, fileId: f.id })));
+        return true;
       });
+      if (!made) {
+        await refund(ctx.db, quota, LIMITS.outsideSharePerStaff, now);
+        throw new HttpError(429, 'recipient_has_too_many');
+      }
 
       // The link exists nowhere but in this email: if it cannot be sent, there is no share.
       const firm = await firmName(ctx);
@@ -216,6 +244,7 @@ export function firmSharesRouter(ctx: Ctx): Router {
       } catch (err) {
         ctx.log.error({ err, channel: 'email' }, 'notification failed');
         await ctx.db.delete(schema.fileShare).where(eq(schema.fileShare.id, id));
+        await refund(ctx.db, quota, LIMITS.outsideSharePerStaff, now);
         throw new HttpError(502, 'email_failed');
       }
 
@@ -305,8 +334,9 @@ export function firmSharesRouter(ctx: Ctx): Router {
         .set({ revokedAt: ctx.now(), revokedBy: actor.name })
         .where(and(eq(schema.fileShare.id, share.id), isNull(schema.fileShare.revokedAt)))
         .returning({ id: schema.fileShare.id });
-      // A browser that had given the code stops at once.
+      // A browser that had given the code stops at once, and no marked copy stays behind.
       await ctx.db.delete(schema.fileShareGrant).where(eq(schema.fileShareGrant.shareId, share.id));
+      await dropMarksOfShare(ctx, share.id);
       if (ended.length > 0) {
         await record(ctx.db, 'outside_share_revoked', actor, {
           clientId: share.clientId,

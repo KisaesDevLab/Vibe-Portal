@@ -161,6 +161,24 @@ describe('a secure link (P49)', () => {
     expect(screen.getByText(/letter\.docx · 4\.8 MB/)).toBeTruthy();
   });
 
+  it('a file that changed into one the link does not allow is listed, but does not open', async () => {
+    const changed = { id: 'f3', name: 'notes.csv', size: 10, preview: null, available: false };
+    serve({
+      [`${BASE}/open`]: {
+        body: verified({
+          canDownload: true,
+          count: 2,
+          files: [changed, { ...PNG, available: true }],
+        }),
+      },
+    });
+    arrive();
+    expect(await screen.findByText(/Not available: this document has changed/)).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Download notes.csv' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'Download scan.png' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'View scan.png' })).toBeTruthy();
+  });
+
   it('says why a link does not work', async () => {
     const cases: [Reply | undefined, string][] = [
       [undefined, 'Link unavailable'],

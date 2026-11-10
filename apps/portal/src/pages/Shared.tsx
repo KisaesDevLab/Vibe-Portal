@@ -16,6 +16,8 @@ interface OutsideFile {
   name: string;
   size: number;
   preview: 'pdf' | 'image' | null;
+  /** False when the file has changed into something this link does not allow. */
+  available?: boolean;
 }
 
 interface Info {
@@ -142,7 +144,7 @@ export function Shared(): JSX.Element {
   const files = info?.files;
   useEffect(() => {
     const only = files?.length === 1 ? files[0] : undefined;
-    if (only?.preview) setViewing(only.id);
+    if (only?.preview && only.available !== false) setViewing(only.id);
   }, [files]);
 
   async function sendCode(): Promise<void> {
@@ -263,7 +265,7 @@ export function Shared(): JSX.Element {
   }
 
   const list = info.files ?? [];
-  const shown = list.find((f) => f.id === viewing);
+  const shown = list.find((f) => f.id === viewing && f.available !== false);
   const url = (f: OutsideFile, mode: 'view' | 'download'): string =>
     `/api/portal/shared/${id}/files/${f.id}/content?mode=${mode}`;
   const who = [info.recipientName, info.organization].filter(Boolean).join(', ');
@@ -297,7 +299,12 @@ export function Shared(): JSX.Element {
             <span style={{ overflowWrap: 'anywhere', flex: '1 1 200px' }}>
               {f.name} · {sizeText(f.size)}
             </span>
-            {f.preview && (
+            {f.available === false && (
+              <span style={{ fontSize: 13 }}>
+                Not available: this document has changed. Ask {info.firmName} to send it again.
+              </span>
+            )}
+            {f.available !== false && f.preview && (
               <Button
                 size="sm"
                 variant={viewing === f.id ? 'primary' : 'secondary'}
@@ -308,7 +315,7 @@ export function Shared(): JSX.Element {
                 View
               </Button>
             )}
-            {info.canDownload && (
+            {f.available !== false && info.canDownload && (
               <a href={url(f, 'download')} download={f.name} aria-label={`Download ${f.name}`}>
                 Download
               </a>
