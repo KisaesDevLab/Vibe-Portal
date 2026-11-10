@@ -28,6 +28,7 @@ import type { Ctx } from '../context';
 import { record } from '../lib/events';
 import { B2Objects, type B2Settings } from './b2';
 import { NotFound, type Bucket, type ObjectStore } from './objects';
+import { snapshotIfDue } from './snapshot';
 
 type FirmRow = typeof schema.firm.$inferSelect;
 type StorageMove = schema.StorageMove;
@@ -273,6 +274,10 @@ async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void>
     await ctx.db.update(schema.firm).set({ storageOther: false, storageMove: m });
     ctx.blobs.use(dst, null);
     ctx.log.info({ to, files: m.total }, 'stored files: move done');
+    // The bucket now holds the files: send it what opens them at once, not tomorrow.
+    if (to === 'b2') {
+      void snapshotIfDue(ctx, true).catch(() => undefined);
+    }
     await record(
       ctx.db,
       'storage_moved',
@@ -319,8 +324,11 @@ export async function resumeInterrupted(ctx: Ctx): Promise<void> {
 const LEFTOVER_AGE_MS = 24 * 3_600_000;
 const SWEEP_EVERY_MS = 23 * 3_600_000;
 
+/** Merged into what is there: the snapshot keeps its own fields in the same note. */
 async function saveNote(ctx: Ctx, n: StorageNote): Promise<void> {
-  await ctx.db.update(schema.firm).set({ storageNote: n });
+  await ctx.db.execute(
+    sql`UPDATE firm SET storage_note = coalesce(storage_note, '{}'::jsonb) || ${JSON.stringify(n)}::jsonb`,
+  );
 }
 
 /**

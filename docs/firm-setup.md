@@ -206,12 +206,25 @@ keep the seal file with it: it unlocks every stored file, and without it they ca
 original of everything you share, so the portal's files can always be shared again; client
 uploads not yet collected by Vibe Files exist only on the portal.
 
-With files in B2, the bucket holds the files and the snapshot holds what opens them: each file's
-own key is in the database, wrapped by the firm key that the seal file unlocks. To get files back
-after losing the appliance you need the bucket **and** a recent snapshot with its seal file; a
-file added after the last snapshot cannot be opened from the bucket alone. Take snapshots as often
-as before, and restore a snapshot made after the last move (an older one may name the other
-place).
+With files in B2, each file's own key is in the database, wrapped by the firm key that the seal
+file unlocks: the bucket alone opens nothing. So the portal also sends an encrypted copy of its
+database to the bucket every day, and as soon as a move to B2 finishes; the bucket keeps the
+newest 14. Settings > Storage shows when the last one went (**Send a database copy now** sends
+one at once), and History records it if one fails. **The bucket and the seal file are then
+enough to get everything back.** Keep a copy of `data/.firm-key.seal` somewhere other than the
+appliance and other than the bucket: without it neither the copies nor the files can be opened.
+Changes made after the last daily copy (a file shared since, a new client) are lost; the files
+themselves are still in the bucket and Vibe Files can share them again.
+
+To restore onto a new appliance from the bucket: install the portal, start it once and stop it,
+then run the portal's `snapshot-restore` command with the bucket's settings (`B2_ENDPOINT`,
+`B2_BUCKET`, `B2_KEY_ID`, `B2_APP_KEY`): `snapshot-restore list` shows the copies, and
+`snapshot-restore restore --seal <old .firm-key.seal>` restores the newest and puts the old seal
+file back in place. Start the portal; everyone signs in again. The installer does not offer this
+as a `vibe portal` command yet.
+
+`sudo vibe backup portal` snapshots are still worth taking: they hold the database as of when
+they were taken, and a restore from one made before the last move may name the other place.
 
 ## When something is wrong
 

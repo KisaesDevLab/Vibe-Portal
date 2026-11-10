@@ -47,6 +47,11 @@ export interface StorageNote {
   refused?: { at: string; count: number; total: number } | null;
   /** The bucket carries another installation's mark: no sweep runs. */
   otherBucket?: boolean;
+  /** The last database snapshot sent to the bucket, and the last failure since. */
+  snapshotAt?: string;
+  snapshotName?: string;
+  snapshotError?: string | null;
+  snapshotFailedAt?: string;
 }
 
 export const firm = pgTable('firm', {

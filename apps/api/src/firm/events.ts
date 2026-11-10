@@ -41,6 +41,7 @@ const ADMIN_KINDS: EventKind[] = [
   'storage_moved',
   'storage_swept',
   'storage_sweep_refused',
+  'storage_snapshot_failed',
 ];
 
 export function firmEventsRouter(ctx: Ctx): Router {

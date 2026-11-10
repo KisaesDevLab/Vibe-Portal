@@ -1243,6 +1243,8 @@ interface StorageData {
     sweptAt?: string;
     refused?: { at: string; count: number; total: number } | null;
     otherBucket?: boolean;
+    snapshotAt?: string;
+    snapshotError?: string | null;
   } | null;
 }
 
@@ -1314,6 +1316,30 @@ function Storage(): JSX.Element {
               The bucket carries another portal&rsquo;s mark, so the daily check for leftover files
               does not run on it.
             </p>
+          )}
+          {d.storage === 'b2' && (
+            <div style={{ display: 'grid', gap: 4 }}>
+              <span>
+                A copy of the portal&rsquo;s database, encrypted, goes to the bucket every day: with
+                the appliance&rsquo;s firm key file it is enough to get every file back.{' '}
+                {d.note?.snapshotAt
+                  ? `Last sent ${when(d.note.snapshotAt)}.`
+                  : 'None has been sent yet.'}
+              </span>
+              {d.note?.snapshotError && (
+                <span role="alert">The last one failed: {d.note.snapshotError}</span>
+              )}
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy || running}
+                  onClick={() => void act('/v1/settings/storage/snapshot', { method: 'POST' })}
+                >
+                  Send a database copy now
+                </Button>
+              </div>
+            </div>
           )}
           <form
             style={{ display: 'grid', gap: 8 }}

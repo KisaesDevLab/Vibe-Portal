@@ -14,15 +14,19 @@ import { PassThrough, Readable } from 'node:stream';
 import { generateKey } from '@vibe/crypto';
 import { eq } from 'drizzle-orm';
 import { schema } from '@vibe-portal/db';
+import { createTestDb } from '@vibe-portal/db/testing';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { BlobStore } from '../files/blobs';
+import { openKeyring } from '../files/keyring';
 import { MemoryObjects, NotFound } from '../files/objects';
+import { openSnapshot, restoreSnapshot, snapshotIfDue } from '../files/snapshot';
 import { resumeInterrupted, runMove, sweep } from '../files/storage';
 import { createFirmKey } from '../firm/keys';
 import { createSetupLink } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
-import { CLIENT, world, type World } from './harness';
+import { CLIENT, fileServices, world, type World } from './harness';
 
 let w: World;
 let bucket: MemoryObjects;
@@ -533,5 +537,98 @@ describe('looking after the bucket (P51 follow-ups)', () => {
     await runMove(w.ctx);
     st = await w.firm('get', '/status').expect(200);
     expect([st.body.storage, st.body.storageMoving]).toEqual(['b2', false]);
+  });
+});
+
+const snapshots = (): string[] =>
+  [...bucket.noteItems.keys()].filter((n) => n.startsWith('snapshots/')).sort();
+
+describe('database snapshots in the bucket (P51)', () => {
+  it('the bucket and the seal file are enough: a new appliance gets every file back', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    const a = await shared('a.pdf', Buffer.from('%PDF shared a'));
+    await w.member('pat@example.test');
+    await move(boss, 'b2');
+    // Sent as soon as the files are in the bucket.
+    for (let i = 0; i < 100 && !snapshots().length; i++) {
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    expect(snapshots()).toHaveLength(1);
+    const data = bucket.noteItems.get(snapshots()[0] as string)?.body as Buffer;
+    // Encrypted: no name, address or password hash readable in it.
+    for (const plain of ['Example CPA', 'pat@example.test', 'kurt@example-cpa.test', 'argon2']) {
+      expect(data.includes(Buffer.from(plain))).toBe(false);
+    }
+    const s = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect(s.body.note.snapshotAt).toBeTruthy();
+
+    // A new appliance: an empty database, a seal file of its own.
+    const fresh = await createTestDb();
+    try {
+      const mine = await fileServices(fresh.db);
+      await expect(openSnapshot(data, join(mine.dir, '.firm-key.seal'))).rejects.toThrow(
+        'does not open this snapshot',
+      );
+      const opened = await openSnapshot(data, join(w.dir, '.firm-key.seal'));
+      await restoreSnapshot(fresh.db, opened);
+      // With the old seal file, the restored database opens the file from the bucket.
+      const keyring = await openKeyring(fresh.db, w.dir);
+      const blobs = new BlobStore(join(mine.dir, 'blobs'));
+      blobs.use(bucket, null);
+      const [f] = await fresh.db.select().from(schema.files).where(eq(schema.files.id, a));
+      const dek = keyring.unwrap(new Uint8Array(f?.dekWrapped as Buffer));
+      expect((await blobs.read(f?.blobKey as string, dek)).toString()).toBe('%PDF shared a');
+      // The same installation: the bucket's mark is its own. Sign-ins are not carried over.
+      const [firm] = await fresh.db.select().from(schema.firm);
+      const [old] = await w.t.db.select().from(schema.firm);
+      expect([firm?.installId, firm?.storage]).toEqual([old?.installId, 'b2']);
+      expect(await fresh.db.select().from(schema.sessions)).toEqual([]);
+      expect((await fresh.db.select().from(schema.portalIdentity)).length).toBe(
+        (await w.t.db.select().from(schema.portalIdentity)).length,
+      );
+      // History carries on after the restored rows.
+      await fresh.db
+        .insert(schema.events)
+        .values({ kind: 'settings_updated', actorKind: 'system', actor: 'test', detail: {} });
+      // A database with clients in it is not overwritten unless asked.
+      await expect(restoreSnapshot(fresh.db, opened)).rejects.toThrow('--replace');
+      await restoreSnapshot(fresh.db, opened, true);
+    } finally {
+      await fresh.close();
+    }
+  });
+
+  it('one a day, the newest fourteen kept; a failure is said once', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    // Files on the appliance: no snapshot is sent.
+    expect(await snapshotIfDue(w.ctx, true)).toBeNull();
+    await move(boss, 'b2');
+    for (let i = 0; i < 100 && !snapshots().length; i++) {
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    expect(await snapshotIfDue(w.ctx)).toBeNull();
+    for (let day = 0; day < 16; day++) {
+      w.later(24 * 60);
+      expect(await snapshotIfDue(w.ctx)).toMatch(/^snapshots\/\d{8}-\d{6}-\w+\.vps$/);
+    }
+    expect(snapshots()).toHaveLength(14);
+
+    bucket.down = true;
+    w.later(24 * 60);
+    await expect(snapshotIfDue(w.ctx)).rejects.toThrow('network down');
+    w.later(60);
+    await expect(snapshotIfDue(w.ctx)).rejects.toThrow('network down');
+    const failed = (await w.t.db.select().from(schema.events)).filter(
+      (e) => e.kind === 'storage_snapshot_failed',
+    );
+    expect(failed).toHaveLength(1);
+    const [f] = await w.t.db.select().from(schema.firm);
+    expect(f?.storageNote?.snapshotError).toBe('network down');
+    bucket.down = false;
+    await snapshotIfDue(w.ctx);
+    const [g] = await w.t.db.select().from(schema.firm);
+    expect(g?.storageNote?.snapshotError).toBeNull();
   });
 });

@@ -17,6 +17,7 @@ import { openKeyring } from './files/keyring';
 import { flush } from './files/notify-queue';
 import { purgeUploads } from './firm/uploads';
 import { purgeMarks } from './files/marks';
+import { snapshotIfDue } from './files/snapshot';
 import { applyStorage, resumeInterrupted, runMove, sweep } from './files/storage';
 import { purgeStale } from './lib/housekeeping';
 import { consoleNotifier, type Notifier } from './lib/notify';
@@ -139,6 +140,8 @@ async function main(): Promise<void> {
     purgeMarks(ctx).catch((err: unknown) => log.error({ err }, 'mark purge failed'));
     // P51: once a day, stored files whose delete failed (D9).
     sweep(ctx).catch((err: unknown) => log.error({ err }, 'stored file sweep failed'));
+    // P51: with files in B2, a database snapshot to the bucket once a day.
+    snapshotIfDue(ctx).catch(() => undefined);
   }, 3_600_000).unref();
   if (config.EMAIL_PROVIDER === 'smtp') {
     // Said at startup, not discovered when a client cannot sign in (QA 2026-11-09).

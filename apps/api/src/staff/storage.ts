@@ -9,6 +9,7 @@
 //   DELETE /api/staff/v1/settings/storage/b2     only while no file is on B2
 //   POST   /api/staff/v1/settings/storage/test   checks the saved bucket and key
 //   POST   /api/staff/v1/settings/storage/move   { to: 'b2' | 'local' }  runs in the background
+//   POST   /api/staff/v1/settings/storage/snapshot  sends a database snapshot to the bucket now
 
 import express, { type Request, type Response, type Router } from 'express';
 import { z } from 'zod';
@@ -28,6 +29,7 @@ import {
   runMove,
   storageState,
 } from '../files/storage';
+import { snapshotIfDue } from '../files/snapshot';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import type { StaffSession } from './auth';
@@ -185,6 +187,21 @@ export function storageRouter(ctx: Ctx): Router {
       await record(ctx.db, 'storage_move', who, { detail: { to } });
       void runMove(ctx);
       res.status(202).json(await storageState(ctx));
+    }),
+  );
+
+  r.post(
+    '/snapshot',
+    h(async (_req, res) => {
+      const [f] = await ctx.db.select().from(schema.firm);
+      if (f?.storage !== 'b2') throw new HttpError(409, 'snapshot_not_b2');
+      try {
+        await snapshotIfDue(ctx, true);
+      } catch (err) {
+        res.status(400).json({ error: 'b2_check_failed', detail: why(err) });
+        return;
+      }
+      res.json(await storageState(ctx));
     }),
   );
 

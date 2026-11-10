@@ -147,6 +147,27 @@ class Decrypt extends Transform {
   }
 }
 
+/** Seals a buffer held in memory the same way as a stored file (a database snapshot). */
+export async function sealBytes(plain: Buffer, key: Uint8Array): Promise<Buffer> {
+  return through(new Encrypt(key, Number.MAX_SAFE_INTEGER), plain);
+}
+
+/** Opens what sealBytes sealed; BadBlob if it was changed or cut off. */
+export async function openBytes(sealed: Buffer, key: Uint8Array): Promise<Buffer> {
+  return through(new Decrypt(key), sealed);
+}
+
+async function through(t: Transform, input: Buffer): Promise<Buffer> {
+  const out: Buffer[] = [];
+  t.on('data', (c: Buffer) => out.push(c));
+  await new Promise<void>((ok, fail) => {
+    t.on('end', ok);
+    t.on('error', fail);
+    t.end(input);
+  });
+  return Buffer.concat(out);
+}
+
 export interface Stored {
   blobKey: string;
   /** Plaintext size. */

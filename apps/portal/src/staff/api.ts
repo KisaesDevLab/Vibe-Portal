@@ -97,6 +97,7 @@ export function staffSay(err: unknown): string {
       'Files are stored in this bucket. Move them back to the appliance before changing the bucket or removing it.',
     move_running: 'A move is already under way.',
     already_there: 'The files are already there.',
+    snapshot_not_b2: 'Database snapshots go to the bucket once files are stored there.',
   };
   // The portal's own reason (Object Lock, another portal's bucket, no room), in full.
   if ((code === 'b2_refused' || code === 'no_room') && err instanceof StaffApiError && err.detail) {

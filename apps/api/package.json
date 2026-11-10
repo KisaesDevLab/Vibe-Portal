@@ -13,7 +13,8 @@
     "test": "vitest run --testTimeout=20000",
     "firm-key": "tsx --env-file-if-exists=../../.env src/scripts/firm-key.ts",
     "staff-setup": "tsx --env-file-if-exists=../../.env src/scripts/staff-setup.ts",
-    "storage-move": "tsx --env-file-if-exists=../../.env src/scripts/storage-move.ts"
+    "storage-move": "tsx --env-file-if-exists=../../.env src/scripts/storage-move.ts",
+    "snapshot-restore": "tsx --env-file-if-exists=../../.env src/scripts/snapshot-restore.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.600.0",
