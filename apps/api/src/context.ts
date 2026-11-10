@@ -12,6 +12,7 @@ import type { BlobStore } from './files/blobs';
 import type { Keyring } from './files/keyring';
 import type { Bucket } from './files/objects';
 import type { Message, Notifier } from './lib/notify';
+import type { VibeAuth } from '@kisaesdevlab/vibe-auth';
 
 /** The largest file a client may send or Vibe Files may share: under Cloudflare's 100 MB
  *  request limit (Free and Pro plans), which a file of 100 MiB would break. */
@@ -39,6 +40,8 @@ export interface Ctx {
   textsOff?: boolean;
   /** Emailed the first staff account's setup link while there is none (P52). */
   firstAdminEmail?: string;
+  /** Staff sign-in through Vibe Auth (P44); in "local" mode it only answers its status. */
+  sso?: VibeAuth;
 }
 
 /**

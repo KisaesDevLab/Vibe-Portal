@@ -32,6 +32,7 @@ import { record } from '../lib/events';
 import { body, clientIp, h, HttpError } from '../lib/http';
 import { hit, LIMITS } from '../lib/rate-limit';
 import { BY_EMAIL, firstAdminResend, firstAdminStatus } from './first-admin';
+import { BREAKGLASS_EMAIL, isBreakglass, type StaffSessions } from './sso';
 import { randomToken, sha256 } from '../lib/secrets';
 import {
   dummyHash,
@@ -60,6 +61,8 @@ export interface StaffSession {
   admin: boolean;
   /** Sees only the clients in `staff_client`, not every client (P48). */
   limited: boolean;
+  /** Signed in through Vibe Auth (P44): signing out also ends the Vibe Auth session. */
+  sso?: boolean;
 }
 
 declare global {
@@ -109,6 +112,7 @@ async function startSession(
   res: Response,
   staffId: string,
   email: string,
+  oidc?: { issuer: string; subject: string; sid?: string; idToken?: string },
 ): Promise<void> {
   const id = randomToken();
   const now = ctx.now();
@@ -119,6 +123,15 @@ async function startSession(
     createdAt: now,
     lastSeenAt: now,
     expiresAt: new Date(now.getTime() + STAFF_HOURS * 3_600_000),
+    // P44: from Vibe Auth, so back-channel logout can end it and sign-out can end it there too.
+    ...(oidc
+      ? {
+          oidcIssuer: oidc.issuer,
+          oidcSubject: oidc.subject,
+          oidcSid: oidc.sid ?? null,
+          oidcIdToken: oidc.idToken ?? null,
+        }
+      : {}),
   });
   await ctx.db
     .update(schema.staffUsers)
@@ -144,7 +157,10 @@ async function resolve(ctx: Ctx, req: Request): Promise<StaffSession | null> {
         gt(schema.sessions.expiresAt, now),
       ),
     );
-  if (!row || !row.u.active || !row.u.totpConfirmedAt) return null;
+  if (!row || !row.u.active) return null;
+  // A finished account (password and authenticator), or a session that came from Vibe Auth
+  // (P44: its own sign-in and second factor), or the emergency account Vibe Auth set up.
+  if (!row.u.totpConfirmedAt && !row.s.oidcSubject && !isBreakglass(row.u.email)) return null;
   if (now.getTime() - row.s.lastSeenAt.getTime() > STAFF_IDLE_MINUTES * 60_000) {
     await ctx.db.delete(schema.sessions).where(eq(schema.sessions.idHash, idHash));
     return null;
@@ -161,6 +177,22 @@ async function resolve(ctx: Ctx, req: Request): Promise<StaffSession | null> {
     admin: row.u.admin,
     // Read on every call, so a change an admin makes applies at once. An admin sees every client.
     limited: !row.u.admin && !row.u.allClients,
+    sso: Boolean(row.s.oidcSubject),
+  };
+}
+
+/** The portal's staff sessions, for Vibe Auth's session adapter (P44). */
+export function staffSessions(ctx: Ctx): StaffSessions {
+  return {
+    start: (res, staffId, email, oidc) => startSession(ctx, res, staffId, email, oidc),
+    async current(req) {
+      const s = await resolve(ctx, req);
+      return s ? { staffId: s.staffId, idHash: s.idHash } : null;
+    },
+    async end(res, idHash) {
+      if (idHash) await ctx.db.delete(schema.sessions).where(eq(schema.sessions.idHash, idHash));
+      clearCookie(res, ctx.cookie.secure);
+    },
   };
 }
 
@@ -179,10 +211,20 @@ export function requireStaff(ctx: Ctx): RequestHandler {
 }
 
 export async function finishedCount(db: Database): Promise<number> {
+  // A finished account: password and authenticator set, or signed in through Vibe Auth (P44).
+  // Not the emergency account Vibe Auth provisions: on its own it must not end first-time setup.
   const [r] = await db
     .select({ n: count() })
     .from(schema.staffUsers)
-    .where(isNotNull(schema.staffUsers.totpConfirmedAt));
+    .where(
+      and(
+        ne(schema.staffUsers.email, BREAKGLASS_EMAIL),
+        or(
+          isNotNull(schema.staffUsers.totpConfirmedAt),
+          sql`${schema.staffUsers.id}::text IN (SELECT user_id FROM auth_identities)`,
+        ),
+      ),
+    );
   return Number(r?.n ?? 0);
 }
 
@@ -482,29 +524,41 @@ export function staffAuthRouter(ctx: Ctx): Router {
     h(async (req, res) => {
       const input = body(LoginSchema, req);
       await limit(req, 'stafflogin', LIMITS.loginPerIp);
-      const email = normalizeEmail(input.email) ?? '';
+      const email = normalizeEmail(input.email) ?? input.email.trim().toLowerCase();
+      // P44: with "single sign-on only", the portal's own sign-in is for the emergency account.
+      if (ctx.sso && !ctx.sso.localLoginAllowed(email).allowed) {
+        throw new HttpError(403, 'local_login_disabled');
+      }
       const now = ctx.now();
       const [u] = email
         ? await ctx.db.select().from(schema.staffUsers).where(eq(schema.staffUsers.email, email))
         : [];
-      const usable = u && u.active && u.passwordHash && u.totpConfirmedAt && u.totpSecretEnc;
+      // The emergency account Vibe Auth provisions has a password and no authenticator until
+      // someone sets one up for it (a setup link): the password alone, as Vibe Auth intends.
+      const passwordOnly = Boolean(u && isBreakglass(u.email) && !u.totpConfirmedAt);
+      const usable =
+        u &&
+        u.active &&
+        u.passwordHash &&
+        (passwordOnly || (u.totpConfirmedAt && u.totpSecretEnc));
       if (!usable) {
         await verifyPassword(await dummyHash(), input.password);
         throw new HttpError(401, 'sign_in_failed');
       }
-      const secret = Buffer.from(
-        ctx.keyring.unwrap(new Uint8Array(u.totpSecretEnc as Buffer)),
-      ).toString();
+      const secret = passwordOnly
+        ? ''
+        : Buffer.from(ctx.keyring.unwrap(new Uint8Array(u.totpSecretEnc as Buffer))).toString();
       const passwordOk = await verifyPassword(u.passwordHash as string, input.password);
       if (u.lockedUntil && u.lockedUntil > now) {
         // Only someone with the right password and code learns the account is locked; to
         // anyone else it looks like any wrong try (or an unknown email).
-        if (passwordOk && verifyTotp(secret, input.code, now)) {
+        if (passwordOk && (passwordOnly || verifyTotp(secret, input.code, now))) {
           throw new HttpError(423, 'locked');
         }
         throw new HttpError(401, 'sign_in_failed');
       }
-      const ok = passwordOk && (await useTotp(ctx.db, u.id, secret, input.code, now));
+      const ok =
+        passwordOk && (passwordOnly || (await useTotp(ctx.db, u.id, secret, input.code, now)));
       if (!ok) {
         // Counted in the database, so tries at the same moment are all counted.
         const [f] = await ctx.db
@@ -521,6 +575,10 @@ export function staffAuthRouter(ctx: Ctx): Router {
         throw new HttpError(401, 'sign_in_failed');
       }
       await startSession(ctx, res, u.id, u.email);
+      // Vibe Auth records each use of the emergency account.
+      await ctx.sso
+        ?.afterLocalLogin({ userId: u.id, email: u.email, ip: clientIp(req) })
+        .catch(() => undefined);
       res.json({ ok: true });
     }),
   );
@@ -541,6 +599,7 @@ export function staffAuthRouter(ctx: Ctx): Router {
     h(async (req, res) => {
       const s = req.staff as StaffSession;
       res.json({
+        sso: Boolean(s.sso),
         email: s.email,
         name: s.name,
         firmName: await firmName(ctx),

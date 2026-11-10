@@ -21,7 +21,9 @@ import { snapshotIfDue } from './files/snapshot';
 import { applyStorage, resumeInterrupted, runMove, sweep } from './files/storage';
 import { normalizeEmail } from './lib/contact';
 import { purgeStale } from './lib/housekeeping';
+import { staffSessions } from './staff/auth';
 import { firstAdminOnStart } from './staff/first-admin';
+import { createStaffSso } from './staff/sso';
 import { consoleNotifier, type Notifier } from './lib/notify';
 import {
   checkSmtp,
@@ -129,6 +131,11 @@ async function main(): Promise<void> {
   };
   moveNow();
   setInterval(moveNow, 30_000).unref();
+  // P44: staff sign-in through Vibe Auth, beside the portal's own. In "local" mode (until the
+  // firm turns it on) it changes nothing; "single sign-on only" without the emergency account
+  // stops the portal here, as Vibe Auth requires.
+  ctx.sso = createStaffSso(ctx, staffSessions(ctx));
+  await ctx.sso.start();
   const app = createApp({
     pingDb: ping,
     ctx,

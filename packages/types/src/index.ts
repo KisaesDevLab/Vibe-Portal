@@ -35,6 +35,7 @@ export const EVENT_KINDS = [
   'sign_in',
   'sign_out',
   'staff_sign_in',
+  'staff_sso',
   'client_updated',
   // A person adds or removes the mobile number they sign in with (P50).
   'phone_added',

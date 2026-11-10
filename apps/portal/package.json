@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@kisaesdevlab/vibe-auth": "1.0.19",
     "@vibe-portal/types": "workspace:*",
     "@vibe/ui": "workspace:*",
     "pdfjs-dist": "^4.10.38",

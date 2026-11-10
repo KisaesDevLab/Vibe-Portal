@@ -29,6 +29,7 @@ const Query = z.object({
  *  read back from these, so staff who are not admins do not get them (QA 2026-11-10). */
 const ADMIN_KINDS: EventKind[] = [
   'staff_sign_in',
+  'staff_sso',
   'settings_updated',
   'staff_added',
   'staff_on',

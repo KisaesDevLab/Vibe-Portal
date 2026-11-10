@@ -418,6 +418,11 @@ export const sessions = pgTable('sessions', {
   lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
   expiresAt: ts('expires_at').notNull(),
   keepSignedIn: boolean('keep_signed_in').notNull().default(false),
+  /** A staff session that came from Vibe Auth (P44): its identity and Vibe Auth session. */
+  oidcIssuer: text('oidc_issuer'),
+  oidcSubject: text('oidc_subject'),
+  oidcSid: text('oidc_sid'),
+  oidcIdToken: text('oidc_id_token'),
 });
 
 export const signInChallenge = pgTable('sign_in_challenge', {
