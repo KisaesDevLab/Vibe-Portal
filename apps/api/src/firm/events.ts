@@ -35,6 +35,10 @@ const ADMIN_KINDS: EventKind[] = [
   'staff_access',
   'firm_key_created',
   'firm_key_revoked',
+  'storage_b2_saved',
+  'storage_b2_removed',
+  'storage_move',
+  'storage_moved',
 ];
 
 export function firmEventsRouter(ctx: Ctx): Router {

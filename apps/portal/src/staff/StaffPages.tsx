@@ -1219,7 +1219,198 @@ function Settings(): JSX.Element {
           </p>
         )}
       </Card>
+      <Storage />
     </div>
+  );
+}
+
+interface StorageData {
+  storage: 'local' | 'b2';
+  bothInUse: boolean;
+  b2: { endpoint: string; bucket: string; keyId: string; hasKey: boolean };
+  move: {
+    to: 'local' | 'b2';
+    state: 'requested' | 'running' | 'done' | 'failed' | 'interrupted';
+    by: string;
+    startedAt?: string;
+    finishedAt?: string;
+    copied?: number;
+    total?: number;
+    error?: string;
+  } | null;
+}
+
+const PLACE = { local: 'on the appliance', b2: 'in the B2 bucket' } as const;
+
+/** Where stored files live, the B2 bucket, and moving files there or back (P51). */
+function Storage(): JSX.Element {
+  const s = useLoad<StorageData>('/v1/settings/storage');
+  const { act, busy, error } = useAct(s.reload);
+  const [b2, setB2] = useState({ endpoint: '', bucket: '', keyId: '', appKey: '' });
+  const [tested, setTested] = useState(false);
+  const d = s.data;
+  useEffect(() => {
+    if (d)
+      setB2((v) => ({ ...v, endpoint: d.b2.endpoint, bucket: d.b2.bucket, keyId: d.b2.keyId }));
+  }, [d]);
+  const running = d?.move?.state === 'requested' || d?.move?.state === 'running';
+  // Follow a move while it runs.
+  useEffect(() => {
+    if (!running) return undefined;
+    const t = window.setInterval(s.reload, 2000);
+    return () => window.clearInterval(t);
+  }, [running, s.reload]);
+  // Files are in the bucket (or on their way): it cannot be changed or removed.
+  const locked = Boolean(d && (d.storage === 'b2' || d.bothInUse));
+  const move = (to: 'b2' | 'local', question: string): void => {
+    if (window.confirm(question)) {
+      void act('/v1/settings/storage/move', { method: 'POST', body: { to } });
+    }
+  };
+  return (
+    <Card title="Storage">
+      <Status load={s} what="the storage settings" />
+      <Problem text={error} />
+      {d && (
+        <div style={{ display: 'grid', gap: 12, maxWidth: 520 }}>
+          <p style={{ margin: 0 }}>
+            Shared files and client uploads are stored <strong>{PLACE[d.storage]}</strong>
+            {d.bothInUse && !running
+              ? ', and some still in the other place: move again to finish'
+              : ''}
+            . They are encrypted with the firm key before they are stored, wherever that is. Keep
+            the appliance backup of the firm key: without it no file can be opened.
+          </p>
+          {d.move && (
+            <p role="status" style={{ margin: 0 }}>
+              {d.move.state === 'requested' && `Moving ${PLACE[d.move.to]}: starting…`}
+              {d.move.state === 'running' &&
+                `Moving ${PLACE[d.move.to]}: ${d.move.copied ?? 0} of ${d.move.total ?? '…'} files checked.`}
+              {d.move.state === 'done' &&
+                `Moved ${PLACE[d.move.to]} ${when(d.move.finishedAt ?? null)} (${d.move.total ?? 0} files), asked by ${d.move.by}.`}
+              {d.move.state === 'failed' &&
+                `The move ${PLACE[d.move.to]} stopped: ${d.move.error ?? 'unknown'}. Every file still opens; move again to finish.`}
+              {d.move.state === 'interrupted' &&
+                `The move ${PLACE[d.move.to]} was cut off by a restart. Every file still opens; move again to finish.`}
+            </p>
+          )}
+          <form
+            style={{ display: 'grid', gap: 8 }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              setTested(false);
+              const { appKey, ...rest } = b2;
+              void act('/v1/settings/storage/b2', {
+                method: 'PUT',
+                body: appKey ? { ...rest, appKey } : rest,
+              }).then((r) => {
+                if (r) setB2((v) => ({ ...v, appKey: '' }));
+              });
+            }}
+          >
+            <strong>Backblaze B2 bucket</strong>
+            <span style={{ fontSize: 13 }}>
+              Use a bucket for the portal alone, and an application key limited to it that may read,
+              write, list and delete files. Saving checks the bucket with a small test file first.
+            </span>
+            <Input
+              label="Endpoint (on the bucket's page, e.g. s3.us-west-004.backblazeb2.com)"
+              name="b2Endpoint"
+              value={b2.endpoint}
+              disabled={locked}
+              onChange={(e) => setB2({ ...b2, endpoint: e.target.value })}
+            />
+            <Input
+              label="Bucket name"
+              name="b2Bucket"
+              value={b2.bucket}
+              disabled={locked}
+              onChange={(e) => setB2({ ...b2, bucket: e.target.value })}
+            />
+            <Input
+              label="Key ID"
+              name="b2KeyId"
+              value={b2.keyId}
+              onChange={(e) => setB2({ ...b2, keyId: e.target.value })}
+            />
+            <Input
+              label={
+                d.b2.hasKey
+                  ? 'Application key (leave empty to keep the saved one)'
+                  : 'Application key'
+              }
+              name="b2AppKey"
+              type="password"
+              autoComplete="off"
+              value={b2.appKey}
+              onChange={(e) => setB2({ ...b2, appKey: e.target.value })}
+            />
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Button type="submit" disabled={busy || running}>
+                Check and save
+              </Button>
+              {d.b2.hasKey && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    setTested(false);
+                    void act('/v1/settings/storage/test', { method: 'POST' }).then((r) => {
+                      if (r) setTested(true);
+                    });
+                  }}
+                >
+                  Test
+                </Button>
+              )}
+              {d.b2.hasKey && !locked && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void act('/v1/settings/storage/b2', { method: 'DELETE' })}
+                >
+                  Remove bucket
+                </Button>
+              )}
+            </div>
+            {tested && <p role="status">The bucket works with the saved key.</p>}
+          </form>
+          {d.b2.hasKey && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {(d.storage !== 'b2' || d.bothInUse) && (
+                <Button
+                  disabled={busy || running}
+                  onClick={() =>
+                    move(
+                      'b2',
+                      'Move every stored file to the B2 bucket? The portal keeps working while it runs. Files are deleted from the appliance only once all of them are in the bucket.',
+                    )
+                  }
+                >
+                  Move files to B2
+                </Button>
+              )}
+              {(d.storage !== 'local' || d.bothInUse) && (
+                <Button
+                  variant="secondary"
+                  disabled={busy || running}
+                  onClick={() =>
+                    move(
+                      'local',
+                      'Move every stored file back to the appliance? Check it has room for them first. Files are deleted from the bucket only once all of them are on the appliance.',
+                    )
+                  }
+                >
+                  Move files back to the appliance
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 

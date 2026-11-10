@@ -429,6 +429,87 @@ describe('staff page', () => {
     );
   });
 
+  it('settings: a B2 bucket is checked and saved, the key never shown, files moved (P51)', async () => {
+    const empty = {
+      storage: 'local',
+      bothInUse: false,
+      b2: { endpoint: '', bucket: '', keyId: '', hasKey: false },
+      move: null,
+    };
+    const saved = {
+      ...empty,
+      b2: {
+        endpoint: 's3.us-west-004.backblazeb2.com',
+        bucket: 'example-cpa-portal',
+        keyId: '004abc',
+        hasKey: true,
+      },
+    };
+    const routes: Record<string, Reply> = {
+      '/auth/me': ME,
+      '/v1/settings': SETTINGS,
+      '/v1/keys': { body: { keys: [] } },
+      '/v1/clients': { body: { clients: [] } },
+      '/v1/staff': { body: { staff: [ANN] } },
+      '/v1/settings/storage': { body: empty },
+      'PUT /v1/settings/storage/b2': {
+        status: 400,
+        body: { error: 'b2_check_failed', detail: 'Key not valid' },
+      },
+    };
+    const calls = serve(routes);
+    at('/staff/settings');
+    await screen.findByText(/stored/);
+    fireEvent.change(screen.getByLabelText(/^Endpoint/), {
+      target: { value: 's3.us-west-004.backblazeb2.com' },
+    });
+    fireEvent.change(screen.getByLabelText('Bucket name'), {
+      target: { value: 'example-cpa-portal' },
+    });
+    fireEvent.change(screen.getByLabelText('Key ID'), { target: { value: '004abc' } });
+    fireEvent.change(screen.getByLabelText('Application key'), { target: { value: 'K004secret' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Check and save' }));
+    expect(
+      await screen.findByText('The bucket could not be used with that key. B2 said: Key not valid'),
+    ).toBeTruthy();
+    expect(
+      calls.find((c) => c.method === 'PUT' && c.path === '/v1/settings/storage/b2')?.body,
+    ).toEqual({
+      endpoint: 's3.us-west-004.backblazeb2.com',
+      bucket: 'example-cpa-portal',
+      keyId: '004abc',
+      appKey: 'K004secret',
+    });
+
+    routes['PUT /v1/settings/storage/b2'] = { body: saved };
+    routes['/v1/settings/storage'] = { body: saved };
+    fireEvent.click(screen.getByRole('button', { name: 'Check and save' }));
+    // Saved: the key field empties and now says the saved one is kept if left empty.
+    const keyField = (await screen.findByLabelText(
+      'Application key (leave empty to keep the saved one)',
+    )) as HTMLInputElement;
+    expect(keyField.value).toBe('');
+
+    routes['POST /v1/settings/storage/move'] = {
+      status: 202,
+      body: { ...saved, move: { to: 'b2', state: 'requested', by: 'ann@firm.test' } },
+    };
+    routes['/v1/settings/storage'] = {
+      body: {
+        ...saved,
+        storage: 'b2',
+        bothInUse: true,
+        move: { to: 'b2', state: 'running', by: 'ann@firm.test', copied: 3, total: 10 },
+      },
+    };
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Move files to B2' }));
+    expect(await screen.findByText('Moving in the B2 bucket: 3 of 10 files checked.')).toBeTruthy();
+    expect(calls.find((c) => c.path === '/v1/settings/storage/move')?.body).toEqual({ to: 'b2' });
+    // Files are on their way to the bucket: it cannot be changed.
+    expect((screen.getByLabelText('Bucket name') as HTMLInputElement).disabled).toBe(true);
+  });
+
   it('staff who are not admins have no Settings; limited staff no Requests (P48)', async () => {
     serve({
       '/auth/me': { body: { ...(ME.body as object), admin: false, allClients: false } },

@@ -4,6 +4,17 @@
 
 import { ApiError } from '../api';
 
+/** An error answer; `detail` is B2's own reason when a bucket check fails (P51). */
+export class StaffApiError extends ApiError {
+  constructor(
+    status: number,
+    code: string,
+    readonly detail?: string,
+  ) {
+    super(status, code);
+  }
+}
+
 export async function staffApi<T>(
   path: string,
   init: { method?: string; body?: unknown; raw?: Blob } = {},
@@ -23,8 +34,8 @@ export async function staffApi<T>(
     headers,
     body,
   });
-  const data = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new ApiError(res.status, data.error ?? 'error');
+  const data = (await res.json().catch(() => ({}))) as { error?: string; detail?: string };
+  if (!res.ok) throw new StaffApiError(res.status, data.error ?? 'error', data.detail);
   return data as T;
 }
 
@@ -77,7 +88,20 @@ export function staffSay(err: unknown): string {
     invalid_json: 'Something went wrong. Try again.',
     json_required: 'Something went wrong. Try again.',
     network: 'The portal cannot be reached right now.',
+    b2_endpoint:
+      "The endpoint must be the bucket's S3 endpoint from Backblaze, like s3.us-west-004.backblazeb2.com.",
+    b2_bucket: 'A B2 bucket name is 6 to 63 letters, digits and hyphens.',
+    b2_app_key: 'Enter the application key.',
+    b2_not_set_up: 'Set up the B2 bucket first.',
+    b2_in_use:
+      'Files are stored in this bucket. Move them back to the appliance before changing the bucket or removing it.',
+    move_running: 'A move is already under way.',
+    already_there: 'The files are already there.',
   };
+  if (code === 'b2_check_failed') {
+    const why = err instanceof StaffApiError && err.detail ? ` B2 said: ${err.detail}` : '';
+    return `The bucket could not be used with that key.${why}`;
+  }
   return words[code] ?? 'Something went wrong. Try again.';
 }
 

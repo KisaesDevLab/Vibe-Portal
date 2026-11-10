@@ -17,6 +17,7 @@ import { openKeyring } from './files/keyring';
 import { flush } from './files/notify-queue';
 import { purgeUploads } from './firm/uploads';
 import { purgeMarks } from './files/marks';
+import { applyStorage, noteInterrupted, runMove } from './files/storage';
 import { purgeStale } from './lib/housekeeping';
 import { consoleNotifier, type Notifier } from './lib/notify';
 import {
@@ -110,6 +111,13 @@ async function main(): Promise<void> {
     blobs,
     textsOff: config.SMS_PROVIDER === 'none',
   };
+  // P51: stored files on the data volume or in B2, as Settings > Storage says. A move the last
+  // run did not finish is marked interrupted; one the appliance command asked for starts.
+  await noteInterrupted(ctx);
+  await applyStorage(ctx);
+  setInterval(() => {
+    runMove(ctx).catch((err: unknown) => log.error({ err }, 'storage move failed'));
+  }, 30_000).unref();
   const app = createApp({
     pingDb: ping,
     ctx,

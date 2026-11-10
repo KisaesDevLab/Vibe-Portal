@@ -55,7 +55,7 @@ Owner decisions, 2026-11-09 (Q&A):
 | API | Node 24 + Express + Drizzle + Zod (copied from TB `apps/api` portal/auth modules) |
 | Database | Postgres 16 (own database, own container, as `connect` does) |
 | Sessions | Postgres-backed (no Redis, to keep the app small) |
-| File storage | Local volume `/data/portal`, each blob encrypted at rest with the firm master key (TB `@vibe/crypto` envelope: XChaCha20-Poly1305, per-file DEK) |
+| File storage | Local volume `/data/portal`, or a Backblaze B2 bucket chosen on Settings > Storage (P51); each blob encrypted on the appliance with the firm master key before it is stored (TB `@vibe/crypto` envelope: XChaCha20-Poly1305, per-file DEK) |
 | Email / SMS | Appliance Email & SMS settings (`EMAIL_PROVIDER`, `SMS_PROVIDER`) |
 | License | PolyForm Small Business 1.0.0, as TB |
 
@@ -71,7 +71,7 @@ Owner decisions, 2026-11-09 (Q&A):
 | `apps/api/src/portal/files.ts`, `file-shares.ts` | partly | Files list/download kept; client-made share links (TB CP11) **out** of v1. Staff-made links to someone outside the client: `firm/shares.ts`, `portal/shared.ts` (P49), written for Vibe Portal |
 | `apps/api/src/files/visibility.ts` | rework | TB shows a file to the whole client; Vibe Portal shows it **per user** (D8) |
 | `packages/crypto`, `packages/ui`, `packages/types` | yes | |
-| `packages/storage` (B2) | no | Local volume only in v1 |
+| `packages/storage` (B2) | partly | `apps/api/src/files/b2.ts` after TB's `b2.ts`, cut down to put/get/remove/exists/list (P51) |
 
 Copying, not sharing a package, is deliberate (D1, D11): the two products then release on their own.
 Each copied file keeps a header line `// Copied from Vibe-Time-Billing <path> @ <commit>` and the
@@ -163,7 +163,8 @@ Intake inbox registration through Filer's existing shared-inbox setting.
 - `vibe install portal`; appears in Vibe Admin's app list.
 - Admin config fields: firm name, logo, colour, portal URL; **Create firm key** (shown once) and
   revoke; upload size limit.
-- Backups: Vibe Vault discovers the portal's Postgres and `/data/portal` volume.
+- Backups: Vibe Vault discovers the portal's Postgres and `/data/portal` volume. With files in B2
+  (P51) the volume holds only the firm key seal; the bucket holds the files.
 - With TB also installed: its own hostname (QUESTIONS P7), no shared state
   (D11).
 
@@ -257,5 +258,5 @@ Each phase ends with its tests green and a ship gate.
 ## 8. Out of scope (v1)
 
 Billing and payments, engagement letters and e-signature, document request lists, messaging,
-client-made share links, expiry of shared files (D9), migration into TB's portal (D11), B2/S3
-storage, sharing new files from the staff web page.
+client-made share links, expiry of shared files (D9), migration into TB's portal (D11), S3
+storage other than B2 (P51), sharing new files from the staff web page.

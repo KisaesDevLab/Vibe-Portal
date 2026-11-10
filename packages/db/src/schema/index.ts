@@ -23,6 +23,19 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 
+/** A move of the stored files between the data volume and B2 (P51). */
+export interface StorageMove {
+  to: 'local' | 'b2';
+  state: 'requested' | 'running' | 'done' | 'failed' | 'interrupted';
+  by: string;
+  requestedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  copied?: number;
+  total?: number;
+  error?: string;
+}
+
 export const firm = pgTable('firm', {
   id: smallint('id').primaryKey().default(1),
   name: text('name').notNull().default(''),
@@ -32,6 +45,18 @@ export const firm = pgTable('firm', {
   portalUrl: text('portal_url').notNull().default(''),
   uploadLimitBytes: bigint('upload_limit_bytes', { mode: 'number' }).notNull(),
   uploadKeepDays: integer('upload_keep_days').notNull(),
+  /** Where stored files live (P51). */
+  storage: text('storage', { enum: ['local', 'b2'] })
+    .notNull()
+    .default('local'),
+  /** Files may still be in the other place: reads look there too, removes reach both. */
+  storageOther: boolean('storage_other').notNull().default(false),
+  b2Endpoint: text('b2_endpoint').notNull().default(''),
+  b2Bucket: text('b2_bucket').notNull().default(''),
+  b2KeyId: text('b2_key_id').notNull().default(''),
+  /** The B2 application key, wrapped by the firm key. Never sent back to the page. */
+  b2AppKeyEnc: bytea('b2_app_key_enc'),
+  storageMove: jsonb('storage_move').$type<StorageMove>(),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });

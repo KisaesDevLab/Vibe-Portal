@@ -28,6 +28,7 @@ Each copied file's second line names its source path and TB commit. This file is
 | `packages/db/src/migrations.ts` | `packages/db/src/scripts/migrate.ts` | Runner split from the connection so tests use pglite |
 | `apps/api/src/files/keyring.ts` | `apps/api/src/crypto/store.ts` (pattern) | `FirmKeyManager` store over `firm_key_envelope`, sealed-on-disk mode |
 | `apps/api/src/files/heic.ts` | `apps/api/src/files/extract-for-naming.ts` | `convertHeicOffThread`, `looksLikeHeic` (worker thread) |
+| `apps/api/src/files/b2.ts` | `packages/storage/src/b2.ts` (`52126542`) | P51: S3 client against B2's endpoint; only put (multipart, streamed), get, remove (every version), exists, list; no presigning, no optional peer deps |
 | `apps/api/src/__tests__/fixtures/sample.heic` | `apps/api/src/files/__fixtures__/sample.heic` | Test photo |
 | `apps/api/src/lib/contact.ts` | `packages/core/src/auth/{sms-otp,email}.ts` | Same normalisation; adds `maskContact` |
 | `apps/api/src/auth/*`, `portal/*` | `apps/api/src/auth/portal-routes.ts`, `portal-invites/grant.ts`, `portal-access-requests/` | Same flow and endpoint shapes, rewritten for Postgres sessions and limits (no Redis, no JWT) |

@@ -167,6 +167,28 @@ whether it was opened and how often. **Revoke** ends a link at once, even while 
 - **History** shows each link sent and revoked, each code sent, and every view and download with
   the recipient's email.
 
+## Storing files in Backblaze B2 (optional)
+
+Shared files and client uploads are kept on the appliance unless you move them to a B2 bucket.
+They are encrypted on the appliance first, so B2 only ever holds files it cannot read.
+
+1. In Backblaze, make a **private bucket for the portal alone**, and an **application key** limited
+   to that bucket that may read, write, list and delete files.
+2. On the staff page, **Settings > Storage**: enter the bucket's **Endpoint** (on the bucket's
+   page, like `s3.us-west-004.backblazeb2.com`), the **Bucket name**, the **Key ID** and the
+   **Application key**, and press **Check and save**. The portal writes, reads and deletes a small
+   test file first. The application key is not shown again.
+3. Press **Move files to B2**. The portal keeps working while it runs; the page shows how far it
+   is. Files are deleted from the appliance only once every one is in the bucket. If the move stops
+   (the connection, a restart), every file still opens: press it again to finish.
+
+**Move files back to the appliance** does the reverse; check the appliance has room first. While
+files are in the bucket it cannot be changed or removed; a new application key for it can be
+saved at any time. From the appliance, `sudo vibe portal storage-move status` shows where files
+are, and `storage-move b2` or `storage-move local` asks the portal to move them.
+
+A file removed from the portal is deleted from the bucket with all its versions.
+
 ## Backups
 
 `sudo vibe backup portal` writes a snapshot under `/var/lib/vibe/portal/backups/` with the
@@ -174,6 +196,10 @@ database (also as a `pg_dump` file) and `data/.firm-key.seal`. Copy it off the a
 keep the seal file with it: it unlocks every stored file, and without it they cannot be read. The cabinet keeps the
 original of everything you share, so the portal's files can always be shared again; client
 uploads not yet collected by Vibe Files exist only on the portal.
+
+With files in B2, the snapshot holds the database and the seal file, and the bucket holds the
+files: the seal file is still what unlocks them. Losing the appliance then loses no file, as long
+as the snapshot (with the seal file) is kept somewhere else.
 
 ## When something is wrong
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
-// Encrypted file storage on the data volume (P6). Each file has its own 32-byte key and is
+// Encrypted file storage (P6), on the data volume or in a B2 bucket (P51: files/objects.ts). Each file has its own 32-byte key and is
 // stored as a series of chunks, so large files stream in and out without being held in memory:
 //
 //   "VPB1"  then per chunk:  [flag 1 byte][length 4 bytes BE][nonce 24 bytes][ciphertext+tag]
@@ -8,14 +8,12 @@
 // XChaCha20-Poly1305 per chunk, with the chunk number and the "last chunk" flag as associated
 // data: a changed, reordered, dropped or cut-off chunk fails to decrypt.
 
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { join } from 'node:path';
-import { pipeline as pipe, Transform, type Readable, type TransformCallback } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
+import { pipeline as pipe, Readable, Transform, type TransformCallback } from 'node:stream';
 
 import { xchacha20poly1305 } from '@noble/ciphers/chacha';
+
+import { DiskObjects, NotFound, type ObjectStore } from './objects';
 
 export const CHUNK = 1024 * 1024;
 const MAGIC = Buffer.from('VPB1');
@@ -158,33 +156,78 @@ export interface Stored {
 }
 
 export class BlobStore {
-  constructor(private readonly dir: string) {}
+  private primary: ObjectStore;
+  /** Where files may still be while a move is under way (P51): read when the primary does not
+   *  have a file, and removed from too. Null once a move has finished. */
+  private other: ObjectStore | null = null;
 
-  private path(blobKey: string): string {
-    if (!/^[0-9a-f-]{36}$/.test(blobKey)) throw new Error('bad blob key');
-    return join(this.dir, blobKey);
+  /** The data volume's store, whether or not it is the one in use. */
+  readonly local: DiskObjects;
+
+  constructor(dir: string) {
+    this.local = new DiskObjects(dir);
+    this.primary = this.local;
+  }
+
+  /** Where new files go, and where older ones may still be (P51). */
+  use(primary: ObjectStore, other: ObjectStore | null): void {
+    this.primary = primary;
+    this.other = other;
+  }
+
+  get where(): { primary: ObjectStore; other: ObjectStore | null } {
+    return { primary: this.primary, other: this.other };
   }
 
   /** Encrypts `source` into a new blob; TooLarge past `maxBytes` (nothing is kept). */
   async put(source: Readable, key: Uint8Array, maxBytes: number): Promise<Stored> {
-    await mkdir(this.dir, { recursive: true, mode: 0o700 });
     const blobKey = randomUUID();
-    const tmp = join(this.dir, `${blobKey}.part`);
     const enc = new Encrypt(key, maxBytes);
+    let tooLarge = false;
+    enc.on('error', (err) => {
+      if (err instanceof TooLarge) tooLarge = true;
+    });
     try {
-      await pipeline(source, enc, createWriteStream(tmp, { mode: 0o600 }));
-      await rename(tmp, this.path(blobKey));
+      await this.primary.put(
+        blobKey,
+        pipe(source, enc, () => undefined),
+      );
     } catch (err) {
-      await rm(tmp, { force: true });
+      if (tooLarge) throw new TooLarge();
       throw err;
     }
+    if (tooLarge) {
+      await this.primary.remove(blobKey);
+      throw new TooLarge();
+    }
     return { blobKey, size: enc.size, sha256: enc.hash.digest('hex') };
+  }
+
+  /** The stored (encrypted) bytes, from wherever the file is now. NotFound at the first read
+   *  when it is in neither place; any other failure is not looked past. */
+  raw(blobKey: string): Readable {
+    const first = this.primary;
+    const second = this.other;
+    async function* read(): AsyncGenerator<Buffer> {
+      const it = first.get(blobKey)[Symbol.asyncIterator]() as AsyncIterator<Buffer>;
+      let head: IteratorResult<Buffer>;
+      try {
+        head = await it.next();
+      } catch (err) {
+        if (!(err instanceof NotFound) || !second) throw err;
+        for await (const c of second.get(blobKey)) yield c as Buffer;
+        return;
+      }
+      if (!head.done) yield head.value;
+      for (let r = await it.next(); !r.done; r = await it.next()) yield r.value;
+    }
+    return Readable.from(read(), { objectMode: false });
   }
 
   /** The plaintext as a stream; it errors with BadBlob if the blob was changed. */
   get(blobKey: string, key: Uint8Array): Readable {
     // pipeline, not pipe(): a read error (e.g. a missing file) reaches the reader too.
-    return pipe(createReadStream(this.path(blobKey)), new Decrypt(key), () => undefined);
+    return pipe(this.raw(blobKey), new Decrypt(key), () => undefined);
   }
 
   /** Reads and checks the whole blob (used before streaming small previews, and in tests). */
@@ -195,15 +238,12 @@ export class BlobStore {
   }
 
   async remove(blobKey: string): Promise<void> {
-    await rm(this.path(blobKey), { force: true });
+    await this.primary.remove(blobKey);
+    if (this.other) await this.other.remove(blobKey);
   }
 
   async exists(blobKey: string): Promise<boolean> {
-    try {
-      await stat(this.path(blobKey));
-      return true;
-    } catch {
-      return false;
-    }
+    if (await this.primary.exists(blobKey)) return true;
+    return this.other ? this.other.exists(blobKey) : false;
   }
 }

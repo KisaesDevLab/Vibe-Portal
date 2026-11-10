@@ -32,6 +32,7 @@ import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { cancelSetupLinks, createSetupLink, type StaffSession } from './auth';
 import { requireAdmin } from './scope';
+import { storageRouter } from './storage';
 
 const MB = 1024 * 1024;
 const LOGO_MAX = 512 * 1024;
@@ -100,6 +101,8 @@ export function staffSettingsRouter(ctx: Ctx): Router {
   const r = express.Router();
   // Not `r.use(requireAdmin)`: the rest of the staff API is mounted after this router.
   r.use(['/settings', '/keys', '/staff'], requireAdmin);
+  // Where stored files live, and moving them (P51).
+  r.use('/settings/storage', storageRouter(ctx));
 
   r.get(
     '/settings',

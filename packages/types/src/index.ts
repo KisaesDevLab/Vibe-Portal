@@ -57,5 +57,10 @@ export const EVENT_KINDS = [
   'outside_view',
   'outside_download',
   'outside_locked',
+  // Where stored files live (P51): the B2 bucket set or removed, a move asked for and its end.
+  'storage_b2_saved',
+  'storage_b2_removed',
+  'storage_move',
+  'storage_moved',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
