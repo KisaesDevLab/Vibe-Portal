@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Vibe Portal: one container serving the API and the built client portal.
 # Built and published to ghcr.io/kisaesdevlab/vibe-portal on version tags (P40).
 
@@ -13,12 +14,21 @@ COPY packages/db/package.json packages/db/
 COPY packages/types/package.json packages/types/
 COPY packages/ui/package.json packages/ui/
 COPY packages/crypto/package.json packages/crypto/
-RUN pnpm install --frozen-lockfile
+# @kisaesdevlab/vibe-auth (P44) comes from GitHub Packages: the token arrives as a BuildKit
+# secret and goes in a throwaway user npmrc that is gone before the layer is written.
+#   docker build --secret id=NODE_AUTH_TOKEN,env=NODE_AUTH_TOKEN .
+RUN --mount=type=secret,id=NODE_AUTH_TOKEN,required=true \
+    printf '//npm.pkg.github.com/:_authToken=%s\n' "$(cat /run/secrets/NODE_AUTH_TOKEN)" > /root/.npmrc \
+ && pnpm install --frozen-lockfile \
+ && rm -f /root/.npmrc
 COPY . .
-RUN pnpm --filter @vibe-portal/portal build \
+RUN --mount=type=secret,id=NODE_AUTH_TOKEN,required=true \
+    printf '//npm.pkg.github.com/:_authToken=%s\n' "$(cat /run/secrets/NODE_AUTH_TOKEN)" > /root/.npmrc \
+ && pnpm --filter @vibe-portal/portal build \
  && pnpm --filter @vibe-portal/api deploy --prod /out \
  && cp tsconfig.base.json /out/ \
- && rm -rf /out/src/__tests__
+ && rm -rf /out/src/__tests__ \
+ && rm -f /root/.npmrc
 
 FROM ${NODE_IMAGE}
 ENV NODE_ENV=production \

@@ -7,6 +7,7 @@ on:
     tags: ['v*.*.*']
 permissions:
   contents: read
+  packages: read
 jobs:
   gate:
     runs-on: ubuntu-24.04
@@ -20,6 +21,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # @kisaesdevlab/vibe-auth (P44) is on GitHub Packages.
+      - run: printf '//npm.pkg.github.com/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > ~/.npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: pnpm install --frozen-lockfile
       - run: pnpm gate
   image:
@@ -56,3 +61,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # The image build reads @kisaesdevlab/vibe-auth from GitHub Packages (P44).
+          secrets: |
+            NODE_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}
