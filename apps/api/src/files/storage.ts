@@ -26,6 +26,7 @@ import { schema } from '@vibe-portal/db';
 
 import type { Ctx } from '../context';
 import { record } from '../lib/events';
+import { mergeStorageNote, rowsOf } from '../lib/rows';
 import { B2Objects, type B2Settings } from './b2';
 import { NotFound, type Bucket, type ObjectStore } from './objects';
 import { snapshotIfDue } from './snapshot';
@@ -37,7 +38,7 @@ export type Place = 'local' | 'b2';
 
 const other = (p: Place): Place => (p === 'b2' ? 'local' : 'b2');
 
-async function firmRow(ctx: Ctx): Promise<FirmRow> {
+export async function firmRow(ctx: Ctx): Promise<FirmRow> {
   const [f] = await ctx.db.select().from(schema.firm);
   if (!f) throw new Error('firm row missing');
   return f;
@@ -159,17 +160,19 @@ async function inUse(ctx: Ctx, key: string): Promise<boolean> {
   return rowsOf<{ n: number }>(rows).length > 0;
 }
 
-async function allInUse(ctx: Ctx): Promise<string[]> {
+async function allInUse(ctx: Ctx): Promise<Set<string>> {
   const rows = await ctx.db.execute<{ k: string }>(sql`
     SELECT ${schema.files.blobKey} AS k FROM ${schema.files} WHERE ${schema.files.blobKey} IS NOT NULL
     UNION SELECT ${schema.uploads.blobKey} FROM ${schema.uploads} WHERE ${schema.uploads.blobKey} IS NOT NULL
     UNION SELECT ${schema.fileShareMark.blobKey} FROM ${schema.fileShareMark}`);
-  return rowsOf<{ k: string }>(rows).map((r) => r.k);
+  return new Set(rowsOf<{ k: string }>(rows).map((r) => r.k));
 }
 
-/** postgres-js returns the rows; pglite (tests) returns { rows }. */
-function rowsOf<T>(r: unknown): T[] {
-  return Array.isArray(r) ? (r as T[]) : ((r as { rows: T[] }).rows ?? []);
+/** Every stored file in a place, by key: one listing instead of a request per file. */
+async function keysIn(store: ObjectStore): Promise<Set<string>> {
+  const keys = new Set<string>();
+  for await (const o of store.list()) keys.add(o.key);
+  return keys;
 }
 
 /** Copies one stored file as it is (still encrypted), then reads it back and compares. */
@@ -193,8 +196,10 @@ async function copyOne(from: ObjectStore, to: ObjectStore, key: string): Promise
   }
 }
 
-/** A move or a sweep is running: one at a time. */
+/** A move is running. A sweep has its own flag: they never run together, but only a move is
+ *  "a move under way" to Settings. */
 let moving = false;
+let sweeping = false;
 
 async function saveMove(ctx: Ctx, m: StorageMove): Promise<void> {
   await ctx.db.update(schema.firm).set({ storageMove: m });
@@ -202,7 +207,8 @@ async function saveMove(ctx: Ctx, m: StorageMove): Promise<void> {
 
 /** Runs the move the database asks for, if any and none is running. */
 export async function runMove(ctx: Ctx): Promise<void> {
-  if (moving) return;
+  // A sweep under way: the move starts on the next tick of the half-minute timer.
+  if (moving || sweeping) return;
   // Set before the first wait, so the timer and a Settings click cannot both start one.
   moving = true;
   try {
@@ -241,8 +247,12 @@ async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void>
     // In use: named in the database, or written moments ago (the database is told just after).
     const needed = async (k: string): Promise<boolean> =>
       ctx.blobs.isRecent(k) || (await inUse(ctx, k));
+    // One query and one listing up front, not a request per file. A file removed since is
+    // copied anyway and its copy removed just after (asked again below).
+    const used = await allInUse(ctx);
+    const there = await keysIn(dst);
     for (const k of keys) {
-      if ((await needed(k)) && !(await dst.exists(k))) {
+      if ((ctx.blobs.isRecent(k) || used.has(k)) && !there.has(k)) {
         try {
           await copyOne(src, dst, k);
         } catch (err) {
@@ -256,28 +266,34 @@ async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void>
       if (m.copied % 25 === 0) await saveMove(ctx, m);
     }
 
-    // 3. Every file the portal knows of is in the new place.
+    // 3. Every file the portal knows of is in the new place. One listing; a file written since
+    // it was taken is asked about on its own.
+    const arrived = await keysIn(dst);
+    const inDst = async (k: string): Promise<boolean> => arrived.has(k) || (await dst.exists(k));
     let missing = 0;
-    for (const k of await allInUse(ctx)) if (!(await dst.exists(k))) missing += 1;
+    for (const k of await allInUse(ctx)) if (!(await inDst(k))) missing += 1;
     if (missing > 0) throw new Error(`${missing} stored files are not in the new place`);
 
     // 4. Only now are the old copies deleted: those that are in the new place, and those no
     // longer in use. One in use and not in the new place stops the move (both stay in use).
     let left = 0;
     for await (const { key: k } of src.list()) {
-      if ((await dst.exists(k)) || !(await needed(k))) await src.remove(k);
+      if ((await inDst(k)) || !(await needed(k))) await src.remove(k);
       else left += 1;
     }
     if (left > 0) throw new Error(`${left} stored files are only in the old place; move again`);
     m.state = 'done';
     m.finishedAt = ctx.now().toISOString();
     await ctx.db.update(schema.firm).set({ storageOther: false, storageMove: m });
-    ctx.blobs.use(dst, null);
+    // From the database, not the stores this move began with: a key saved on Settings during the
+    // move (applyStorage) must not be undone by the old one.
+    await applyStorage(ctx);
     ctx.log.info({ to, files: m.total }, 'stored files: move done');
     // The bucket now holds the files: send it what opens them at once, not tomorrow.
     if (to === 'b2') {
       void snapshotIfDue(ctx, true).catch(() => undefined);
     }
+    // The move is done and saved: a History write that fails must not mark it failed.
     await record(
       ctx.db,
       'storage_moved',
@@ -285,7 +301,7 @@ async function move(ctx: Ctx, start: FirmRow, asked: StorageMove): Promise<void>
       {
         detail: { to, files: m.total, ok: true },
       },
-    );
+    ).catch((err: unknown) => ctx.log.error({ err }, 'stored files: history not written'));
   } catch (err) {
     ctx.log.error({ err, to }, 'stored files: move failed');
     m.state = 'failed';
@@ -326,9 +342,7 @@ const SWEEP_EVERY_MS = 23 * 3_600_000;
 
 /** Merged into what is there: the snapshot keeps its own fields in the same note. */
 async function saveNote(ctx: Ctx, n: StorageNote): Promise<void> {
-  await ctx.db.execute(
-    sql`UPDATE firm SET storage_note = coalesce(storage_note, '{}'::jsonb) || ${JSON.stringify(n)}::jsonb`,
-  );
+  await mergeStorageNote(ctx.db, n as Record<string, unknown>);
 }
 
 /**
@@ -339,8 +353,8 @@ async function saveNote(ctx: Ctx, n: StorageNote): Promise<void> {
  * backup restored), so nothing is removed and Settings says so.
  */
 export async function sweep(ctx: Ctx, force = false): Promise<void> {
-  if (moving) return;
-  moving = true;
+  if (moving || sweeping) return;
+  sweeping = true;
   try {
     const f = await firmRow(ctx);
     const state = f.storageMove?.state;
@@ -369,10 +383,11 @@ export async function sweep(ctx: Ctx, force = false): Promise<void> {
     const cutoff = now.getTime() - LEFTOVER_AGE_MS;
     let total = 0;
     const leftovers: string[] = [];
+    const used = await allInUse(ctx);
     for await (const o of store.list()) {
       total += 1;
       if (o.modified.getTime() >= cutoff || ctx.blobs.isRecent(o.key)) continue;
-      if (!(await inUse(ctx, o.key))) leftovers.push(o.key);
+      if (!used.has(o.key)) leftovers.push(o.key);
     }
     // Real leftovers come one at a time (a delete that failed). Many at once means the database
     // does not match the files: none is removed, however few files there are.
@@ -411,7 +426,7 @@ export async function sweep(ctx: Ctx, force = false): Promise<void> {
       );
     }
   } finally {
-    moving = false;
+    sweeping = false;
   }
 }
 

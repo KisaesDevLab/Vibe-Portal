@@ -22,7 +22,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 
-import { checkKey, checkNote, NotFound, type Bucket, type Listed } from './objects';
+import { checkKey, checkNote, NotFound, OBJECT_KEY, type Bucket, type Listed } from './objects';
 
 export interface B2Settings {
   /** The bucket's S3 endpoint, as B2 shows it: s3.<region>.backblazeb2.com */
@@ -179,7 +179,7 @@ export class B2Objects implements Bucket {
   }
 
   async *list(): AsyncIterable<Listed> {
-    for await (const o of this.listed(PREFIX)) if (/^[0-9a-f-]{36}$/.test(o.key)) yield o;
+    for await (const o of this.listed(PREFIX)) if (OBJECT_KEY.test(o.key)) yield o;
   }
 
   async objectLock(): Promise<boolean | null> {

@@ -45,8 +45,9 @@ export async function sendStored(
   res.setHeader('Content-Disposition', disposition(f.inlineType ? 'inline' : 'attachment', f.name));
   res.setHeader('Content-Length', String(f.size));
   res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
-  await beforeBody();
   try {
+    // Inside the try: if it fails, the finally still closes the stored file (or B2 download).
+    await beforeBody();
     if (!first.done && !(await sent(res, first.value))) return;
     for (let next = await it.next(); !next.done; next = await it.next()) {
       // The reader went away (a download cancelled): stop, and close the source below.

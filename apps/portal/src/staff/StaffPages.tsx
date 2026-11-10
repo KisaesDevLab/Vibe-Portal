@@ -1257,10 +1257,14 @@ function Storage(): JSX.Element {
   const [b2, setB2] = useState({ endpoint: '', bucket: '', keyId: '', appKey: '' });
   const [tested, setTested] = useState(false);
   const d = s.data;
+  // Filled from what is saved when that changes, not on every reload (a move reloads every 2 s
+  // and would wipe what the admin is typing).
+  const saved = d ? `${d.b2.endpoint}\n${d.b2.bucket}\n${d.b2.keyId}` : null;
   useEffect(() => {
-    if (d)
-      setB2((v) => ({ ...v, endpoint: d.b2.endpoint, bucket: d.b2.bucket, keyId: d.b2.keyId }));
-  }, [d]);
+    if (saved === null) return;
+    const [endpoint = '', bucket = '', keyId = ''] = saved.split('\n');
+    setB2((v) => ({ ...v, endpoint, bucket, keyId }));
+  }, [saved]);
   const running = d?.move?.state === 'requested' || d?.move?.state === 'running';
   // Follow a move while it runs.
   useEffect(() => {

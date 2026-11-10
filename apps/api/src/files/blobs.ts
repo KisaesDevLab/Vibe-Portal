@@ -247,12 +247,13 @@ export class BlobStore {
     enc.on('error', (err) => {
       if (err instanceof TooLarge) tooLarge = true;
     });
+    const body = pipe(source, enc, () => undefined);
     try {
-      await store.put(
-        blobKey,
-        pipe(source, enc, () => undefined),
-      );
+      await store.put(blobKey, body);
     } catch (err) {
+      // The place refused it (B2 down past its retries): stop reading the sender too, as a
+      // failed pipeline would, so the request's stream is not left open and paused.
+      body.destroy();
       if (tooLarge) throw new TooLarge();
       throw err;
     }
@@ -315,9 +316,23 @@ export class BlobStore {
     return Buffer.concat(parts);
   }
 
-  async remove(blobKey: string): Promise<void> {
-    await this.primary.remove(blobKey);
-    if (this.other) await this.other.remove(blobKey);
+  /**
+   * Removes a stored file from both places. Never throws: callers have already changed the
+   * database, and what follows (History, marked copies, the answer) must still happen. A file
+   * that could not be removed (B2 down) is left for the daily sweep (files/storage.ts, D9).
+   * False when it may still be there.
+   */
+  async remove(blobKey: string): Promise<boolean> {
+    let ok = true;
+    for (const place of [this.primary, this.other]) {
+      if (!place) continue;
+      try {
+        await place.remove(blobKey);
+      } catch {
+        ok = false;
+      }
+    }
+    return ok;
   }
 
   async exists(blobKey: string): Promise<boolean> {

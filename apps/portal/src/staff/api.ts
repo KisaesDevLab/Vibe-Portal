@@ -98,6 +98,7 @@ export function staffSay(err: unknown): string {
     move_running: 'A move is already under way.',
     already_there: 'The files are already there.',
     snapshot_not_b2: 'Database snapshots go to the bucket once files are stored there.',
+    snapshot_busy: 'A database copy is being sent right now. Try again in a minute.',
   };
   // The portal's own reason (Object Lock, another portal's bucket, no room), in full.
   if ((code === 'b2_refused' || code === 'no_room') && err instanceof StaffApiError && err.detail) {

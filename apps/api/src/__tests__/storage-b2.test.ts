@@ -656,3 +656,74 @@ describe('database snapshots in the bucket (P51)', () => {
     expect(h?.storageNote?.snapshotAt).toBe(g?.storageNote?.snapshotAt);
   });
 });
+
+describe('P51 QA follow-ups', () => {
+  it('removing a file while B2 is down still finishes, and the sweep takes the stored file later', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    const a = await shared('a.pdf', Buffer.from('%PDF a'));
+    await move(boss, 'b2');
+    bucket.down = true;
+    await w.firm('delete', `/files/${a}`).expect(200);
+    bucket.down = false;
+    const kinds = (await w.t.db.select().from(schema.events)).map((e) => e.kind);
+    expect(kinds).toContain('remove');
+    // Still in the bucket, named by nothing: a leftover for the daily sweep.
+    expect(bucket.items.size).toBe(1);
+  });
+
+  it('a sweep under way is not a move: Settings may still start one', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    await shared('a.pdf', Buffer.from('%PDF a'));
+    // The sweep runs over the appliance's files; a move asked for meanwhile is accepted.
+    const sweeping = sweep(w.ctx, true);
+    const res = await boss.post('/api/staff/v1/settings/storage/move').send({ to: 'b2' });
+    expect(res.status).toBe(202);
+    await sweeping;
+    // The route's own start may have found the sweep running: the timer's next tick starts it.
+    await runMove(w.ctx);
+    let s = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    for (let i = 0; i < 200 && s.body.move.state !== 'done'; i++) {
+      await new Promise((ok) => setTimeout(ok, 10));
+      s = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    }
+    expect([s.body.storage, s.body.move.state]).toEqual(['b2', 'done']);
+    for (let i = 0; i < 100 && !snapshots().length; i++) {
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+  });
+
+  it('a key saved during a move is the one in use after it', async () => {
+    const boss = await admin();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    await shared('a.pdf', Buffer.from('%PDF a'));
+    const opened: string[] = [];
+    let changed = false;
+    // The key is changed on Settings while the move copies a file (done here inside the copy,
+    // as the in-memory test database takes one statement at a time).
+    w.ctx.openB2 = (s) => {
+      opened.push(s.keyId);
+      return Object.assign(Object.create(bucket) as MemoryObjects, {
+        put: async (key: string, body: Readable) => {
+          if (!changed && opened.length > 1) {
+            changed = true;
+            await w.t.db.update(schema.firm).set({ b2KeyId: '004newkey0000000000000001' });
+          }
+          return bucket.put(key, body);
+        },
+      });
+    };
+    await w.t.db.update(schema.firm).set({
+      storageMove: { to: 'b2', state: 'requested', by: 'kurt', requestedAt: 'x' },
+    });
+    await runMove(w.ctx);
+    expect(changed).toBe(true);
+    // The database copy sent after a move to B2 finishes before the test database closes.
+    for (let i = 0; i < 100 && !snapshots().length; i++) {
+      await new Promise((ok) => setTimeout(ok, 10));
+    }
+    // The last store the move put in place was opened with the new key.
+    expect(opened.at(-1)).toBe('004newkey0000000000000001');
+  });
+});

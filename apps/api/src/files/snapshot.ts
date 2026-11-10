@@ -25,6 +25,7 @@ import { schema, type Database } from '@vibe-portal/db';
 
 import type { Ctx } from '../context';
 import { record } from '../lib/events';
+import { mergeStorageNote, rowsOf } from '../lib/rows';
 import { openBytes, sealBytes } from './blobs';
 import type { Bucket } from './objects';
 
@@ -60,11 +61,6 @@ export interface SnapshotHeader {
   };
   /** The body's key, wrapped by the master key. */
   dek: string;
-}
-
-/** postgres-js returns the rows; pglite (tests) returns { rows }. */
-function rowsOf<T>(r: unknown): T[] {
-  return Array.isArray(r) ? (r as T[]) : ((r as { rows: T[] }).rows ?? []);
 }
 
 async function query<T>(db: Pick<Database, 'execute'>, q: ReturnType<typeof sql>): Promise<T[]> {
@@ -309,9 +305,7 @@ export async function restoreSnapshot(
     // The database is older than the files written since this snapshot: the sweep for leftover
     // files holds off for a week (storage.ts).
     const hold = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString();
-    await tx.execute(
-      sql`UPDATE firm SET storage_note = coalesce(storage_note, '{}'::jsonb) || ${JSON.stringify({ sweepHoldUntil: hold })}::jsonb`,
-    );
+    await mergeStorageNote(tx, { sweepHoldUntil: hold });
     // Identity columns carry on after the restored rows.
     const ids = await query<{ t: string; c: string }>(
       tx,
@@ -330,9 +324,7 @@ export async function restoreSnapshot(
 }
 
 async function noteSnapshot(ctx: Ctx, n: Record<string, unknown>): Promise<void> {
-  await ctx.db.execute(
-    sql`UPDATE firm SET storage_note = coalesce(storage_note, '{}'::jsonb) || ${JSON.stringify(n)}::jsonb`,
-  );
+  await mergeStorageNote(ctx.db, n);
 }
 
 let taking = false;

@@ -23,6 +23,7 @@ import {
   BucketRefused,
   checkBucket,
   checkMove,
+  firmRow,
   isMoving,
   NoRoom,
   openB2,
@@ -81,8 +82,7 @@ export function storageRouter(ctx: Ctx): Router {
       const at = parseEndpoint(input.endpoint);
       if (!at) throw new HttpError(400, 'b2_endpoint');
       if (!validBucket(input.bucket)) throw new HttpError(400, 'b2_bucket');
-      const [f] = await ctx.db.select().from(schema.firm);
-      if (!f) throw new Error('firm row missing');
+      const f = await firmRow(ctx);
       const endpoint = at.host;
       // Files are in this bucket (or being moved there or out): it cannot change under them.
       const inUse = f.storage === 'b2' || f.storageOther;
@@ -123,8 +123,7 @@ export function storageRouter(ctx: Ctx): Router {
   r.delete(
     '/b2',
     h(async (req, res) => {
-      const [f] = await ctx.db.select().from(schema.firm);
-      if (!f) throw new Error('firm row missing');
+      const f = await firmRow(ctx);
       if (f.storage === 'b2' || f.storageOther || isMoving()) {
         throw new HttpError(409, 'b2_in_use');
       }
@@ -153,9 +152,9 @@ export function storageRouter(ctx: Ctx): Router {
   r.post(
     '/test',
     h(async (_req, res) => {
-      const [f] = await ctx.db.select().from(schema.firm);
-      const s = f ? b2Settings(ctx, f) : null;
-      if (!f || !s) throw new HttpError(400, 'b2_not_set_up');
+      const f = await firmRow(ctx);
+      const s = b2Settings(ctx, f);
+      if (!s) throw new HttpError(400, 'b2_not_set_up');
       try {
         await checkBucket(openB2(ctx, s), f.installId);
       } catch (err) {
@@ -170,8 +169,7 @@ export function storageRouter(ctx: Ctx): Router {
     '/move',
     h(async (req, res) => {
       const { to } = body(MoveSchema, req);
-      const [f] = await ctx.db.select().from(schema.firm);
-      if (!f) throw new Error('firm row missing');
+      const f = await firmRow(ctx);
       if (
         isMoving() ||
         f.storageMove?.state === 'requested' ||
@@ -203,11 +201,13 @@ export function storageRouter(ctx: Ctx): Router {
   r.post(
     '/snapshot',
     h(async (_req, res) => {
-      const [f] = await ctx.db.select().from(schema.firm);
-      if (f?.storage !== 'b2') throw new HttpError(409, 'snapshot_not_b2');
+      const f = await firmRow(ctx);
+      if (f.storage !== 'b2') throw new HttpError(409, 'snapshot_not_b2');
       try {
-        await snapshotIfDue(ctx, true);
+        // Null: none was sent for this request (one is being taken right now).
+        if (!(await snapshotIfDue(ctx, true))) throw new HttpError(409, 'snapshot_busy');
       } catch (err) {
+        if (err instanceof HttpError) throw err;
         res.status(400).json({ error: 'b2_check_failed', detail: why(err) });
         return;
       }
