@@ -13,7 +13,7 @@
 // A wrong id or key is "not found", whatever else is wrong with the request.
 
 import express, { type Request, type Response, type Router } from 'express';
-import { and, asc, desc, eq, gt, isNotNull, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm';
 import { parse, serialize } from 'cookie';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
@@ -115,6 +115,7 @@ export function sharedRouter(ctx: Ctx): Router {
         size: schema.files.size,
         contentType: schema.files.contentType,
         blobKey: schema.files.blobKey,
+        downloads: schema.fileShareItem.downloads,
       })
       .from(schema.fileShareItem)
       .innerJoin(schema.files, eq(schema.files.id, schema.fileShareItem.fileId))
@@ -131,8 +132,8 @@ export function sharedRouter(ctx: Ctx): Router {
       emailMasked: maskContact(s.recipientEmail),
       expiresAt: s.expiresAt,
       canDownload: s.canDownload,
-      // P58: downloads left on this link; null when there is no limit.
-      downloadsLeft: s.downloadLimit > 0 ? Math.max(0, s.downloadLimit - s.downloads) : null,
+      // P58: downloads allowed for each file; null when there is no limit.
+      downloadLimit: s.downloadLimit > 0 ? s.downloadLimit : null,
       count: files.length,
       verified: false,
     };
@@ -148,6 +149,8 @@ export function sharedRouter(ctx: Ctx): Router {
         name: f.name,
         size: f.size,
         preview: previewOf(f.contentType),
+        // P58: downloads left of this file; null when there is no limit.
+        downloadsLeft: s.downloadLimit > 0 ? Math.max(0, s.downloadLimit - f.downloads) : null,
         // False when the file has since changed into something this link does not allow
         // (Vibe Files replaced its content): listed, but it does not open.
         // Or a marked link's PDF found not to be markable (a locked or damaged new version).
@@ -396,22 +399,24 @@ export function sharedRouter(ctx: Ctx): Router {
       // View only: nothing is sent as a file to keep.
       if (!inline && !s.canDownload) throw new HttpError(403, 'view_only');
       if (!inline) {
-        // P58: one download counted, in the database, so downloads at the same moment are each
-        // counted; past the link's limit nothing is sent.
+        // P58: one download of this file counted, in the database, so downloads at the same
+        // moment are each counted; past the link's limit for this file nothing is sent.
         const [counted] = await ctx.db
-          .update(schema.fileShare)
-          .set({ downloads: sql`${schema.fileShare.downloads} + 1` })
+          .update(schema.fileShareItem)
+          .set({ downloads: sql`${schema.fileShareItem.downloads} + 1` })
           .where(
             and(
-              eq(schema.fileShare.id, s.id),
-              or(
-                eq(schema.fileShare.downloadLimit, 0),
-                lt(schema.fileShare.downloads, schema.fileShare.downloadLimit),
-              ),
+              eq(schema.fileShareItem.shareId, s.id),
+              eq(schema.fileShareItem.fileId, f.id),
+              s.downloadLimit > 0 ? lt(schema.fileShareItem.downloads, s.downloadLimit) : undefined,
             ),
           )
-          .returning({ n: schema.fileShare.downloads });
+          .returning({ n: schema.fileShareItem.downloads });
         if (!counted) throw new HttpError(403, 'download_limit');
+        await ctx.db
+          .update(schema.fileShare)
+          .set({ downloads: sql`${schema.fileShare.downloads} + 1` })
+          .where(eq(schema.fileShare.id, s.id));
       }
 
       const blobKey = f.blobKey;

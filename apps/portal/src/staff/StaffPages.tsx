@@ -1083,7 +1083,18 @@ function SecureLinks({
                 {s.organization && `, ${s.organization}`}
               </td>
               <td style={td}>
-                {s.files.map((f) => (f.removed ? `${f.name} (removed)` : f.name)).join(', ')}
+                {s.files
+                  .map(
+                    (f) =>
+                      `${f.name}${f.removed ? ' (removed)' : ''}${
+                        s.canDownload
+                          ? s.downloadLimit > 0
+                            ? ` (${f.downloads ?? 0} of ${s.downloadLimit} downloads)`
+                            : ` (${f.downloads ?? 0} ${f.downloads === 1 ? 'download' : 'downloads'})`
+                          : ''
+                      }`,
+                  )
+                  .join(', ')}
               </td>
               <td style={td}>
                 {s.canDownload ? 'View and download' : 'View only'}
@@ -1102,14 +1113,6 @@ function SecureLinks({
                 {s.opens === 0
                   ? '—'
                   : `${s.opens} ${s.opens === 1 ? 'time' : 'times'}, last ${when(s.lastOpenedAt)}`}
-                {s.canDownload && (
-                  <>
-                    <br />
-                    {s.downloadLimit > 0
-                      ? `${s.downloads} of ${s.downloadLimit} downloads`
-                      : `${s.downloads} ${s.downloads === 1 ? 'download' : 'downloads'}`}
-                  </>
-                )}
               </td>
               <td style={td}>
                 {(s.status === 'sent' || s.status === 'opened') && (

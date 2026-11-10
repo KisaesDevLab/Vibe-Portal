@@ -149,7 +149,7 @@ describe('a secure link to someone outside (P49)', () => {
       expiresAt: '2026-11-16T15:00:00.000Z',
       canDownload: true,
       // P58: the firm's limit (5 unless changed) when the link was made.
-      downloadsLeft: 5,
+      downloadLimit: 5,
       count: 1,
       verified: false,
     });
@@ -224,7 +224,7 @@ describe('a secure link to someone outside (P49)', () => {
         opens: 1,
         lastOpenedAt: '2026-11-09T15:00:00.000Z',
         status: 'opened',
-        files: [{ fileId, name: 'Return-2025.pdf', removed: false }],
+        files: [{ fileId, name: 'Return-2025.pdf', removed: false, downloads: 1 }],
       },
     ]);
     const events = (await boss.get('/api/staff/v1/events?since=0').expect(200)).body.events as {
@@ -271,6 +271,25 @@ describe('a secure link to someone outside (P49)', () => {
     expect(list.body.shares[0]).toEqual(
       expect.objectContaining({ downloads: 2, downloadLimit: 2 }),
     );
+    // Per file (owner 2026-11-10): another file in a link has its own count.
+    await boss
+      .put('/api/staff/v1/settings')
+      .send({ ...settings, shareDownloadLimit: 2 })
+      .expect(200);
+    const second = await onPortal(CLIENT, 'K-1.pdf', await realPdf());
+    const two = await send(boss, [fileId, second], {
+      canDownload: true,
+      email: 'two@third-bank.test',
+    });
+    const ann = await unlock(two, 'two@third-bank.test');
+    const get = (f: string) => ann.get(`${two.path}/files/${f}/content?mode=download`);
+    expect((await get(fileId)).status).toBe(200);
+    expect((await get(fileId)).status).toBe(200);
+    expect((await get(fileId)).status).toBe(403);
+    expect((await get(second)).status).toBe(200);
+    expect((await get(second)).status).toBe(200);
+    expect((await get(second)).status).toBe(403);
+
     // 0: no limit, for links made from then on.
     await boss
       .put('/api/staff/v1/settings')
@@ -492,8 +511,8 @@ describe('the ways a secure link stops working (P49)', () => {
     expect(open.body.files.map((f: { name: string }) => f.name)).toEqual(['b.pdf']);
     const list = await boss.get(`/api/staff/v1/shares?clientId=${CLIENT}`).expect(200);
     expect(list.body.shares[0].files).toEqual([
-      { fileId: a, name: 'a.pdf', removed: true },
-      { fileId: b, name: 'b.pdf', removed: false },
+      { fileId: a, name: 'a.pdf', removed: true, downloads: 0 },
+      { fileId: b, name: 'b.pdf', removed: false, downloads: 0 },
     ]);
     // And cannot be sent anew.
     const more = await boss

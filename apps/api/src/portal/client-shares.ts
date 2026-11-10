@@ -88,6 +88,7 @@ export function clientSharesRouter(ctx: Ctx): Router {
               shareId: schema.fileShareItem.shareId,
               name: schema.files.name,
               removedAt: schema.files.removedAt,
+              downloads: schema.fileShareItem.downloads,
             })
             .from(schema.fileShareItem)
             .innerJoin(schema.files, eq(schema.files.id, schema.fileShareItem.fileId))
@@ -115,6 +116,9 @@ export function clientSharesRouter(ctx: Ctx): Router {
           downloadLimit: x.downloadLimit,
           status: shareStatus(x, now),
           files: items.filter((i) => i.shareId === x.id).map((i) => i.name),
+          fileDownloads: items
+            .filter((i) => i.shareId === x.id)
+            .map((i) => ({ name: i.name, downloads: i.downloads })),
         })),
       });
     }),

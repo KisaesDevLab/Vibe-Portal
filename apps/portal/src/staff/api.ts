@@ -198,7 +198,7 @@ export interface OutsideShare {
   opens: number;
   lastOpenedAt: string | null;
   status: 'locked' | 'revoked' | 'expired' | 'opened' | 'sent';
-  files: { fileId: string; name: string; removed: boolean }[];
+  files: { fileId: string; name: string; removed: boolean; downloads?: number }[];
 }
 
 export const when = (iso: string | null): string =>

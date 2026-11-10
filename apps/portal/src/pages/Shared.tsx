@@ -20,6 +20,8 @@ interface OutsideFile {
   preview: 'pdf' | 'image' | null;
   /** False when the file has changed into something this link does not allow. */
   available?: boolean;
+  /** Downloads left of this file; null when there is no limit (P58). */
+  downloadsLeft?: number | null;
 }
 
 interface Info {
@@ -27,8 +29,8 @@ interface Info {
   emailMasked: string;
   expiresAt: string;
   canDownload: boolean;
-  /** Downloads left on this link; null when there is no limit (P58). */
-  downloadsLeft?: number | null;
+  /** Downloads allowed for each file; null when there is no limit (P58). */
+  downloadLimit?: number | null;
   count: number;
   verified: boolean;
   recipientName?: string;
@@ -100,7 +102,7 @@ export function Shared(): JSX.Element {
   const [code, setCode] = useState('');
   const [viewing, setViewing] = useState<string | null>(null);
   /** Downloads started on this page since it loaded (P58). */
-  const [took, setTook] = useState(0);
+  const [took, setTook] = useState<Record<string, number>>({});
 
   const failed = useCallback((err: unknown): void => {
     const end = endedBy(err);
@@ -271,12 +273,16 @@ export function Shared(): JSX.Element {
   }
 
   const list = info.files ?? [];
-  // P58: downloads left on this link (null: no limit), less those started on this page.
-  const left =
-    info.downloadsLeft === undefined || info.downloadsLeft === null
+  // P58: downloads left of a file (null: no limit), less those started on this page.
+  const leftOf = (f: OutsideFile): number | null =>
+    f.downloadsLeft === undefined || f.downloadsLeft === null
       ? null
-      : Math.max(0, info.downloadsLeft - took);
-  const canDl = info.canDownload && (left === null || left > 0);
+      : Math.max(0, f.downloadsLeft - (took[f.id] ?? 0));
+  const canDl = (f: OutsideFile): boolean => {
+    const left = leftOf(f);
+    return info.canDownload && (left === null || left > 0);
+  };
+  const limit = info.downloadLimit ?? null;
   const shown = list.find((f) => f.id === viewing && f.available !== false);
   const url = (f: OutsideFile, mode: 'view' | 'download'): string =>
     `/api/portal/shared/${id}/files/${f.id}/content?mode=${mode}`;
@@ -294,11 +300,9 @@ export function Shared(): JSX.Element {
           {who ? `Shared with ${who}. ` : ''}
           {!info.canDownload
             ? 'These documents are shared to view only.'
-            : left === null
+            : limit === null
               ? 'You can view and download these documents.'
-              : left > 0
-                ? `You can view these documents, and download ${left === 1 ? 'one more time' : `${left} more times`} in all.`
-                : 'You can view these documents. This link has been downloaded as many times as it allows.'}{' '}
+              : `You can view these documents, and download each up to ${limit === 1 ? 'once' : `${limit} times`}.`}{' '}
           For your security this page locks at {timeText(info.verifiedUntil ?? '')}; the link itself
           works until {dayText(info.expiresAt)}.
         </p>
@@ -315,7 +319,13 @@ export function Shared(): JSX.Element {
             meta={
               f.available === false
                 ? `Not available: this document has changed. Ask ${info.firmName} to send it again.`
-                : sizeText(f.size)
+                : `${sizeText(f.size)}${
+                    info.canDownload && leftOf(f) !== null
+                      ? leftOf(f) === 0
+                        ? ' · no downloads left'
+                        : ` · ${leftOf(f)} ${leftOf(f) === 1 ? 'download' : 'downloads'} left`
+                      : ''
+                  }`
             }
             actions={
               f.available === false ? undefined : (
@@ -330,12 +340,12 @@ export function Shared(): JSX.Element {
                       label="View"
                     />
                   )}
-                  {canDl && (
+                  {canDl(f) && (
                     <ActionDownload
                       href={url(f, 'download')}
                       filename={f.name}
                       ariaLabel={`Download ${f.name}`}
-                      onClick={() => setTook((t) => t + 1)}
+                      onClick={() => setTook((t) => ({ ...t, [f.id]: (t[f.id] ?? 0) + 1 }))}
                       icon={<Download size={16} />}
                       label="Download"
                     />
@@ -351,7 +361,7 @@ export function Shared(): JSX.Element {
           key={shown.id}
           url={url(shown, 'view')}
           downloadUrl={url(shown, 'download')}
-          canDownload={canDl}
+          canDownload={canDl(shown)}
           filename={shown.name}
         />
       )}

@@ -335,6 +335,7 @@ export function firmSharesRouter(ctx: Ctx): Router {
                 fileId: schema.files.id,
                 name: schema.files.name,
                 removedAt: schema.files.removedAt,
+                downloads: schema.fileShareItem.downloads,
               })
               .from(schema.fileShareItem)
               .innerJoin(schema.files, eq(schema.files.id, schema.fileShareItem.fileId))
@@ -366,7 +367,12 @@ export function firmSharesRouter(ctx: Ctx): Router {
           status: shareStatus(s, now),
           files: items
             .filter((i) => i.shareId === s.id)
-            .map((i) => ({ fileId: i.fileId, name: i.name, removed: i.removedAt !== null })),
+            .map((i) => ({
+              fileId: i.fileId,
+              name: i.name,
+              removed: i.removedAt !== null,
+              downloads: i.downloads,
+            })),
         })),
       });
     }),

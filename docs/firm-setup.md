@@ -159,10 +159,10 @@ whether it was opened and how often. **Revoke** ends a link at once, even while 
   one.
 - One recipient can hold 5 working links for the same client at a time. Revoke an old one to
   send another.
-- Each link may be downloaded 5 times in all, unless an admin changes **Downloads allowed per
-  secure link** on Settings › Firm (0 for no limit). A link keeps the number set when it was sent.
-  Viewing on the page is not a download. The client's page shows how many downloads each link has
-  had.
+- Each file in a link may be downloaded 5 times, unless an admin changes **Downloads allowed per
+  secure link** on Settings › Firm (0 for no limit). It counts per file: a link of six files lets
+  each of them be downloaded. A link keeps the number set when it was sent. Viewing on the page is
+  not a download. The client's page shows each file's downloads beside it.
 - **Remove** a file from the portal and it leaves every link. Switch a client off and its links
   stop for as long as it is off.
 - When Vibe Files updates a file, links show the new version. If the new version no longer suits
