@@ -24,6 +24,7 @@ import { dropMarksOfShare } from '../files/marks';
 import { createOutsideShare, SHARE_MAX_FILES, shareStatus } from '../firm/shares';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
+import { displayNameOf } from '../lib/contact';
 import { LIMITS } from '../lib/rate-limit';
 
 /** A client's link lasts at most this long (owner 2026-11-10). */
@@ -51,7 +52,7 @@ async function whoIs(ctx: Ctx, s: ClientSession): Promise<{ actor: Actor; name: 
     .select()
     .from(schema.portalIdentity)
     .where(eq(schema.portalIdentity.id, s.identityId));
-  const name = p?.name || p?.email || p?.phone || 'A client';
+  const name = displayNameOf(p);
   return { actor: { kind: 'client', name: s.identityId }, name };
 }
 
@@ -66,7 +67,9 @@ export function clientSharesRouter(ctx: Ctx): Router {
       const on = await enabled(ctx);
       const clients = await activeClientsOf(ctx.db, s.identityId);
       const clientId = clients.find((c) => c.id === s.activeClientId)?.id ?? clients[0]?.id;
-      if (!on || !clientId) {
+      // Listed even when the firm has since turned client links off, so they can still be seen
+      // (and they no longer work: shared.ts).
+      if (!clientId) {
         res.json({ enabled: on, maxDays: CLIENT_SHARE_MAX_DAYS, shares: [] });
         return;
       }
@@ -101,7 +104,7 @@ export function clientSharesRouter(ctx: Ctx): Router {
             .orderBy(asc(schema.files.name))
         : [];
       res.json({
-        enabled: true,
+        enabled: on,
         maxDays: CLIENT_SHARE_MAX_DAYS,
         shares: shares.map((x) => ({
           id: x.id,
@@ -112,11 +115,9 @@ export function clientSharesRouter(ctx: Ctx): Router {
           createdAt: x.createdAt,
           expiresAt: x.expiresAt,
           opens: x.opens,
-          downloads: x.downloads,
           downloadLimit: x.downloadLimit,
           status: shareStatus(x, now),
-          files: items.filter((i) => i.shareId === x.id).map((i) => i.name),
-          fileDownloads: items
+          files: items
             .filter((i) => i.shareId === x.id)
             .map((i) => ({ name: i.name, downloads: i.downloads })),
         })),
@@ -186,7 +187,8 @@ export function clientSharesRouter(ctx: Ctx): Router {
       const who = await whoIs(ctx, s);
       const ended = await ctx.db
         .update(schema.fileShare)
-        .set({ revokedAt: ctx.now(), revokedBy: who.name })
+        // Prefixed, so no name can read as the lockout marker ('lockout').
+        .set({ revokedAt: ctx.now(), revokedBy: `client: ${who.name}` })
         .where(and(eq(schema.fileShare.id, share.id), isNull(schema.fileShare.revokedAt)))
         .returning({ id: schema.fileShare.id });
       await ctx.db.delete(schema.fileShareGrant).where(eq(schema.fileShareGrant.shareId, share.id));

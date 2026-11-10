@@ -347,9 +347,8 @@ export const fileShare = pgTable('file_share', {
   wrongTries: integer('wrong_tries').notNull().default(0),
   opens: integer('opens').notNull().default(0),
   /** Downloads each file of this link allows (the firm's limit when it was made); 0 for no
-   *  limit (P58). `downloads` counts all files together. */
+   *  limit (P58). Each file's count is in file_share_item. */
   downloadLimit: integer('download_limit').notNull().default(0),
-  downloads: integer('downloads').notNull().default(0),
   firstOpenedAt: ts('first_opened_at'),
   lastOpenedAt: ts('last_opened_at'),
 });

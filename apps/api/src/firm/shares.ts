@@ -358,7 +358,7 @@ export function firmSharesRouter(ctx: Ctx): Router {
           createdBy: s.createdBy,
           // P55: sent by one of the client's people, not by the firm.
           byClient: s.sentByIdentityId !== null,
-          downloads: s.downloads,
+          downloads: items.filter((i) => i.shareId === s.id).reduce((n, i) => n + i.downloads, 0),
           downloadLimit: s.downloadLimit,
           expiresAt: s.expiresAt,
           revokedAt: s.revokedAt,

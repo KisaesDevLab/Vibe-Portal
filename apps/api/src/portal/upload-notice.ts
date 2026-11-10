@@ -17,6 +17,7 @@ import type { ClientSession } from '../auth/sessions';
 import type { Ctx } from '../context';
 import { record } from '../lib/events';
 import { HttpError } from '../lib/http';
+import { displayNameOf } from '../lib/contact';
 import { messageTo } from '../lib/notify';
 import { hit } from '../lib/rate-limit';
 
@@ -116,7 +117,7 @@ export async function notifyBatch(
     })
     .from(schema.portalIdentity)
     .where(eq(schema.portalIdentity.id, s.identityId));
-  const from = who?.name || who?.email || who?.phone || 'A client';
+  const from = displayNameOf(who);
   const note = files.find((f) => f.note)?.note ?? '';
   const n = files.length;
   const body =

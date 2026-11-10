@@ -71,7 +71,36 @@ export function sharedRouter(ctx: Ctx): Router {
       .from(schema.clients)
       .where(eq(schema.clients.id, s.clientId));
     if (!c?.active) throw new HttpError(410, 'share_revoked');
+    // P55 review: a link a client sent works only while the firm allows client links and the
+    // sender still has this client (their files are checked one by one: `sentByMayStill`).
+    if (s.sentByIdentityId) {
+      const [f] = await ctx.db.select({ on: schema.firm.clientLinks }).from(schema.firm);
+      if (!f?.on) throw new HttpError(410, 'share_revoked');
+      const [a] = await ctx.db
+        .select({ id: schema.clientAccess.identityId })
+        .from(schema.clientAccess)
+        .innerJoin(
+          schema.portalIdentity,
+          eq(schema.portalIdentity.id, schema.clientAccess.identityId),
+        )
+        .where(
+          and(
+            eq(schema.clientAccess.identityId, s.sentByIdentityId),
+            eq(schema.clientAccess.clientId, s.clientId),
+            eq(schema.clientAccess.active, true),
+            eq(schema.portalIdentity.status, 'active'),
+          ),
+        );
+      if (!a) throw new HttpError(410, 'share_revoked');
+    }
   };
+
+  /** For a link a client sent: only files the firm still shows that person (P55 review). */
+  const sentByMayStill = (s: Share) =>
+    s.sentByIdentityId
+      ? sql`EXISTS (SELECT 1 FROM file_visibility v WHERE v.file_id = ${schema.files.id}
+              AND v.identity_id = ${s.sentByIdentityId} AND v.visible)`
+      : undefined;
 
   /** The share the request's id and key name, if it still works. */
   const load = async (req: Request): Promise<Share> => {
@@ -124,6 +153,7 @@ export function sharedRouter(ctx: Ctx): Router {
           eq(schema.fileShareItem.shareId, s.id),
           isNull(schema.files.removedAt),
           isNotNull(schema.files.blobKey),
+          sentByMayStill(s),
         ),
       )
       .orderBy(asc(schema.files.name), asc(schema.files.id));
@@ -387,6 +417,7 @@ export function sharedRouter(ctx: Ctx): Router {
             eq(schema.fileShareItem.shareId, s.id),
             eq(schema.fileShareItem.fileId, fileId.data),
             isNull(schema.files.removedAt),
+            sentByMayStill(s),
           ),
         );
       const f = row?.f;
@@ -413,10 +444,6 @@ export function sharedRouter(ctx: Ctx): Router {
           )
           .returning({ n: schema.fileShareItem.downloads });
         if (!counted) throw new HttpError(403, 'download_limit');
-        await ctx.db
-          .update(schema.fileShare)
-          .set({ downloads: sql`${schema.fileShare.downloads} + 1` })
-          .where(eq(schema.fileShare.id, s.id));
       }
 
       const blobKey = f.blobKey;

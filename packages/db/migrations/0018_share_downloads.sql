@@ -7,8 +7,5 @@
 
 ALTER TABLE firm ADD COLUMN share_download_limit integer NOT NULL DEFAULT 5
   CHECK (share_download_limit BETWEEN 0 AND 1000);
-ALTER TABLE file_share
-  ADD COLUMN download_limit integer NOT NULL DEFAULT 0,
-  -- All files together, for the staff page.
-  ADD COLUMN downloads integer NOT NULL DEFAULT 0;
+ALTER TABLE file_share ADD COLUMN download_limit integer NOT NULL DEFAULT 0;
 ALTER TABLE file_share_item ADD COLUMN downloads integer NOT NULL DEFAULT 0;

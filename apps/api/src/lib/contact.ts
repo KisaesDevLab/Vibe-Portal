@@ -71,3 +71,10 @@ export function isUsCanadaPhone(phone: string): boolean {
   const m = /^\+1(\d{3})\d{7}$/.exec(phone);
   return m !== null && !NANP_ABROAD.has(m[1] as string);
 }
+
+/** How a client person is named to others: their name, else email, else phone (P55, P56). */
+export function displayNameOf(
+  p: { name?: string | null; email?: string | null; phone?: string | null } | undefined,
+): string {
+  return p?.name || p?.email || p?.phone || 'A client';
+}

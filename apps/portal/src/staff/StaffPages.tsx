@@ -27,6 +27,7 @@ import {
 } from '@vibe/ui';
 
 import { FirmLogo, reloadBranding } from '../branding';
+import { Select } from '../components/Field';
 import { usePages } from '../paging';
 import { ApiError } from '../api';
 import {
@@ -271,8 +272,11 @@ export function StaffHome(): JSX.Element {
 
 function Table({ head, children }: { head: string[]; children: ReactNode }): JSX.Element {
   const ref = useRef<HTMLTableElement>(null);
-  // P59: each cell carries its column's name, shown beside it when the row is a card (phone).
+  // P59: each cell carries its column's name, shown beside it when the row is a card. Only on
+  // a phone, where the cards are.
+  const narrowTable = useIsNarrow();
   useLayoutEffect(() => {
+    if (!narrowTable) return;
     const rows = ref.current?.tBodies[0]?.rows ?? [];
     for (const tr of Array.from(rows)) {
       Array.from(tr.cells).forEach((td, i) => {
@@ -371,6 +375,8 @@ function ClientDetail(): JSX.Element {
     people.reload();
     files.reload();
     links.reload();
+    head.reload();
+    uploads.reload();
   };
   /** The file "Send securely" was pressed on, while its form is open. */
   const [sending, setSending] = useState<string | null>(null);
@@ -513,6 +519,8 @@ function ClientDetail(): JSX.Element {
         onChanged={() => {
           files.reload();
           head.reload();
+          // A file removed leaves the links that held it.
+          links.reload();
         }}
         onSend={(fileId) => {
           setSentNote('');
@@ -642,19 +650,33 @@ function ClientFiles({
   };
   const pickedFiles = all.filter((f) => picked.has(f.fileId));
 
-  /** One call per file; the list is read again once at the end. */
+  /** One call per file, four at a time; the list is read again once at the end. A file that
+   *  failed stays selected, and the page says how many, so trying again finishes the job. */
   const many = async (what: (f: SharedFile) => Promise<unknown>): Promise<void> => {
     setWorking(true);
     setProblem('');
-    try {
-      for (const f of pickedFiles) await what(f);
-      setPicked(new Set());
-    } catch (err) {
-      setProblem(staffSay(err));
-    } finally {
-      setWorking(false);
-      onChanged();
+    const failed = new Set<string>();
+    let why = '';
+    const queue = [...pickedFiles];
+    const worker = async (): Promise<void> => {
+      for (let f = queue.shift(); f; f = queue.shift()) {
+        try {
+          await what(f);
+        } catch (err) {
+          failed.add(f.fileId);
+          why = staffSay(err);
+        }
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    setPicked(failed);
+    if (failed.size) {
+      setProblem(
+        `${failed.size} of ${pickedFiles.length} could not be changed (${why}). They are still selected: try again.`,
+      );
     }
+    setWorking(false);
+    onChanged();
   };
   const visibility = (visible: boolean): Promise<void> =>
     many((f) =>
@@ -760,25 +782,23 @@ function ClientFiles({
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 13 }}>Tax year</span>
-            <select value={year} onChange={(e) => setYear(e.target.value)}>
+          <div style={{ flex: '0 1 150px' }}>
+            <Select label="Tax year" value={year} onChange={(e) => setYear(e.target.value)}>
               <option value="all">All years</option>
               {years.map((y) => (
                 <option key={y ?? 'none'} value={String(y ?? 'none')}>
                   {y ?? 'No tax year'}
                 </option>
               ))}
-            </select>
-          </label>
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span style={{ fontSize: 13 }}>Sort</span>
-            <select value={sort} onChange={(e) => setSort(e.target.value as FileSort)}>
+            </Select>
+          </div>
+          <div style={{ flex: '0 1 150px' }}>
+            <Select label="Sort" value={sort} onChange={(e) => setSort(e.target.value as FileSort)}>
               <option value="newest">Newest first</option>
               <option value="name">Name</option>
               <option value="year">Tax year</option>
-            </select>
-          </label>
+            </Select>
+          </div>
         </div>
       )}
       {picked.size > 0 && (
@@ -1368,7 +1388,8 @@ interface SettingsData {
   /** Clients may send secure links to files shared with them (P55). */
   clientLinks: boolean;
   /** Downloads each new secure link allows; 0 for no limit (P58). */
-  shareDownloadLimit: number;
+  /** Empty while being typed: not saved until it is a number. */
+  shareDownloadLimit: number | '';
 }
 
 function Settings(): JSX.Element {
@@ -1419,6 +1440,8 @@ function Settings(): JSX.Element {
             style={{ display: 'grid', gap: 8, maxWidth: 420 }}
             onSubmit={(e) => {
               e.preventDefault();
+              // Empty is not 0 ("no limit"): nothing is saved until it is a number.
+              if (form.shareDownloadLimit === '') return;
               void act('/v1/settings', {
                 method: 'PUT',
                 body: {
@@ -1427,7 +1450,7 @@ function Settings(): JSX.Element {
                   uploadLimitMb: Number(form.uploadLimitMb),
                   uploadKeepDays: Number(form.uploadKeepDays),
                   clientLinks: form.clientLinks,
-                  shareDownloadLimit: Number(form.shareDownloadLimit),
+                  shareDownloadLimit: form.shareDownloadLimit,
                 },
               }).then((r) => {
                 if (r) {
@@ -1477,7 +1500,12 @@ function Settings(): JSX.Element {
               min={0}
               max={1000}
               value={form.shareDownloadLimit}
-              onChange={(e) => setForm({ ...form, shareDownloadLimit: Number(e.target.value) })}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  shareDownloadLimit: e.target.value === '' ? '' : Number(e.target.value),
+                })
+              }
             />
             <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <input
@@ -1492,7 +1520,7 @@ function Settings(): JSX.Element {
                 page and can revoke it.
               </span>
             </label>
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || form.shareDownloadLimit === ''}>
               Save
             </Button>
           </form>

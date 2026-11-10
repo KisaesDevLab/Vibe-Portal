@@ -22,11 +22,9 @@ export interface ClientLink {
   createdAt: string;
   expiresAt: string;
   opens: number;
-  downloads: number;
   downloadLimit: number;
-  fileDownloads?: { name: string; downloads: number }[];
   status: 'locked' | 'revoked' | 'expired' | 'opened' | 'sent';
-  files: string[];
+  files: { name: string; downloads: number }[];
 }
 
 const STATUS: Record<ClientLink['status'], string> = {
@@ -214,7 +212,7 @@ export function ClientLinksList({
         {slice.map((l) => (
           <ItemRow
             key={l.id}
-            title={l.files.join(', ')}
+            title={l.files.map((f) => f.name).join(', ')}
             meta={
               <>
                 To {l.name ? `${l.name} ` : ''}
@@ -230,11 +228,10 @@ export function ClientLinksList({
                     ? ` · each file up to ${l.downloadLimit} downloads`
                     : ' · view and download'
                   : ' · view only'}
-                {l.canDownload && (l.fileDownloads ?? []).some((d) => d.downloads > 0) && (
+                {l.canDownload && l.files.some((d) => d.downloads > 0) && (
                   <>
                     <br />
-                    Downloaded:{' '}
-                    {(l.fileDownloads ?? []).map((d) => `${d.name} ${d.downloads}×`).join(', ')}
+                    Downloaded: {l.files.map((d) => `${d.name} ${d.downloads}×`).join(', ')}
                   </>
                 )}
               </>

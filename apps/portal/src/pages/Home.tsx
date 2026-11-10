@@ -29,6 +29,12 @@ export function Home(): JSX.Element {
   const [sentNote, setSentNote] = useState('');
   const [me, setMe] = useState<Me | null>(null);
   const links = useClientLinks(me?.activeClientId ?? '');
+  // A form for one client's file never stays open on another client's page.
+  const shownClient = me?.activeClientId;
+  useEffect(() => {
+    setSending(null);
+    setSentNote('');
+  }, [shownClient]);
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');

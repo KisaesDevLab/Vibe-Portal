@@ -68,6 +68,18 @@ function actorOf(req: Request): Actor {
 }
 
 /** Vibe Files' firm API, authorised by the firm key. */
+/** A client and its counts, for the client list and a client's page (P54). The counts name
+ *  `clients.id` in full: inside `FROM files f` a bare "id" would be the file's own. */
+const clientColumns = {
+  id: schema.clients.id,
+  clientCode: schema.clients.clientCode,
+  displayName: schema.clients.displayName,
+  active: schema.clients.active,
+  users: sql<number>`(SELECT count(*) FROM client_access a WHERE a.client_id = clients.id AND a.active)`,
+  files: sql<number>`(SELECT count(*) FROM files f WHERE f.client_id = clients.id AND f.removed_at IS NULL)`,
+  waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = clients.id AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
+};
+
 export function firmRouter(ctx: Ctx): Router {
   return firmApi(ctx, requireFirmKey(ctx), false);
 }
@@ -152,15 +164,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
     '/clients',
     h(async (req, res) => {
       const rows = await ctx.db
-        .select({
-          id: schema.clients.id,
-          clientCode: schema.clients.clientCode,
-          displayName: schema.clients.displayName,
-          active: schema.clients.active,
-          users: sql<number>`(SELECT count(*) FROM client_access a WHERE a.client_id = clients.id AND a.active)`,
-          files: sql<number>`(SELECT count(*) FROM files f WHERE f.client_id = clients.id AND f.removed_at IS NULL)`,
-          waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = clients.id AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
-        })
+        .select(clientColumns)
         .from(schema.clients)
         .where(inScope(req, schema.clients.id))
         .orderBy(asc(schema.clients.displayName));
@@ -181,15 +185,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
     h(async (req, res) => {
       const id = param(req, 'id');
       const [c] = await ctx.db
-        .select({
-          id: schema.clients.id,
-          clientCode: schema.clients.clientCode,
-          displayName: schema.clients.displayName,
-          active: schema.clients.active,
-          users: sql<number>`(SELECT count(*) FROM client_access a WHERE a.client_id = clients.id AND a.active)`,
-          files: sql<number>`(SELECT count(*) FROM files f WHERE f.client_id = clients.id AND f.removed_at IS NULL)`,
-          waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = clients.id AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
-        })
+        .select(clientColumns)
         .from(schema.clients)
         .where(eq(schema.clients.id, id));
       if (!c) throw new HttpError(404, 'client_not_found');

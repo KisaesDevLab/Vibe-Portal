@@ -72,6 +72,22 @@ export function say(err: unknown): string {
     email_failed: 'The email could not be sent. Try again in a few minutes.',
     not_verified: 'This page has locked. Open the link again and enter a new code.',
     view_only: 'This document can be viewed here but not downloaded.',
+    // Secure links a client sends (P55), downloads (P58) and upload notices (P56).
+    recipient_has_too_many:
+      'That person already has 5 working links for these files. End an old link first.',
+    too_many_shares: 'You have sent as many links as you can today. Try again tomorrow.',
+    cannot_watermark:
+      'This PDF is locked or damaged, so it cannot be marked with their name. Ask the firm to send it.',
+    too_large_to_watermark:
+      'This PDF is too large to send by secure link. Ask the firm to send it.',
+    view_only_needs_preview:
+      'This kind of file cannot be shown on the page: choose "View and download it".',
+    file_not_found: 'That file is no longer on the portal. Reload the page.',
+    client_links_off: 'The firm does not allow sending secure links from the portal.',
+    download_limit: 'This file has been downloaded as many times as the link allows.',
+    notice_not_sent: 'Your files were sent, but the email to the firm could not be sent.',
+    cannot_notify: 'That person can no longer be told. Choose someone else.',
+    share_revoked: 'This link has ended.',
     network: 'The portal cannot be reached right now. Try again later.',
   };
   return words[code] ?? 'Something went wrong. Try again.';
