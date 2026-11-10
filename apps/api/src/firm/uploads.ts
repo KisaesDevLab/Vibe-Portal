@@ -18,6 +18,7 @@ import type { Ctx } from '../context';
 import { sendStored } from '../files/send';
 import { record, type Actor } from '../lib/events';
 import { h, HttpError, notForStaff } from '../lib/http';
+import { inScope, mustSee } from '../staff/scope';
 
 function actorOf(req: Request): Actor {
   return req.firmActor ?? { kind: 'firm_key', name: 'Vibe Files' };
@@ -36,7 +37,7 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
 
   r.get(
     '/',
-    h(async (_req, res) => {
+    h(async (req, res) => {
       const rows = await ctx.db
         .select({
           u: schema.uploads,
@@ -49,7 +50,13 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
         .from(schema.uploads)
         .innerJoin(schema.clients, eq(schema.clients.id, schema.uploads.clientId))
         .innerJoin(schema.portalIdentity, eq(schema.portalIdentity.id, schema.uploads.identityId))
-        .where(and(isNull(schema.uploads.fetchedAt), isNull(schema.uploads.removedAt)))
+        .where(
+          and(
+            isNull(schema.uploads.fetchedAt),
+            isNull(schema.uploads.removedAt),
+            inScope(req, schema.uploads.clientId),
+          ),
+        )
         .orderBy(asc(schema.uploads.uploadedAt))
         .limit(500);
       res.json({
@@ -82,6 +89,7 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
       const id = idOf(req);
       const [u] = await ctx.db.select().from(schema.uploads).where(eq(schema.uploads.id, id));
       if (!u || !u.blobKey || !u.dekWrapped) throw new HttpError(404, 'not_found');
+      mustSee(req, u.clientId);
       const blobKey = u.blobKey;
       const dekWrapped = u.dekWrapped;
       await sendStored(

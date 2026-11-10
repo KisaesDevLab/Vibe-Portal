@@ -40,7 +40,33 @@ function at(path: string): void {
 }
 
 const ME: Reply = {
-  body: { email: 'ann@firm.test', name: 'Ann Staff', firmName: 'Example CPA' },
+  body: {
+    email: 'ann@firm.test',
+    name: 'Ann Staff',
+    firmName: 'Example CPA',
+    admin: true,
+    allClients: true,
+  },
+};
+const SETTINGS: Reply = {
+  body: {
+    firmName: 'Example CPA',
+    accentColor: '#0f6cbd',
+    uploadLimitMb: 95,
+    uploadKeepDays: 30,
+    hasLogo: false,
+    portalUrl: 'https://portal.example.test',
+  },
+};
+const ANN = {
+  id: 's1',
+  email: 'ann@firm.test',
+  name: 'Ann Staff',
+  active: true,
+  ready: true,
+  lastSignInAt: null,
+  admin: true,
+  clientIds: null,
 };
 const CLIENT = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -284,33 +310,12 @@ describe('staff page', () => {
   });
 
   it('settings: a new key is shown once, and adding staff shows the setup link', async () => {
-    serve({
+    const calls = serve({
       '/auth/me': ME,
-      '/v1/settings': {
-        body: {
-          firmName: 'Example CPA',
-          accentColor: '#0f6cbd',
-          uploadLimitMb: 95,
-          uploadKeepDays: 30,
-          hasLogo: false,
-          portalUrl: 'https://portal.example.test',
-        },
-      },
+      '/v1/settings': SETTINGS,
       '/v1/keys': { body: { keys: [] } },
-      '/v1/staff': {
-        body: {
-          staff: [
-            {
-              id: 's1',
-              email: 'ann@firm.test',
-              name: 'Ann Staff',
-              active: true,
-              ready: true,
-              lastSignInAt: null,
-            },
-          ],
-        },
-      },
+      '/v1/clients': { body: { clients: [CLIENT] } },
+      '/v1/staff': { body: { staff: [ANN] } },
       'POST /v1/keys': { status: 201, body: { id: 'k1', key: 'vpk_secret' } },
       'POST /v1/staff': {
         status: 201,
@@ -328,11 +333,99 @@ describe('staff page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
     expect(await screen.findByText(/staff\/setup#t=abc/)).toBeTruthy();
     expect(screen.getByText(/Setup link for Bob \(bob@firm.test\)/)).toBeTruthy();
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/v1/staff')?.body).toEqual({
+      email: 'bob@firm.test',
+      name: 'Bob',
+      admin: false,
+    });
     // The key is shown only until the next thing done.
     expect(screen.queryByText('vpk_secret')).toBeNull();
     // Your own row cannot be turned off or reset.
     expect(screen.getByText('you')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Ann Staff/ })).toBeNull();
+  });
+
+  it('settings: limits a staff member to the clients ticked (P48)', async () => {
+    const other = { ...CLIENT, id: '33333333-3333-4333-8333-333333333333', displayName: 'Jones' };
+    const bob = { ...ANN, id: 's2', email: 'bob@firm.test', name: 'Bob', admin: false };
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/settings': SETTINGS,
+      '/v1/keys': { body: { keys: [] } },
+      '/v1/clients': { body: { clients: [CLIENT, other] } },
+      '/v1/staff': {
+        body: {
+          staff: [
+            ANN,
+            bob,
+            { ...bob, id: 's3', email: 'cy@firm.test', name: 'Cy', clientIds: [other.id] },
+          ],
+        },
+      },
+      'PATCH /v1/staff/s2': { body: { ok: true } },
+      'PATCH /v1/staff/s3': { body: { ok: true } },
+    });
+    at('/staff/settings');
+    const row = (await screen.findByText('bob@firm.test')).closest('tr') as HTMLElement;
+    expect(within(row).getByText('Every client')).toBeTruthy();
+    expect(screen.getByText('Admin: every client')).toBeTruthy();
+    expect(screen.getByText('1 client')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Access for Bob' }));
+    const form = screen.getByRole('form', { name: 'Access for Bob' });
+    fireEvent.click(within(form).getByLabelText('Sees only these clients'));
+    expect(within(form).getByText(/they will see no clients/)).toBeTruthy();
+    fireEvent.click(await within(form).findByLabelText(/Smith, John/));
+    fireEvent.click(within(form).getByRole('button', { name: 'Save access' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/v1/staff/s2')?.body).toEqual({
+        admin: false,
+        clientIds: [CLIENT.id],
+      }),
+    );
+    await waitFor(() => expect(screen.queryByRole('form', { name: 'Access for Bob' })).toBeNull());
+
+    // Made an admin: the list they had is not sent.
+    fireEvent.click(screen.getByRole('button', { name: 'Access for Cy' }));
+    const cy = screen.getByRole('form', { name: 'Access for Cy' });
+    expect((within(cy).getByLabelText(/Jones/) as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(within(cy).getByLabelText(/^Admin/));
+    fireEvent.click(within(cy).getByRole('button', { name: 'Save access' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/v1/staff/s3')?.body).toEqual({
+        admin: true,
+        clientIds: null,
+      }),
+    );
+  });
+
+  it('staff who are not admins have no Settings; limited staff no Requests (P48)', async () => {
+    serve({
+      '/auth/me': { body: { ...(ME.body as object), admin: false, allClients: false } },
+      '/v1/clients': { body: { clients: [] } },
+    });
+    at('/staff/settings');
+    // Sent back to Clients.
+    await screen.findByRole('heading', { name: 'Clients' });
+    expect(screen.getByText('You see the clients an admin chose for you.')).toBeTruthy();
+    expect(screen.getByText('No clients chosen for you yet.')).toBeTruthy();
+    const nav = screen.getByRole('navigation', { name: 'Staff' });
+    expect(within(nav).queryByRole('link', { name: 'Settings' })).toBeNull();
+    expect(within(nav).queryByRole('link', { name: 'Requests' })).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'Uploads' })).toBeTruthy();
+  });
+
+  it('staff who see every client but are not admins keep Requests (P48)', async () => {
+    serve({
+      '/auth/me': { body: { ...(ME.body as object), admin: false } },
+      '/v1/clients': { body: { clients: [CLIENT] } },
+    });
+    at('/staff');
+    await screen.findByRole('link', { name: 'Smith, John' });
+    const nav = screen.getByRole('navigation', { name: 'Staff' });
+    expect(within(nav).getByRole('link', { name: 'Requests' })).toBeTruthy();
+    expect(within(nav).queryByRole('link', { name: 'Settings' })).toBeNull();
+    expect(screen.queryByText('You see the clients an admin chose for you.')).toBeNull();
   });
 
   it('a page whose session ended goes to sign in', async () => {

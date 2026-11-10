@@ -229,6 +229,8 @@ Each phase ends with its tests green and a ship gate.
 - [x] Pages: Clients & users (invite, disable), Access requests (approve → client, deny), Uploads
   (list, download, mark fetched only through Vibe Files), Shared files (who sees each; hide; remove)
 - [x] Every action in `events` with the staff user's name, shown on the History page (P43)
+- [x] Admins and per-client access (P48): admins alone use Settings; an admin can limit a staff
+  member to some clients (`staff_users.admin`, `all_clients`; `staff_client`)
 - **Gate:** a request approved on the page shows the client as active in Vibe Files' Share window;
   a file removed on the page shows as not on the portal in Vibe Files
 

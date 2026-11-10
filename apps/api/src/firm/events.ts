@@ -7,12 +7,13 @@
 //   GET /api/firm/v1/events?since=<id>&limit=<n>[&latest=1]
 
 import express, { type Router } from 'express';
-import { asc, desc, eq, gt } from 'drizzle-orm';
+import { and, asc, desc, eq, gt } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
 import type { Ctx } from '../context';
 import { h } from '../lib/http';
+import { inScope } from '../staff/scope';
 
 const Query = z.object({
   since: z.coerce.number().int().min(0).default(0),
@@ -31,7 +32,8 @@ export function firmEventsRouter(ctx: Ctx): Router {
         .select({ e: schema.events, vfDocumentId: schema.files.vfDocumentId })
         .from(schema.events)
         .leftJoin(schema.files, eq(schema.files.id, schema.events.fileId))
-        .where(gt(schema.events.id, q.since))
+        // P48: limited staff see their clients' events only (none of the firm-wide ones).
+        .where(and(gt(schema.events.id, q.since), inScope(req, schema.events.clientId)))
         .orderBy(q.latest ? desc(schema.events.id) : asc(schema.events.id))
         .limit(q.limit);
       res.json({

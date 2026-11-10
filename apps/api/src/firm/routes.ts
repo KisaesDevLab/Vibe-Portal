@@ -27,6 +27,7 @@ import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { randomToken, sha256 } from '../lib/secrets';
+import { inScope, mustSee, requireAllClients } from '../staff/scope';
 import { VERSION } from '../version';
 import { firmFilesRouter } from './files';
 import { requireFirmKey } from './keys';
@@ -83,6 +84,14 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   r.use('/files', firmFilesRouter(ctx, staff));
   r.use('/uploads', firmUploadsRouter(ctx, staff));
   r.use('/events', firmEventsRouter(ctx));
+  // P48: a staff member limited to some clients reaches only those; any other answers as if it
+  // were not on the portal. Access requests are not about one client yet, so they are for staff
+  // who see every client. (Vibe Files, with the firm key, sees everything.)
+  r.use('/clients/:id', (req, _res, next) => {
+    mustSee(req, req.params['id'] ?? '', 'client_not_found');
+    next();
+  });
+  r.use('/access-requests', requireAllClients);
 
   const clientExists = async (id: string): Promise<boolean> =>
     (
@@ -127,7 +136,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   // bare "id", which inside `FROM files f` would mean the file's own id.
   r.get(
     '/clients',
-    h(async (_req, res) => {
+    h(async (req, res) => {
       const rows = await ctx.db
         .select({
           id: schema.clients.id,
@@ -139,6 +148,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = clients.id AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
         })
         .from(schema.clients)
+        .where(inScope(req, schema.clients.id))
         .orderBy(asc(schema.clients.displayName));
       res.json({
         clients: rows.map((c) => ({

@@ -59,6 +59,10 @@ export const staffUsers = pgTable('staff_users', {
   failedLogins: integer('failed_logins').notNull().default(0),
   lockedUntil: ts('locked_until'),
   totpLastStep: bigint('totp_last_step', { mode: 'number' }),
+  /** Uses Settings: the firm, portal keys and staff accounts (P48). */
+  admin: boolean('admin').notNull().default(false),
+  /** False: sees only the clients in `staff_client` (P48). */
+  allClients: boolean('all_clients').notNull().default(true),
 });
 
 export const staffSetupToken = pgTable('staff_setup_token', {
@@ -81,6 +85,20 @@ export const clients = pgTable('clients', {
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
+
+/** The clients a limited staff member sees (P48); used only while `allClients` is false. */
+export const staffClient = pgTable(
+  'staff_client',
+  {
+    staffId: uuid('staff_id')
+      .notNull()
+      .references(() => staffUsers.id, { onDelete: 'cascade' }),
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+  },
+  (t) => [primaryKey({ columns: [t.staffId, t.clientId] })],
+);
 
 export const portalIdentity = pgTable('portal_identity', {
   id: uuid('id').primaryKey().defaultRandom(),

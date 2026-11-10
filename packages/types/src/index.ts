@@ -40,6 +40,7 @@ export const EVENT_KINDS = [
   'staff_on',
   'staff_off',
   'staff_reset',
+  'staff_access',
   'upload_removed',
   'upload_purged',
   'file_added',

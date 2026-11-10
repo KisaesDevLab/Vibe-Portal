@@ -17,6 +17,7 @@ import {
   type PortalUser,
   type SharedFile,
   type StaffMe,
+  type StaffRow,
 } from './api';
 
 /** Sends the person to sign in when the session has ended (30 minutes idle, 12 hours). */
@@ -125,7 +126,15 @@ export function StaffHome(): JSX.Element {
     await staffApi('/auth/logout', { method: 'POST' }).catch(() => undefined);
     navigate('/staff/login', { replace: true });
   };
-  const nav = ['Clients', 'Requests', 'Uploads', 'History', 'Settings'];
+  // Settings are for admins; access requests for staff who see every client.
+  const { admin, allClients } = me.data;
+  const nav = [
+    'Clients',
+    ...(allClients ? ['Requests'] : []),
+    'Uploads',
+    'History',
+    ...(admin ? ['Settings'] : []),
+  ];
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}>
       <header style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -143,12 +152,12 @@ export function StaffHome(): JSX.Element {
         </Button>
       </header>
       <Routes>
-        <Route index element={<Clients />} />
+        <Route index element={<Clients limited={!allClients} />} />
         <Route path="clients/:id" element={<ClientDetail />} />
-        <Route path="requests" element={<Requests />} />
+        {allClients && <Route path="requests" element={<Requests />} />}
         <Route path="uploads" element={<Uploads />} />
         <Route path="history" element={<History />} />
-        <Route path="settings" element={<Settings />} />
+        {admin && <Route path="settings" element={<Settings />} />}
         <Route path="*" element={<Navigate to="/staff" replace />} />
       </Routes>
     </div>
@@ -176,7 +185,7 @@ function Table({ head, children }: { head: string[]; children: ReactNode }): JSX
 
 const td = { padding: '6px 8px', borderTop: '1px solid var(--vibe-border, #ddd)' };
 
-function Clients(): JSX.Element {
+function Clients({ limited }: { limited: boolean }): JSX.Element {
   const load = useLoad<{ clients: ClientRow[] }>('/v1/clients');
   const [q, setQ] = useState('');
   const rows = (load.data?.clients ?? []).filter((c) =>
@@ -188,10 +197,17 @@ function Clients(): JSX.Element {
         Clients appear here once Vibe Files has shared a file or invited someone for them. Files are
         shared from Vibe Files.
       </p>
+      {limited && <p>You see the clients an admin chose for you.</p>}
       <Input label="Find a client" name="q" value={q} onChange={(e) => setQ(e.target.value)} />
       <Status load={load} what="the clients" />
       {load.data && rows.length === 0 && (
-        <p>{q.trim() ? 'No client matches.' : 'No clients on the portal yet.'}</p>
+        <p>
+          {q.trim()
+            ? 'No client matches.'
+            : limited
+              ? 'No clients chosen for you yet.'
+              : 'No clients on the portal yet.'}
+        </p>
       )}
       <Table head={['Client', 'ID', 'People', 'Files', 'Uploads waiting']}>
         {rows.map((c) => (
@@ -583,17 +599,9 @@ function Settings(): JSX.Element {
       revokedAt: string | null;
     }[];
   }>('/v1/keys');
-  const staff = useLoad<{
-    staff: {
-      id: string;
-      email: string;
-      name: string;
-      active: boolean;
-      ready: boolean;
-      lastSignInAt: string | null;
-    }[];
-  }>('/v1/staff');
+  const staff = useLoad<{ staff: StaffRow[] }>('/v1/staff');
   const me = useLoad<StaffMe>('/auth/me');
+  const clients = useLoad<{ clients: ClientRow[] }>('/v1/clients');
   const reload = (): void => {
     s.reload();
     keys.reload();
@@ -603,7 +611,9 @@ function Settings(): JSX.Element {
   const [form, setForm] = useState<SettingsData | null>(null);
   const [newKey, setNewKey] = useState('');
   const [keyLabel, setKeyLabel] = useState('');
-  const [person, setPerson] = useState({ email: '', name: '' });
+  const [person, setPerson] = useState({ email: '', name: '', admin: false });
+  // The staff member whose access is being changed.
+  const [access, setAccess] = useState<StaffRow | null>(null);
   const [link, setLink] = useState<{ who: string; url: string } | null>(null);
   // Bumped when the logo changes, so the browser shows the new one (it caches it).
   const [logoV, setLogoV] = useState(0);
@@ -787,7 +797,11 @@ function Settings(): JSX.Element {
       </Card>
       <Card title="Staff">
         <Status load={staff} what="the staff" />
-        <Table head={['Name', 'Email', 'State', 'Last sign-in', 'Actions']}>
+        <p>
+          An admin uses Settings. Other staff see every client unless you limit them to some with{' '}
+          <strong>Access</strong>.
+        </p>
+        <Table head={['Name', 'Email', 'State', 'Sees', 'Last sign-in', 'Actions']}>
           {(staff.data?.staff ?? []).map((u) => {
             const self = u.email === me.data?.email;
             return (
@@ -797,8 +811,26 @@ function Settings(): JSX.Element {
                 <td style={td}>
                   {self ? 'you' : !u.active ? 'turned off' : u.ready ? 'active' : 'setting up'}
                 </td>
+                <td style={td}>
+                  {u.admin
+                    ? 'Admin: every client'
+                    : u.clientIds
+                      ? `${u.clientIds.length} ${u.clientIds.length === 1 ? 'client' : 'clients'}`
+                      : 'Every client'}
+                </td>
                 <td style={td}>{when(u.lastSignInAt)}</td>
                 <td style={td}>
+                  {!self && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      aria-label={`Access for ${u.name}`}
+                      onClick={() => setAccess(u)}
+                    >
+                      Access
+                    </Button>
+                  )}{' '}
                   {!self && (
                     <Button
                       size="sm"
@@ -843,6 +875,20 @@ function Settings(): JSX.Element {
             );
           })}
         </Table>
+        {access && (
+          <StaffAccess
+            key={access.id}
+            who={access}
+            clients={clients}
+            busy={busy}
+            onCancel={() => setAccess(null)}
+            onSave={(change) =>
+              void act(`/v1/staff/${access.id}`, { method: 'PATCH', body: change }).then((r) => {
+                if (r) setAccess(null);
+              })
+            }
+          />
+        )}
         <form
           style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 8 }}
           onSubmit={(e) => {
@@ -851,7 +897,7 @@ function Settings(): JSX.Element {
               const l = (r as { setupLink?: string } | null)?.setupLink;
               if (l) {
                 setLink({ who: `${person.name} (${person.email.trim()})`, url: l });
-                setPerson({ email: '', name: '' });
+                setPerson({ email: '', name: '', admin: false });
               }
             });
           }}
@@ -868,6 +914,14 @@ function Settings(): JSX.Element {
             value={person.name}
             onChange={(e) => setPerson({ ...person, name: e.target.value })}
           />
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input
+              type="checkbox"
+              checked={person.admin}
+              onChange={(e) => setPerson({ ...person, admin: e.target.checked })}
+            />
+            <span>Admin</span>
+          </label>
           <Button type="submit" disabled={busy || !person.email.trim() || !person.name.trim()}>
             Add staff
           </Button>
@@ -880,5 +934,126 @@ function Settings(): JSX.Element {
         )}
       </Card>
     </div>
+  );
+}
+
+/** What a staff member may do: admin or not, and every client or only some (P48). */
+function StaffAccess({
+  who,
+  clients,
+  busy,
+  onSave,
+  onCancel,
+}: {
+  who: StaffRow;
+  clients: Load<{ clients: ClientRow[] }>;
+  busy: boolean;
+  onSave: (change: { admin: boolean; clientIds: string[] | null }) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [admin, setAdmin] = useState(who.admin);
+  const [limited, setLimited] = useState(who.clientIds !== null);
+  const [picked, setPicked] = useState<Set<string>>(new Set(who.clientIds ?? []));
+  const [q, setQ] = useState('');
+  const all = clients.data?.clients ?? [];
+  const shown = all.filter((c) =>
+    `${c.displayName} ${c.clientCode}`.toLowerCase().includes(q.trim().toLowerCase()),
+  );
+  const toggle = (id: string, on: boolean): void => {
+    const next = new Set(picked);
+    if (on) next.add(id);
+    else next.delete(id);
+    setPicked(next);
+  };
+  const some = limited && !admin;
+  return (
+    <form
+      aria-label={`Access for ${who.name}`}
+      style={{
+        display: 'grid',
+        gap: 8,
+        margin: '12px 0',
+        padding: 12,
+        border: '1px solid var(--vibe-border, #ddd)',
+        borderRadius: 6,
+      }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSave({ admin, clientIds: some ? [...picked] : null });
+      }}
+    >
+      <strong>
+        Access for {who.name} ({who.email})
+      </strong>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
+        <span>Admin: uses Settings (the firm, portal keys, staff) and sees every client</span>
+      </label>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input
+          type="radio"
+          name="sees"
+          checked={!some}
+          disabled={admin}
+          onChange={() => setLimited(false)}
+        />
+        <span>Sees every client</span>
+      </label>
+      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input
+          type="radio"
+          name="sees"
+          checked={some}
+          disabled={admin}
+          onChange={() => setLimited(true)}
+        />
+        <span>Sees only these clients</span>
+      </label>
+      {some && (
+        <>
+          <p>
+            They see the people, files, uploads and history of these clients, and nothing of any
+            other client. They do not see access requests.
+          </p>
+          <Status load={clients} what="the clients" />
+          <Input
+            label="Find a client to tick"
+            name="accessFind"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+          <div style={{ maxHeight: 260, overflowY: 'auto', display: 'grid', gap: 4 }}>
+            {shown.map((c) => (
+              <label key={c.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={picked.has(c.id)}
+                  onChange={(e) => toggle(c.id, e.target.checked)}
+                />
+                <span>
+                  {c.displayName} {c.clientCode && `(${c.clientCode})`}
+                  {!c.active && ' (switched off)'}
+                </span>
+              </label>
+            ))}
+            {clients.data && shown.length === 0 && (
+              <span>{q.trim() ? 'No client matches.' : 'No clients on the portal yet.'}</span>
+            )}
+          </div>
+          <span>
+            {picked.size} {picked.size === 1 ? 'client' : 'clients'} ticked
+            {picked.size === 0 && ': they will see no clients'}
+          </span>
+        </>
+      )}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <Button type="submit" disabled={busy}>
+          Save access
+        </Button>
+        <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </form>
   );
 }

@@ -2,7 +2,7 @@
 //
 // The staff page's Settings (P36): the firm's name, colour and logo, the upload limit and how
 // long fetched uploads are kept, the firm keys Vibe Files uses, and staff accounts. Every change
-// is recorded with the staff member's name.
+// is recorded with the staff member's name. All of it is for admins (P48).
 //
 //   GET    /api/staff/v1/settings
 //   PUT    /api/staff/v1/settings                { firmName, accentColor, uploadLimitMb, uploadKeepDays }
@@ -10,17 +10,19 @@
 //   DELETE /api/staff/v1/settings/logo
 //   GET    /api/staff/v1/keys                    POST { label } -> { key } (shown once)
 //   DELETE /api/staff/v1/keys/:id
-//   GET    /api/staff/v1/staff                   POST { email, name } -> { setupLink }
-//   PATCH  /api/staff/v1/staff/:id               { active }
+//   GET    /api/staff/v1/staff                   POST { email, name, admin?, clientIds? }
+//                                                -> { setupLink }
+//   PATCH  /api/staff/v1/staff/:id               { active?, admin?, clientIds? }
+//          clientIds: the only clients they see, or null for every client. An admin sees all.
 //   POST   /api/staff/v1/staff/:id/reset         -> { setupLink } (new password and authenticator)
 //
 //   GET    /api/portal/branding                  (public) { firmName, accentColor, hasLogo }
 //   GET    /api/portal/branding/logo             (public)
 
 import express, { type Request, type Router } from 'express';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import { schema } from '@vibe-portal/db';
+import { schema, type Database } from '@vibe-portal/db';
 
 import { firmName, MAX_UPLOAD_BYTES, type Ctx } from '../context';
 import { createFirmKey, revokeFirmKey } from '../firm/keys';
@@ -29,6 +31,7 @@ import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { cancelSetupLinks, createSetupLink, type StaffSession } from './auth';
+import { requireAdmin } from './scope';
 
 const MB = 1024 * 1024;
 const LOGO_MAX = 512 * 1024;
@@ -44,11 +47,36 @@ const SettingsSchema = z.object({
   uploadKeepDays: z.number().int().min(0).max(3650),
 });
 const KeySchema = z.object({ label: z.string().trim().min(1).max(60) });
+/** The only clients a staff member sees, or null for every client. */
+const ClientIds = z.array(z.string().uuid()).max(20_000).nullable();
 const StaffSchema = z.object({
   email: z.string().trim().max(254),
   name: z.string().trim().min(1).max(120),
+  admin: z.boolean().default(false),
+  clientIds: ClientIds.default(null),
 });
-const ActiveSchema = z.object({ active: z.boolean() });
+const StaffChange = z
+  .object({
+    active: z.boolean().optional(),
+    admin: z.boolean().optional(),
+    clientIds: ClientIds.optional(),
+  })
+  .refine((c) => Object.values(c).some((v) => v !== undefined), 'nothing to change');
+
+type Tx = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+/** Replaces the clients a staff member is limited to (none when they see every client). */
+async function setClients(tx: Tx, staffId: string, clientIds: string[] | null): Promise<void> {
+  await tx.delete(schema.staffClient).where(eq(schema.staffClient.staffId, staffId));
+  const ids = [...new Set((clientIds ?? []).map((c) => c.toLowerCase()))];
+  if (!ids.length) return;
+  const known = await tx
+    .select({ id: schema.clients.id })
+    .from(schema.clients)
+    .where(inArray(schema.clients.id, ids));
+  if (known.length !== ids.length) throw new HttpError(400, 'client_not_found');
+  await tx.insert(schema.staffClient).values(ids.map((clientId) => ({ staffId, clientId })));
+}
 
 function actor(req: Request): Actor {
   return { kind: 'staff', name: (req.staff as StaffSession).email };
@@ -69,6 +97,8 @@ function imageType(b: Buffer): string | null {
 
 export function staffSettingsRouter(ctx: Ctx): Router {
   const r = express.Router();
+  // Not `r.use(requireAdmin)`: the rest of the staff API is mounted after this router.
+  r.use(['/settings', '/keys', '/staff'], requireAdmin);
 
   r.get(
     '/settings',
@@ -170,6 +200,12 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         .select()
         .from(schema.staffUsers)
         .orderBy(asc(schema.staffUsers.name));
+      const limits = new Map<string, string[]>();
+      for (const c of await ctx.db.select().from(schema.staffClient)) {
+        const list = limits.get(c.staffId);
+        if (list) list.push(c.clientId);
+        else limits.set(c.staffId, [c.clientId]);
+      }
       res.json({
         staff: rows.map((u) => ({
           id: u.id,
@@ -178,6 +214,9 @@ export function staffSettingsRouter(ctx: Ctx): Router {
           active: u.active,
           ready: Boolean(u.totpConfirmedAt),
           lastSignInAt: u.lastSignInAt,
+          admin: u.admin,
+          // The only clients they see; null for every client.
+          clientIds: u.admin || u.allClients ? null : (limits.get(u.id) ?? []),
         })),
       });
     }),
@@ -209,15 +248,32 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         .from(schema.staffUsers)
         .where(eq(schema.staffUsers.email, email));
       if (taken) throw new HttpError(409, 'email_taken');
-      const [u] = await ctx.db
-        .insert(schema.staffUsers)
-        .values({ email, name: input.name })
-        .returning({ id: schema.staffUsers.id });
-      if (!u) throw new Error('staff insert returned nothing');
+      if (input.admin && input.clientIds) throw new HttpError(400, 'admin_sees_all');
+      const u = await ctx.db.transaction(async (tx) => {
+        const [row] = await tx
+          .insert(schema.staffUsers)
+          .values({
+            email,
+            name: input.name,
+            admin: input.admin,
+            allClients: input.clientIds === null,
+          })
+          .returning({ id: schema.staffUsers.id });
+        if (!row) throw new Error('staff insert returned nothing');
+        await setClients(tx, row.id, input.clientIds);
+        return row;
+      });
       const a = actor(req);
       const link = await createSetupLink(ctx, u.id, a.name);
       await sendSetup(email, link);
-      await record(ctx.db, 'staff_added', a, { detail: { staffId: u.id, email } });
+      await record(ctx.db, 'staff_added', a, {
+        detail: {
+          staffId: u.id,
+          email,
+          admin: input.admin,
+          clients: input.clientIds ? input.clientIds.length : 'all',
+        },
+      });
       res.status(201).json({ id: u.id, setupLink: link });
     }),
   );
@@ -226,23 +282,61 @@ export function staffSettingsRouter(ctx: Ctx): Router {
     '/staff/:id',
     h(async (req, res) => {
       const id = idParam(req);
-      const { active } = body(ActiveSchema, req);
-      if (!active && id === (req.staff as StaffSession).staffId) {
-        throw new HttpError(409, 'cannot_turn_off_yourself');
+      const change = body(StaffChange, req);
+      const me = (req.staff as StaffSession).staffId;
+      // Nobody takes their own access away, so an admin is always left: whoever made the change.
+      if (id === me) {
+        if (change.active === false) throw new HttpError(409, 'cannot_turn_off_yourself');
+        if (change.admin === false || change.clientIds) {
+          throw new HttpError(409, 'cannot_change_yourself');
+        }
       }
-      const rows = await ctx.db
-        .update(schema.staffUsers)
-        .set({ active })
-        .where(eq(schema.staffUsers.id, id))
-        .returning({ id: schema.staffUsers.id });
-      if (!rows.length) throw new HttpError(404, 'not_found');
-      if (!active) {
-        await ctx.db.delete(schema.sessions).where(eq(schema.sessions.subjectId, id));
-        await cancelSetupLinks(ctx.db, id, ctx.now());
-      }
-      await record(ctx.db, active ? 'staff_on' : 'staff_off', actor(req), {
-        detail: { staffId: id },
+      const after = await ctx.db.transaction(async (tx) => {
+        // Both accounts are held until this is done (in one order, so two admins changing each
+        // other at the same moment take turns): the one who goes second is no longer an admin.
+        const held = await tx
+          .select()
+          .from(schema.staffUsers)
+          .where(inArray(schema.staffUsers.id, [id, me]))
+          .orderBy(asc(schema.staffUsers.id))
+          .for('update');
+        const self = held.find((u) => u.id === me);
+        if (!self?.admin || !self.active) throw new HttpError(403, 'admins_only');
+        const u = held.find((x) => x.id === id);
+        if (!u) throw new HttpError(404, 'not_found');
+        const admin = change.admin ?? u.admin;
+        // Whether they are limited to some clients after this. Someone made an admin sees
+        // every client; a list sent for an admin is refused.
+        const limited =
+          change.clientIds !== undefined ? change.clientIds !== null : !u.allClients && !admin;
+        if (admin && limited) throw new HttpError(400, 'admin_sees_all');
+        await tx
+          .update(schema.staffUsers)
+          .set({ active: change.active ?? u.active, admin, allClients: !limited })
+          .where(eq(schema.staffUsers.id, id));
+        if (change.clientIds !== undefined) await setClients(tx, id, change.clientIds);
+        else if (!limited) await setClients(tx, id, null);
+        return { was: u, admin, limited };
       });
+      const a = actor(req);
+      if (change.active !== undefined && change.active !== after.was.active) {
+        if (!change.active) {
+          await ctx.db.delete(schema.sessions).where(eq(schema.sessions.subjectId, id));
+          await cancelSetupLinks(ctx.db, id, ctx.now());
+        }
+        await record(ctx.db, change.active ? 'staff_on' : 'staff_off', a, {
+          detail: { staffId: id },
+        });
+      }
+      if (change.admin !== undefined || change.clientIds !== undefined) {
+        await record(ctx.db, 'staff_access', a, {
+          detail: {
+            staffId: id,
+            admin: after.admin,
+            clients: change.clientIds ? change.clientIds.length : after.limited ? 'same' : 'all',
+          },
+        });
+      }
       res.json({ ok: true });
     }),
   );

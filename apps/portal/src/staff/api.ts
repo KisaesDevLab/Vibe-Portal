@@ -42,6 +42,10 @@ export function staffSay(err: unknown): string {
     name_required: 'Enter your name.',
     not_for_staff: 'Only Vibe Files can do that.',
     cannot_turn_off_yourself: 'You cannot turn off your own account.',
+    cannot_change_yourself: 'You cannot change your own access; ask another admin.',
+    admins_only: 'Only an admin can do that.',
+    all_clients_only: 'Only staff who see every client can do that.',
+    admin_sees_all: 'An admin sees every client. Untick Admin to choose clients.',
     already_has_access: 'That person already has access to this client.',
     client_inactive: 'This client is switched off.',
     png_or_jpeg: 'The logo must be a PNG or JPEG file of at most 512 KB.',
@@ -69,6 +73,22 @@ export interface StaffMe {
   email: string;
   name: string;
   firmName: string;
+  /** Uses Settings. */
+  admin: boolean;
+  /** False for someone an admin limited to some clients. */
+  allClients: boolean;
+}
+
+export interface StaffRow {
+  id: string;
+  email: string;
+  name: string;
+  active: boolean;
+  ready: boolean;
+  lastSignInAt: string | null;
+  admin: boolean;
+  /** The only clients they see; null for every client. */
+  clientIds: string[] | null;
 }
 
 export interface ClientRow {

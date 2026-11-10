@@ -24,6 +24,7 @@ import { drop, enqueue } from '../files/notify-queue';
 import { cleanName, contentTypeOf } from '../files/types';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError, notForStaff, queryWithText } from '../lib/http';
+import { inScope, mustSee } from '../staff/scope';
 
 const Uuid = z.string().uuid();
 const Sha = z
@@ -225,6 +226,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       const id = fileId(req);
       const { users } = body(VisibilitySchema, req);
       const file = await liveFile(id);
+      mustSee(req, file.clientId);
       const ids = Object.keys(users);
       // Only people with access to this file's client.
       const known = ids.length
@@ -287,6 +289,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       const now = ctx.now();
       const actor = actorOf(req);
       const before = await liveFile(id);
+      mustSee(req, before.clientId);
       const [gone] = await ctx.db
         .update(schema.files)
         .set({ removedAt: now, removedBy: actor.name, blobKey: null, dekWrapped: null })
@@ -307,6 +310,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       const q = ListQuery.parse(req.query);
       const live = and(
         isNull(schema.files.removedAt),
+        inScope(req, schema.files.clientId),
         q.clientId ? eq(schema.files.clientId, q.clientId) : undefined,
         q.vfDocumentId ? eq(schema.files.vfDocumentId, q.vfDocumentId) : undefined,
       );

@@ -24,12 +24,12 @@ the appliance's own hostname.
 
 Have the email settings ready. Office 365 example:
 
-| Setting | Example |
-|---|---|
-| SMTP server | `smtp.office365.com` |
-| Port | `587` (STARTTLS; use `465` for a server that wants TLS from the start) |
-| User and password | a mailbox licensed to send, e.g. `portal@yourfirm.com` |
-| From | `Your Firm CPA <portal@yourfirm.com>` |
+| Setting           | Example                                                                |
+| ----------------- | ---------------------------------------------------------------------- |
+| SMTP server       | `smtp.office365.com`                                                   |
+| Port              | `587` (STARTTLS; use `465` for a server that wants TLS from the start) |
+| User and password | a mailbox licensed to send, e.g. `portal@yourfirm.com`                 |
+| From              | `Your Firm CPA <portal@yourfirm.com>`                                  |
 
 Then, on the appliance:
 
@@ -91,6 +91,14 @@ On the staff page, **Settings**:
   authenticator, and they set both again from the link (also
   `sudo vibe portal staff-reset <email>` on the appliance, which also turns a turned-off
   account back on).
+  - **Admin**: only admins see Settings. The first account is an admin; tick **Admin** when
+    adding someone, or use **Access** later. You cannot change your own access, so an admin
+    always remains.
+  - **Access**: staff see every client unless you limit them. Choose **Sees only these
+    clients** and tick the clients: that person then sees only those clients' people, files,
+    uploads and history, and not the access requests. An admin always sees every client. The
+    change applies at once. This limits the staff page only: Vibe Files on the office PCs
+    shows every client, as before.
 - **Portal keys**: **Make a key** for Vibe Files (next step). It is shown once.
 
 ## 5. Connect Vibe Files
@@ -125,10 +133,12 @@ uploads not yet collected by Vibe Files exist only on the portal.
 
 ## When something is wrong
 
-| What you see | What to check |
-|---|---|
-| Cloudflare 502 on the portal address | **No TLS Verify** on the tunnel's public hostname (step 3) |
-| Clients get no email | `sudo vibe logs portal` for the SMTP error; the mailbox may need SMTP AUTH turned on (Office 365: Admin center › user › Mail › Manage email apps) |
-| Vibe Files' **Test** says the key is not accepted | The key was revoked or mistyped: make a new one on the staff page |
-| Uploads do not arrive | Is Vibe Files open on some PC? In Admin › Portal press **Fetch uploads now**; a problem shows in the bar at the top of Browse. The staff page's **Uploads** lists what is still waiting |
-| Staff locked out after wrong tries | Wait 15 minutes. Lost phone: another staff member sends **New setup link**, or `sudo vibe portal staff-reset <email>` |
+| What you see                                                                 | What to check                                                                                                                                                                           |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare 502 on the portal address                                         | **No TLS Verify** on the tunnel's public hostname (step 3)                                                                                                                              |
+| Clients get no email                                                         | `sudo vibe logs portal` for the SMTP error; the mailbox may need SMTP AUTH turned on (Office 365: Admin center › user › Mail › Manage email apps)                                       |
+| Vibe Files' **Test** says the key is not accepted                            | The key was revoked or mistyped: make a new one on the staff page                                                                                                                       |
+| Uploads do not arrive                                                        | Is Vibe Files open on some PC? In Admin › Portal press **Fetch uploads now**; a problem shows in the bar at the top of Browse. The staff page's **Uploads** lists what is still waiting |
+| Staff locked out after wrong tries                                           | Wait 15 minutes. Lost phone: an admin sends **New setup link**, or `sudo vibe portal staff-reset <email>`                                                                               |
+| No admin can sign in (left the firm, lost phone)                             | `sudo vibe portal staff-reset <email>` for a staff member: with no other working admin, it makes them an admin                                                                          |
+| A staff member does not see a client, or has no **Requests** or **Settings** | An admin limited them: Settings › Staff › **Access**                                                                                                                                    |

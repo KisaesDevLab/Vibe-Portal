@@ -55,6 +55,10 @@ export interface StaffSession {
   staffId: string;
   email: string;
   name: string;
+  /** Uses Settings (P48). */
+  admin: boolean;
+  /** The only clients this person sees; null for every client (P48). */
+  clientIds: string[] | null;
 }
 
 declare global {
@@ -148,7 +152,24 @@ async function resolve(ctx: Ctx, req: Request): Promise<StaffSession | null> {
     .update(schema.sessions)
     .set({ lastSeenAt: now })
     .where(eq(schema.sessions.idHash, idHash));
-  return { idHash, staffId: row.u.id, email: row.u.email, name: row.u.name };
+  // Read on every call, so a change an admin makes applies at once. An admin sees every client.
+  const clientIds =
+    row.u.admin || row.u.allClients
+      ? null
+      : (
+          await ctx.db
+            .select({ clientId: schema.staffClient.clientId })
+            .from(schema.staffClient)
+            .where(eq(schema.staffClient.staffId, row.u.id))
+        ).map((c) => c.clientId);
+  return {
+    idHash,
+    staffId: row.u.id,
+    email: row.u.email,
+    name: row.u.name,
+    admin: row.u.admin,
+    clientIds,
+  };
 }
 
 /** Requires a signed-in staff member; their actions are recorded as theirs. */
@@ -209,6 +230,56 @@ export async function createSetupLink(
     createdBy: by,
   });
   return `${ctx.portalUrl}/staff/setup#t=${token}`;
+}
+
+/** The appliance's `staff-setup reset <email>`: the account is turned on, its password and
+ *  authenticator are set again from a new link, and its sessions end. When no other admin can
+ *  sign in it also becomes an admin who sees every client (P48), so the firm is never locked
+ *  out of Settings. Null when no account has that email. */
+export async function applianceReset(
+  ctx: Pick<Ctx, 'db' | 'now' | 'portalUrl'>,
+  email: string,
+): Promise<{ email: string; link: string; madeAdmin: boolean } | null> {
+  const [u] = await ctx.db
+    .select()
+    .from(schema.staffUsers)
+    .where(eq(schema.staffUsers.email, email.trim().toLowerCase()));
+  if (!u) return null;
+  const [admins] = await ctx.db
+    .select({ n: count() })
+    .from(schema.staffUsers)
+    .where(
+      and(
+        eq(schema.staffUsers.admin, true),
+        eq(schema.staffUsers.active, true),
+        isNotNull(schema.staffUsers.totpConfirmedAt),
+        ne(schema.staffUsers.id, u.id),
+      ),
+    );
+  const madeAdmin = Number(admins?.n ?? 0) === 0 && !u.admin;
+  await ctx.db
+    .update(schema.staffUsers)
+    .set({
+      passwordHash: null,
+      totpSecretEnc: null,
+      totpConfirmedAt: null,
+      failedLogins: 0,
+      lockedUntil: null,
+      active: true,
+      ...(madeAdmin ? { admin: true, allClients: true } : {}),
+    })
+    .where(eq(schema.staffUsers.id, u.id));
+  if (madeAdmin) {
+    await ctx.db.delete(schema.staffClient).where(eq(schema.staffClient.staffId, u.id));
+  }
+  await ctx.db.delete(schema.sessions).where(eq(schema.sessions.subjectId, u.id));
+  await record(
+    ctx.db,
+    'staff_reset',
+    { kind: 'system', name: 'appliance' },
+    { detail: { staffId: u.id, ...(madeAdmin ? { madeAdmin: true } : {}) } },
+  );
+  return { email: u.email, link: await createSetupLink(ctx, u.id, 'appliance'), madeAdmin };
 }
 
 /** Accepts a code once: its step must be newer than the last one used (RFC 6238 §5.2). */
@@ -328,12 +399,20 @@ export function staffAuthRouter(ctx: Ctx): Router {
         const [u] = taken
           ? await ctx.db
               .update(schema.staffUsers)
-              .set({ name: input.name, passwordHash, totpSecretEnc: enc, active: true })
+              .set({
+                name: input.name,
+                passwordHash,
+                totpSecretEnc: enc,
+                active: true,
+                admin: true,
+                allClients: true,
+              })
               .where(eq(schema.staffUsers.id, taken.id))
               .returning()
           : await ctx.db
               .insert(schema.staffUsers)
-              .values({ email: e, name: input.name, passwordHash, totpSecretEnc: enc })
+              // The first account is the firm's admin.
+              .values({ email: e, name: input.name, passwordHash, totpSecretEnc: enc, admin: true })
               .returning();
         if (!u) throw new Error('staff insert returned nothing');
         staffId = u.id;
@@ -451,7 +530,13 @@ export function staffAuthRouter(ctx: Ctx): Router {
     requireStaff(ctx),
     h(async (req, res) => {
       const s = req.staff as StaffSession;
-      res.json({ email: s.email, name: s.name, firmName: await firmName(ctx) });
+      res.json({
+        email: s.email,
+        name: s.name,
+        firmName: await firmName(ctx),
+        admin: s.admin,
+        allClients: s.clientIds === null,
+      });
     }),
   );
 
