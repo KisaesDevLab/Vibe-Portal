@@ -165,3 +165,33 @@ describe('a portal without text messages (P50)', () => {
     expect(screen.queryByLabelText('Mobile number')).toBeNull();
   });
 });
+
+describe('sign in by text, edge cases (P50)', () => {
+  it('a phone-only account is not offered another number', async () => {
+    serve({ '/auth/me': { body: me('+15552013344', null) } });
+    at('/');
+    await screen.findByText(/code texted to \+15552013344/);
+    expect(screen.queryByText('Use another number')).toBeNull();
+  });
+
+  it('says on the home page why no code came after accepting', async () => {
+    serve({
+      '/invitations/preview': {
+        body: {
+          firmName: 'Example CPA',
+          clientName: 'Smith, John',
+          name: 'John',
+          contact: 'j***@example.test',
+          alsoPhone: '***-***-3344',
+        },
+      },
+      '/invitations/accept': { body: { ok: true, phoneCode: 'too_many_requests', phone: 'x' } },
+      '/auth/me': { body: me(null) },
+    });
+    at('/invite#t=abcdefghijklmnopqrstuvwxyz');
+    fireEvent.click(await screen.findByLabelText(/Also let me sign in by text/));
+    fireEvent.click(screen.getByRole('button', { name: 'Accept and sign in' }));
+    await screen.findByText(/Too many tries.*You can add your mobile number below/);
+    screen.getByLabelText('Mobile number');
+  });
+});

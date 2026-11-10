@@ -56,6 +56,9 @@ export async function sendPhoneCode(ctx: Ctx, identityId: string, phone: string)
   if (!isUsCanadaPhone(phone)) throw new HttpError(400, 'phone_us_only');
   const who = await identityOf(ctx, identityId);
   if (who.phone === phone) throw new HttpError(409, 'phone_already_yours');
+  // With no email, the number is the only way this person signs in and nobody could be told it
+  // changed: a stolen session must not move the account to another phone.
+  if (who.phone && !who.email) throw new HttpError(409, 'phone_only_contact');
   const now = ctx.now();
   if (
     !(await hit(ctx.db, `phone:identity:${identityId}`, LIMITS.phoneConfirmPerIdentity, now)) ||
@@ -155,7 +158,11 @@ export function accountRouter(ctx: Ctx): Router {
           .where(eq(schema.portalIdentity.id, s.identityId));
       } catch (err) {
         // Another account confirmed the same number a moment earlier.
-        if ((err as { code?: unknown }).code === '23505') throw new HttpError(409, 'phone_in_use');
+        // Postgres' unique violation, on the error or on the driver error it wraps.
+        const e = err as { code?: unknown; cause?: { code?: unknown } };
+        if (e.code === '23505' || e.cause?.code === '23505') {
+          throw new HttpError(409, 'phone_in_use');
+        }
         throw err;
       }
       // An earlier number's sign-in codes stop working with it.

@@ -15,8 +15,13 @@ type State = 'loading' | 'ready' | 'signed_out' | 'error';
 
 export function Home(): JSX.Element {
   const navigate = useNavigate();
-  // A code texted when the invitation was accepted with "also sign in by text".
-  const pending = (useLocation().state as { phoneCode?: Pending } | null)?.phoneCode ?? null;
+  // A code texted when the invitation was accepted with "also sign in by text", or why none
+  // was. Kept here and cleared from the history entry, so a reload does not bring it back.
+  const location = useLocation();
+  const [handoff] = useState(
+    () => location.state as { phoneCode?: Pending; phoneProblem?: string } | null,
+  );
+  const pending = handoff?.phoneCode ?? null;
   const [me, setMe] = useState<Me | null>(null);
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState('');
@@ -42,6 +47,18 @@ export function Home(): JSX.Element {
   }, [fail]);
 
   useEffect(load, [load]);
+
+  useEffect(() => {
+    if (!handoff) return;
+    if (handoff.phoneProblem) {
+      setNotice(
+        `${say(new ApiError(0, handoff.phoneProblem))} You can add your mobile number below.`,
+      );
+    }
+    navigate(location.pathname, { replace: true, state: null });
+    // Once, on arrival.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (state === 'signed_out') return <Navigate to="/login" replace />;
   if (state === 'loading') return <p role="status">Loading…</p>;

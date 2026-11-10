@@ -111,7 +111,7 @@ export function PhoneSignIn({
           </div>
         </form>
       )}
-      {current && !pending && me.textsOn !== false && (
+      {current && !pending && me.textsOn !== false && me.identity.email && (
         <details>
           <summary>Use another number</summary>
           <form

@@ -213,6 +213,23 @@ describe('removing the mobile number (P50)', () => {
     expect(r.body.error).toBe('phone_only_contact');
   });
 
+  it('a phone-only account cannot move to another number (nobody could be told)', async () => {
+    await w
+      .firm('post', `/clients/${CLIENT}/invites`)
+      .send({ phone: PHONE, name: 'Cal' })
+      .expect(201);
+    const agent = request.agent(w.app);
+    await agent
+      .post('/api/portal/invitations/accept')
+      .send({ token: w.linkToken(PHONE) })
+      .expect(200);
+    const before = w.notes.sent.length;
+    const r = await agent.post('/api/portal/account/phone').send({ phone: '+15559876543' });
+    expect(r.status).toBe(409);
+    expect(r.body.error).toBe('phone_only_contact');
+    expect(w.notes.sent.length).toBe(before);
+  });
+
   it('a new number replaces the old one, whose sign-in codes stop working', async () => {
     const { agent, id } = await withPhone();
     expect(await textSignIn(PHONE)).toBe(true);

@@ -52,10 +52,15 @@ export function AcceptInvitation(): JSX.Element {
         },
       });
       // A code texted to the number waits on the home page; any other answer (too many codes)
-      // leaves the person to add the number there.
+      // is said there, where the person can add the number.
       navigate('/', {
         replace: true,
-        state: r.phoneCode === 'sent' && r.phone ? { phoneCode: { phone: r.phone } } : null,
+        state:
+          r.phoneCode === 'sent' && r.phone
+            ? { phoneCode: { phone: r.phone } }
+            : r.phoneCode
+              ? { phoneProblem: r.phoneCode }
+              : null,
       });
     } catch (err) {
       setError(say(err));
