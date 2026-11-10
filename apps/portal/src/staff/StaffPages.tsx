@@ -900,6 +900,7 @@ function SendSecurely({
           <span>Link works for</span>
           <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
             <option value={7}>7 days</option>
+            <option value={14}>14 days</option>
             <option value={30}>30 days</option>
             <option value={90}>90 days</option>
           </select>

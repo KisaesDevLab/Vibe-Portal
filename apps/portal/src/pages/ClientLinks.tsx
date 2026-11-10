@@ -143,8 +143,13 @@ export function SendLinkForm({
       <label style={{ display: 'grid', gap: 4 }}>
         <span>The link works for</span>
         <select value={f.days} onChange={(e) => setF({ ...f, days: Number(e.target.value) })}>
-          <option value={7}>7 days</option>
-          <option value={Math.min(30, maxDays)}>{Math.min(30, maxDays)} days</option>
+          {[7, 14, 30]
+            .filter((d) => d <= maxDays)
+            .map((d) => (
+              <option key={d} value={d}>
+                {d} days
+              </option>
+            ))}
         </select>
       </label>
       <label style={{ display: 'grid', gap: 4 }}>
