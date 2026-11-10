@@ -19,7 +19,8 @@ Owner decisions, 2026-11-09 (Q&A):
 | D9 | Lifetime | A shared file stays on the portal until staff remove it (hidden from every user, or **Remove from portal**). |
 | D10 | Uploads | Client uploads are fetched by Vibe Files into a Portal inbox and filed through Intake like scans. |
 | D11 | With full TB | The portals run side by side; the firm decides per client which one to use. No migration in v1. |
-| D12 | Not TB "files only" | Considered running TB itself with its portal feature switches (`@vibe/core/portal-features`) set to Documents only. Rejected: Vibe Portal stays a separate, smaller app (no worker, Redis or staff app) with its own license and releases; copied TB code is tracked in `VENDORED.md`. |
+| D12 | Not TB "files only" | Considered running TB itself with its portal feature switches (`@vibe/core/portal-features`) set to Documents only. Rejected: Vibe Portal stays a separate, smaller app (no worker, Redis or TB's full staff app) with its own license and releases; copied TB code is tracked in `VENDORED.md`. |
+| D13 | Staff web page | A small staff page in the portal besides Vibe Files (Q&A 2026-11-09, P5): invites, client users, access requests, client uploads, hide/remove shared files. Sharing new files stays in Vibe Files. |
 
 ---
 
@@ -33,12 +34,14 @@ Owner decisions, 2026-11-09 (Q&A):
           └── cabinet share (client folders, Intake inboxes)         /data/portal (file blobs)
 ```
 
-- **No staff web app.** Every staff action (invite, approve, share, unshare, see uploads) is done
-  in Vibe Files through the firm API. The portal's only web UI is the client side, plus the
-  appliance admin screen for configuration.
+- **Staff work mainly in Vibe Files**, through the firm API. A **small staff web page** (D13) covers
+  the jobs that need no cabinet access, for staff away from a Vibe Files PC: invites, client users,
+  access requests, client uploads, and hiding or removing files already shared. Sharing a *new*
+  file is only done from Vibe Files, because only Vibe Files reaches the cabinet.
 - **The cabinet is the source of truth.** The portal holds a *copy* of each shared file. The
   original never leaves the cabinet and is never changed by the portal.
-- **Vibe Files is the only writer of shares.** The portal never decides visibility on its own.
+- **Only staff decide visibility.** New files come only from Vibe Files; the staff page can hide or
+  remove them. The portal never decides visibility on its own.
 - **Which client is which:** the portal keys clients by the Vibe Files client identity (its stable
   client UUID) and stores the display name and client ID for the client's screens.
 
@@ -60,7 +63,8 @@ Owner decisions, 2026-11-09 (Q&A):
 |---|---|---|
 | `apps/portal` pages `Login`, `AcceptInvitation`, `RequestAccess`, `Files`, `FilePreview`, `Switch`, `Profile`, `NotificationPrefs`, `Help` | yes | Strip billing, pay-to-unlock banner, requests, messaging links |
 | `apps/portal` everything else (Invoices, Letters, Proposal, Retainers, TaxReturns, Messages, Appointments, …) | no | |
-| `apps/api/src/auth/portal-*`, `step-up*`, `session-*`, `cookies`, `request-ip` | yes | Portal identities only; no staff auth, no RBAC beyond the firm key |
+| `apps/api/src/auth/portal-*`, `step-up*`, `session-*`, `cookies`, `request-ip` | yes | Client identities |
+| `apps/api/src/auth/password`, `totp-secret`, `sso/vibe-auth-adapter` | yes | Staff sign-in for the staff page (D13, P9); no RBAC: every staff user can do everything on the page |
 | `apps/api/src/portal-invites/grant.ts`, `portal-access-requests` | yes | Called from the firm API instead of the staff app |
 | `apps/api/src/portal/files.ts`, `file-shares.ts` | partly | Files list/download kept; client-made share links (TB CP11) **out** of v1 |
 | `apps/api/src/files/visibility.ts` | rework | TB shows a file to the whole client; Vibe Portal shows it **per user** (D8) |
@@ -125,7 +129,7 @@ appends to `events`. Rate-limited per key.
   will confirm your access."
 - **Files**: files visible to *this user* for the active client, newest first, with date shared.
   Preview (PDF.js; images inline; others download). Download. "New" badge until first opened.
-- **Upload**: drag-and-drop or choose files; optional note; progress; size limit 100 MB per file;
+- **Upload**: drag-and-drop or choose files; optional note; progress; size limit set by the firm (default 100 MB per file; Cloudflare's free plan caps a request at 100 MB);
   allowed: PDF, JPG/PNG/HEIC/TIFF, Office (docx, xlsx, csv), txt. List of "Your uploads" with date
   and "Received by the firm" once fetched.
 - **Switch entity**: when the user has several clients.
@@ -151,13 +155,13 @@ Intake inbox registration through Filer's existing shared-inbox setting.
 ## 6. Appliance packaging (vibe-installer)
 
 - `apps/portal/` with `docker-compose.yml`, `docker-compose.grouped.yml`, `env.template`,
-  `caddy.fragment` (its own path in multi-app mode, see QUESTIONS P7; root in single-app mode), `healthcheck.sh`, as
+  `caddy.fragment` (its own hostname, QUESTIONS P7; root in single-app mode), `healthcheck.sh`, as
   `apps/connect`.
 - `vibe install portal`; appears in Vibe Admin's app list.
 - Admin config fields: firm name, logo, colour, portal URL; **Create firm key** (shown once) and
   revoke; upload size limit.
 - Backups: Vibe Vault discovers the portal's Postgres and `/data/portal` volume.
-- With TB also installed: separate hostnames or paths (QUESTIONS P7), no shared state
+- With TB also installed: its own hostname (QUESTIONS P7), no shared state
   (D11).
 
 ---
@@ -206,6 +210,14 @@ Each phase ends with its tests green and a ship gate.
 - **Gate:** from Vibe Files, invite a client, share a file to one of two users, client downloads,
   client uploads, the upload appears in Intake with the right client; all of it in the audit trail
 
+### Phase 6b — Staff web page (D13)
+- [ ] Staff sign-in (P9); staff accounts in the appliance admin screen
+- [ ] Pages: Clients & users (invite, disable), Access requests (approve → client, deny), Uploads
+  (list, download, mark fetched only through Vibe Files), Shared files (who sees each; hide; remove)
+- [ ] Every action in `events`, shown in Vibe Files' audit trail with the staff user's name
+- **Gate:** a request approved on the page shows the client as active in Vibe Files' Share window;
+  a file removed on the page shows as not on the portal in Vibe Files
+
 ### Phase 7 — Hardening
 - [ ] Security review (auth, firm key handling, upload parsing, path handling, headers/CSP)
 - [ ] Load: 500 clients, 20,000 files; large uploads over the tunnel
@@ -217,4 +229,4 @@ Each phase ends with its tests green and a ship gate.
 
 Billing and payments, engagement letters and e-signature, document request lists, messaging,
 client-made share links, expiry of shared files (D9), migration into TB's portal (D11), B2/S3
-storage, a staff web app.
+storage, sharing new files from the staff web page.
