@@ -111,11 +111,21 @@ export function firmUploadsRouter(ctx: Ctx): Router {
         .returning();
       if (!u) {
         const [exists] = await ctx.db
-          .select({ id: schema.uploads.id, removedAt: schema.uploads.removedAt })
+          .select({
+            id: schema.uploads.id,
+            removedAt: schema.uploads.removedAt,
+            fetchedBy: schema.uploads.fetchedBy,
+          })
           .from(schema.uploads)
           .where(eq(schema.uploads.id, id));
         if (!exists) throw new HttpError(404, 'not_found');
-        throw new HttpError(409, exists.removedAt ? 'removed_by_client' : 'already_fetched');
+        // Who has it: a PC whose earlier claim reached the portal but whose answer was lost
+        // knows it is its own (Phase 6 QA).
+        res.status(409).json({
+          error: exists.removedAt ? 'removed_by_client' : 'already_fetched',
+          fetchedBy: exists.removedAt ? null : exists.fetchedBy,
+        });
+        return;
       }
       await record(ctx.db, 'fetch', actor, {
         clientId: u.clientId,
