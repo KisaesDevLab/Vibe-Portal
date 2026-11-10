@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, EmptyState, Pill } from '@vibe/ui';
 
+import { usePages } from '../paging';
 import { api, say } from '../api';
 
 export interface PortalFile {
@@ -75,6 +76,9 @@ export function Files({
 
   useEffect(load, [load, clientId]);
 
+  // Long lists a page at a time (P57).
+  const { slice: page, pager } = usePages(files ?? [], `${year}|${query}|${clientId}`);
+
   const opened = (id: string): void =>
     setFiles((list) => list?.map((f) => (f.id === id ? { ...f, isNew: false } : f)) ?? list);
 
@@ -126,7 +130,7 @@ export function Files({
         />
       ) : (
         <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
-          {files.map((f) => (
+          {page.map((f) => (
             <li
               key={f.id}
               style={{
@@ -193,6 +197,7 @@ export function Files({
           ))}
         </ul>
       )}
+      {pager}
     </section>
   );
 }

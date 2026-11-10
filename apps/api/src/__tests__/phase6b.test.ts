@@ -334,6 +334,11 @@ describe('what staff do (D13)', () => {
     expect(ids).toHaveLength(2);
     expect(ids[0]).toBeGreaterThan(ids[1]);
     expect(ids[0]).toBe(Math.max(...h.body.events.map((e: { id: number }) => e.id)));
+    // P57: the next page, older than the last one shown.
+    const older = await agent
+      .get(`/api/staff/v1/events?latest=1&limit=2&before=${ids[1] as number}`)
+      .expect(200);
+    for (const e of older.body.events as { id: number }[]) expect(e.id).toBeLessThan(ids[1]);
   });
 });
 

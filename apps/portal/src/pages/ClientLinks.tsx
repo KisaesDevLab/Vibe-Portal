@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Button, Input } from '@vibe/ui';
 
 import { api, say } from '../api';
+import { usePages } from '../paging';
 
 export interface ClientLink {
   id: string;
@@ -177,6 +178,7 @@ export function ClientLinksList({
   onChanged: () => void;
 }): JSX.Element | null {
   const [error, setError] = useState('');
+  const { slice, pager } = usePages(links);
   if (links.length === 0) return null;
   async function stop(l: ClientLink): Promise<void> {
     if (!window.confirm(`End the link sent to ${l.email}? It stops working at once.`)) return;
@@ -193,7 +195,7 @@ export function ClientLinksList({
       <h2 style={{ fontSize: 16, margin: 0 }}>Links you sent</h2>
       {error && <p role="alert">{error}</p>}
       <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: 8 }}>
-        {links.map((l) => (
+        {slice.map((l) => (
           <li
             key={l.id}
             style={{
@@ -226,6 +228,7 @@ export function ClientLinksList({
           </li>
         ))}
       </ul>
+      {pager}
     </section>
   );
 }

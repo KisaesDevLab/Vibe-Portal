@@ -9,6 +9,7 @@ import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from '
 import { Button, Card, Input } from '@vibe/ui';
 
 import { FirmLogo, reloadBranding } from '../branding';
+import { usePages } from '../paging';
 import { ApiError } from '../api';
 import {
   staffApi,
@@ -205,6 +206,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
   const rows = (load.data?.clients ?? []).filter((c) =>
     `${c.displayName} ${c.clientCode}`.toLowerCase().includes(q.trim().toLowerCase()),
   );
+  const { slice, pager } = usePages(rows, `${q}|${rows.length}`);
   return (
     <Card title="Clients">
       <p>
@@ -224,7 +226,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
         </p>
       )}
       <Table head={['Client', 'ID', 'People', 'Files', 'Uploads waiting']}>
-        {rows.map((c) => (
+        {slice.map((c) => (
           <tr key={c.id}>
             <td style={td}>
               <Link to={`/staff/clients/${c.id}`}>{c.displayName}</Link>
@@ -237,6 +239,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
           </tr>
         ))}
       </Table>
+      {pager}
     </Card>
   );
 }
@@ -509,8 +512,9 @@ function ClientFiles({
           ? (b.taxYear ?? 0) - (a.taxYear ?? 0) || a.name.localeCompare(b.name)
           : b.sharedAt.localeCompare(a.sharedAt),
     );
+  const { slice: page, pager } = usePages(shown, `${q}|${year}|${sort}|${shown.length}`);
   const folders = years
-    .map((y) => ({ year: y, files: shown.filter((f) => f.taxYear === y) }))
+    .map((y) => ({ year: y, files: page.filter((f) => f.taxYear === y) }))
     .filter((g) => g.files.length > 0);
   const toggle = (ids: string[], on: boolean): void => {
     const next = new Set(picked);
@@ -757,6 +761,7 @@ function ClientFiles({
           </details>
         );
       })}
+      {pager}
     </Card>
   );
 }
@@ -955,6 +960,7 @@ function SecureLinks({
   onRevoke: (share: OutsideShare) => void;
 }): JSX.Element {
   const shares = load.data?.shares ?? [];
+  const { slice, pager } = usePages(shares);
   return (
     <Card title="Secure links sent outside">
       <Status load={load} what="the secure links" />
@@ -963,7 +969,7 @@ function SecureLinks({
       )}
       {shares.length > 0 && (
         <Table head={['To', 'Files', 'Access', 'State', 'Sent', 'Expires', 'Opened', 'Actions']}>
-          {shares.map((s) => (
+          {slice.map((s) => (
             <tr key={s.id}>
               <td style={td}>
                 {s.name ? `${s.name} (${s.email})` : s.email}
@@ -1007,6 +1013,7 @@ function SecureLinks({
           ))}
         </Table>
       )}
+      {pager}
     </Card>
   );
 }
@@ -1119,6 +1126,7 @@ interface UploadRow {
 function Uploads(): JSX.Element {
   const load = useLoad<{ uploads: UploadRow[] }>('/v1/uploads');
   const data = load.data;
+  const { slice, pager } = usePages(data?.uploads ?? []);
   return (
     <Card title="Uploads waiting for Vibe Files">
       <p>
@@ -1128,7 +1136,7 @@ function Uploads(): JSX.Element {
       <Status load={load} what="the uploads" />
       {data?.uploads.length === 0 && <p>Nothing waiting: Vibe Files has collected everything.</p>}
       <Table head={['Received', 'Client', 'File', 'From', 'Note']}>
-        {(data?.uploads ?? []).map((u) => (
+        {slice.map((u) => (
           <tr key={u.uploadId}>
             <td style={td}>{when(u.uploadedAt)}</td>
             <td style={td}>
@@ -1144,6 +1152,7 @@ function Uploads(): JSX.Element {
           </tr>
         ))}
       </Table>
+      {pager}
     </Card>
   );
 }
@@ -1158,16 +1167,46 @@ interface EventRow {
   detail: Record<string, unknown>;
 }
 
+const HISTORY_PAGE = 100;
+
 function History(): JSX.Element {
-  const load = useLoad<{ events: EventRow[] }>('/v1/events?latest=1&limit=300');
-  const rows = load.data?.events ?? [];
+  const load = useLoad<{ events: EventRow[] }>(`/v1/events?latest=1&limit=${HISTORY_PAGE}`);
+  // Older pages, fetched as asked for (P57).
+  const [older, setOlder] = useState<EventRow[]>([]);
+  const [more, setMore] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const first = load.data?.events ?? [];
+  useEffect(() => {
+    setOlder([]);
+    setMore(first.length === HISTORY_PAGE);
+  }, [load.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rows = [...first, ...older];
+  const showOlder = async (): Promise<void> => {
+    const last = rows[rows.length - 1];
+    if (!last) return;
+    setBusy(true);
+    setProblem('');
+    try {
+      const r = await staffApi<{ events: EventRow[] }>(
+        `/v1/events?latest=1&limit=${HISTORY_PAGE}&before=${last.id}`,
+      );
+      setOlder((o) => [...o, ...r.events]);
+      setMore(r.events.length === HISTORY_PAGE);
+    } catch (err) {
+      setProblem(staffSay(err));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Card title="History">
       <p>
-        The newest 300 events: sign-ins, invitations, sharing, client views and downloads, uploads,
-        and secure links sent outside (&ldquo;outside&rdquo; events).
+        Newest first: sign-ins, invitations, sharing, client views and downloads, uploads, and
+        secure links sent outside (&ldquo;outside&rdquo; events).
       </p>
       <Status load={load} what="the history" />
+      <Problem text={problem} />
       {load.data && rows.length === 0 && <p>Nothing has happened yet.</p>}
       <Table head={['When', 'What', 'Who']}>
         {rows.map((e) => (
@@ -1178,6 +1217,13 @@ function History(): JSX.Element {
           </tr>
         ))}
       </Table>
+      {load.data && more && (
+        <div style={{ marginTop: 8 }}>
+          <Button variant="secondary" disabled={busy} onClick={() => void showOlder()}>
+            Show older
+          </Button>
+        </div>
+      )}
     </Card>
   );
 }

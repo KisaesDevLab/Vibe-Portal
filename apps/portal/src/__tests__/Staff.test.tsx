@@ -620,28 +620,51 @@ describe('staff page', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch(/Open the setup link again/);
   });
 
-  it('History asks for the newest events', async () => {
+  it('long client lists come a page at a time (P57)', async () => {
+    const clients = Array.from({ length: 120 }, (_, i) => ({
+      ...CLIENT,
+      id: `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+      clientCode: String(2000 + i),
+      displayName: `Client ${String(i).padStart(3, '0')}`,
+    }));
+    serve({ '/auth/me': ME, '/v1/clients': { body: { clients } } });
+    at('/staff');
+    expect(await screen.findByText('1–50 of 120')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Client 000' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Client 050' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('51–100 of 120')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Client 050' })).toBeTruthy();
+    // A search starts again at the first page.
+    fireEvent.change(screen.getByLabelText('Find a client'), { target: { value: 'Client 11' } });
+    expect(await screen.findByRole('link', { name: 'Client 110' })).toBeTruthy();
+    expect(screen.queryByText(/of 120/)).toBeNull();
+  });
+
+  it('History shows the newest events, and older ones on request (P57)', async () => {
+    const ev = (id: number, kind: string) => ({
+      id,
+      at: '2026-11-01T10:00:00Z',
+      kind,
+      actorKind: 'staff',
+      actor: 'ann@firm.test',
+      clientId: null,
+      detail: {},
+    });
+    // A full page of 100, so there may be more.
+    const page = Array.from({ length: 100 }, (_, i) => ev(200 - i, 'staff_sign_in'));
     const calls = serve({
       '/auth/me': ME,
-      '/v1/events?latest=1&limit=300': {
-        body: {
-          events: [
-            {
-              id: 9,
-              at: '2026-11-01T10:00:00Z',
-              kind: 'staff_sign_in',
-              actorKind: 'staff',
-              actor: 'ann@firm.test',
-              clientId: null,
-              detail: {},
-            },
-          ],
-        },
-      },
+      '/v1/events?latest=1&limit=100': { body: { events: page } },
+      '/v1/events?latest=1&limit=100&before=101': { body: { events: [ev(7, 'settings_updated')] } },
     });
     at('/staff/history');
-    expect(await screen.findByText('staff sign in')).toBeTruthy();
-    expect(calls.some((c) => c.path === '/v1/events?latest=1&limit=300')).toBe(true);
+    expect((await screen.findAllByText('staff sign in')).length).toBe(100);
+    fireEvent.click(screen.getByRole('button', { name: 'Show older' }));
+    expect(await screen.findByText('settings updated')).toBeTruthy();
+    expect(calls.some((c) => c.path === '/v1/events?latest=1&limit=100&before=101')).toBe(true);
+    // Fewer than a page came back: nothing older.
+    expect(screen.queryByRole('button', { name: 'Show older' })).toBeNull();
   });
 
   const portalFile = (fileId: string, name: string): object => ({
