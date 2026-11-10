@@ -138,4 +138,59 @@ describe('portal', () => {
       clientAs: 'Smith, John',
     });
   });
+
+  it('a sign-in link is used only when the person presses Sign in (scanners open links)', async () => {
+    const calls = serve({
+      '/auth/verify-link': { body: { ok: true } },
+      '/auth/me': { body: ME },
+    });
+    window.history.replaceState(null, '', '/auth/verify#t=abcdefghijklmnopqrstuvwxyz');
+    render(
+      <MemoryRouter initialEntries={['/auth/verify']}>
+        <App />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: 'Sign in' });
+    expect(calls).toEqual([]);
+    expect(window.location.hash).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    await screen.findByText('Signed in as John Smith.');
+    expect(calls[0]).toEqual({
+      path: '/auth/verify-link',
+      body: { token: 'abcdefghijklmnopqrstuvwxyz' },
+    });
+  });
+
+  it('offers Try again when the portal cannot be reached', async () => {
+    serve({ '/auth/me': { status: 503, body: { error: 'down' } } });
+    at('/');
+    fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+    await screen.findByRole('button', { name: 'Try again' });
+  });
+
+  it('says so when switching client fails', async () => {
+    serve({
+      '/auth/me': { body: ME },
+      '/auth/switch-client': { status: 404, body: { error: 'not_found' } },
+    });
+    at('/');
+    fireEvent.change(await screen.findByLabelText('Showing files for'), {
+      target: { value: 'c2' },
+    });
+    expect((await screen.findByRole('alert')).textContent).toMatch(/went wrong/);
+  });
+
+  it('request access can send a new code', async () => {
+    const calls = serve({
+      '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },
+      '/access-requests/r1/resend': { body: { sentTo: 'm***@example.test' } },
+    });
+    at('/request-access');
+    fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Mary' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'm@example.test' } });
+    fireEvent.change(screen.getByLabelText(/Whose files/), { target: { value: 'Smith' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send a new code' }));
+    await waitFor(() => expect(calls.map((c) => c.path)).toContain('/access-requests/r1/resend'));
+  });
 });

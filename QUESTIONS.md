@@ -26,3 +26,6 @@
 | P22 | 2026-11-09 | Which files open in the browser | PDF (PDF.js viewer) and JPG/PNG; others download | Owner 2026-11-09: as assumed |
 | P23 | 2026-11-09 | Largest file staff can share | The firm's upload limit (default 100 MB, Cloudflare free-plan cap) | Owner 2026-11-09: as assumed |
 | P24 | 2026-11-09 | Can a client hide a shared file from their own list | No; only staff decide what is on the portal | Owner 2026-11-09: as assumed |
+| P25 | 2026-11-09 | Which client address rate limits count by | Cloudflare's CF-Connecting-IP behind the tunnel (`TRUST_CF_CONNECTING_IP`, default on), else the socket; never the client-written first entry of X-Forwarded-For (QA 2026-11-09) | |
+| P26 | 2026-11-09 | Does opening a sign-in link sign the person in at once | No: the page asks them to press **Sign in**, so email security scanners that open links cannot use up the one-time link (QA 2026-11-09) | |
+| P27 | 2026-11-09 | Which contact is used when an invitation or request carries both email and phone | Only the one the link or code went to (email when given). The other never matches an existing person; from an invitation (staff typed it) it is stored only if no one else has it; from a request it is never stored (QA 2026-11-09) | |

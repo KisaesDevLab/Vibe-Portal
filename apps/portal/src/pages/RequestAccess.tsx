@@ -56,6 +56,24 @@ export function RequestAccess(): JSX.Element {
     }
   }
 
+  async function resend(): Promise<void> {
+    if (step.at !== 'confirm') return;
+    setBusy(true);
+    setError('');
+    try {
+      const r = await api<{ sentTo: string }>(`/access-requests/${step.id}/resend`, {
+        method: 'POST',
+      });
+      setCode('');
+      setStep({ ...step, sentTo: r.sentTo });
+      setError('');
+    } catch (err) {
+      setError(say(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (step.at === 'done') {
     return (
       <AuthLayout brand="Client Portal" title="Request sent">
@@ -83,6 +101,9 @@ export function RequestAccess(): JSX.Element {
           {error && <p role="alert">{error}</p>}
           <Button type="submit" disabled={busy || code.trim().length !== 6}>
             Confirm
+          </Button>
+          <Button type="button" variant="ghost" disabled={busy} onClick={() => void resend()}>
+            Send a new code
           </Button>
         </form>
       </AuthLayout>

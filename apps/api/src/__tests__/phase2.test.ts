@@ -71,6 +71,7 @@ beforeEach(async () => {
     now: () => clock,
     portalUrl: 'https://files.example-cpa.test',
     cookie: { secure: false },
+    trustCfIp: false,
   };
   app = createApp({ pingDb: async () => true, ctx });
   await t.db.update(schema.firm).set({ name: 'Example CPA' });
@@ -104,9 +105,10 @@ describe('firm key', () => {
     expect(revoked.body).toEqual({ error: 'bad_firm_key' });
   });
 
-  it('repeated wrong keys from one address are blocked', async () => {
+  it('repeated wrong keys from one address are blocked, but never the right key', async () => {
     for (let i = 0; i < 20; i++) await firm('get', '/status', 'vpk_wrong');
-    expect((await firm('get', '/status')).status).toBe(429);
+    expect((await firm('get', '/status', 'vpk_wrong')).status).toBe(429);
+    expect((await firm('get', '/status')).status).toBe(200);
   });
 
   it('records the PC and Windows user on what Vibe Files does (P15)', async () => {
@@ -336,6 +338,13 @@ describe('sign-in rules', () => {
     expect(users.body.users).toEqual([expect.objectContaining({ status: 'disabled' })]);
   });
 
+  it('a bodyless POST typed as JSON is accepted', async () => {
+    await request(app)
+      .post('/api/portal/auth/logout')
+      .set('Content-Type', 'application/json')
+      .expect(200);
+  });
+
   it('portal changes must be JSON (no cross-site form posts)', async () => {
     const res = await request(app)
       .post('/api/portal/auth/login')
@@ -426,6 +435,272 @@ describe('request access -> confirm -> approve -> sign in', () => {
     await request(app)
       .post('/api/portal/access-requests')
       .send({ name: 'Spam', email: 's9@example.test', clientAs: 'x' })
+      .expect(429);
+  });
+});
+
+describe('QA 2026-11-09', () => {
+  async function accept(to: string, keepSignedIn = false) {
+    const agent = request.agent(app);
+    await agent
+      .post('/api/portal/invitations/accept')
+      .send({ token: linkToken(to), keepSignedIn })
+      .expect(200);
+    return agent;
+  }
+
+  it('an invitation never signs someone in as another person who shares a phone', async () => {
+    await invite({ email: 'husband@example.test', phone: '5551112222' });
+    await accept('husband@example.test');
+    await invite({ email: 'wife@example.test', phone: '5551112222' }, OTHER);
+    const wife = await accept('wife@example.test');
+    const me = await wife.get('/api/portal/auth/me').expect(200);
+    expect(me.body.identity).toMatchObject({ email: 'wife@example.test', phone: null });
+    expect(me.body.clients).toEqual([{ id: OTHER, name: 'Smith Farms LLC' }]);
+    expect(await t.db.select().from(schema.portalIdentity)).toHaveLength(2);
+  });
+
+  it('a couple sharing a phone can both be invited to the same client', async () => {
+    await invite({ email: 'husband@example.test', phone: '5551112222' });
+    await accept('husband@example.test');
+    await invite({ email: 'wife@example.test', phone: '5551112222' });
+  });
+
+  it("an access request with someone else's phone cannot reach their account", async () => {
+    // The victim signs in by phone only.
+    await invite({ phone: '5559990000' });
+    await accept('+15559990000');
+    const created = await request(app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'Mallory', email: 'mallory@example.test', phone: '5559990000', clientAs: 'x' })
+      .expect(201);
+    const id = created.body.requestId as string;
+    await request(app)
+      .post(`/api/portal/access-requests/${id}/confirm`)
+      .send({ code: code('mallory@example.test') })
+      .expect(200);
+    const list = await firm('get', '/access-requests').expect(200);
+    expect(list.body.requests[0].confirmedContact).toBe('mallory@example.test');
+    await firm('post', `/access-requests/${id}/approve`).send({ clientId: OTHER }).expect(200);
+
+    const rows = await t.db.select().from(schema.portalIdentity);
+    const victim = rows.find((r) => r.phone === '+15559990000');
+    const mallory = rows.find((r) => r.email === 'mallory@example.test');
+    expect(victim?.email).toBeNull();
+    expect(mallory?.phone).toBeNull();
+    expect(victim?.id).not.toBe(mallory?.id);
+  });
+
+  it('a switched-off client: no invitations, pending ones stop, users signed out', async () => {
+    await invite({ email: 'a@example.test' });
+    const agent = await accept('a@example.test');
+    await invite({ email: 'b@example.test' });
+    const pending = linkToken('b@example.test');
+
+    await firm('put', `/clients/${CLIENT}`)
+      .send({ clientCode: '1001', displayName: 'Smith, John', active: false })
+      .expect(200);
+    await agent.get('/api/portal/auth/me').expect(401);
+    await request(app).post('/api/portal/invitations/accept').send({ token: pending }).expect(404);
+    const again = await firm('post', `/clients/${CLIENT}/invites`).send({
+      email: 'c@example.test',
+    });
+    expect(again.status).toBe(409);
+    expect(again.body).toEqual({ error: 'client_inactive' });
+    const [ev] = await t.db
+      .select()
+      .from(schema.events)
+      .where(eq(schema.events.kind, 'client_updated'))
+      .orderBy(schema.events.id);
+    expect(ev).toMatchObject({ clientId: CLIENT, actor: 'THGR18C-XA003\\kurt' });
+  });
+
+  it('an invitation that fails to accept is not used up', async () => {
+    await invite({ email: 'a@example.test' });
+    const token = linkToken('a@example.test');
+    await firm('put', `/clients/${CLIENT}`)
+      .send({ clientCode: '1001', displayName: 'Smith, John', active: false })
+      .expect(200);
+    await request(app).post('/api/portal/invitations/accept').send({ token }).expect(404);
+    expect(await t.db.select().from(schema.clientAccess)).toHaveLength(0);
+  });
+
+  it('turning a user off withdraws an invitation still waiting for them', async () => {
+    await invite({ email: 'a@example.test' });
+    await accept('a@example.test');
+    await invite({ email: 'a@example.test' }, OTHER);
+    const otherLink = linkToken('a@example.test');
+    // A second, older invitation to the first client would re-enable them.
+    await t.db.update(schema.clientAccess).set({ active: false });
+    await firm('post', `/clients/${CLIENT}/invites`).send({ email: 'a@example.test' }).expect(201);
+    const stale = linkToken('a@example.test');
+    await t.db.update(schema.clientAccess).set({ active: true });
+    const [identity] = await t.db.select().from(schema.portalIdentity);
+    await firm('patch', `/clients/${CLIENT}/users/${identity?.id}`)
+      .send({ active: false })
+      .expect(200);
+    await request(app).post('/api/portal/invitations/accept').send({ token: stale }).expect(404);
+    // The invitation to the other client is not touched.
+    await request(app)
+      .post('/api/portal/invitations/accept')
+      .send({ token: otherLink })
+      .expect(200);
+    const users = await firm('get', `/clients/${CLIENT}/users`).expect(200);
+    expect(users.body.users).toEqual([expect.objectContaining({ status: 'disabled' })]);
+  });
+
+  it('a request is decided once: approve twice, or deny after approve, is refused', async () => {
+    const created = await request(app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'M', email: 'm@example.test', clientAs: 'x' })
+      .expect(201);
+    const id = created.body.requestId as string;
+    await request(app)
+      .post(`/api/portal/access-requests/${id}/confirm`)
+      .send({ code: code('m@example.test') })
+      .expect(200);
+    await firm('post', `/access-requests/${id}/approve`).send({ clientId: CLIENT }).expect(200);
+    await firm('post', `/access-requests/${id}/approve`).send({ clientId: OTHER }).expect(404);
+    await firm('post', `/access-requests/${id}/deny`).expect(404);
+    expect(await t.db.select().from(schema.clientAccess)).toHaveLength(1);
+  });
+
+  it('approving onto a switched-off client is refused', async () => {
+    const created = await request(app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'M', email: 'm@example.test', clientAs: 'x' })
+      .expect(201);
+    const id = created.body.requestId as string;
+    await request(app)
+      .post(`/api/portal/access-requests/${id}/confirm`)
+      .send({ code: code('m@example.test') })
+      .expect(200);
+    await firm('put', `/clients/${OTHER}`)
+      .send({ displayName: 'Smith Farms LLC', active: false })
+      .expect(200);
+    const res = await firm('post', `/access-requests/${id}/approve`).send({ clientId: OTHER });
+    expect(res.status).toBe(409);
+  });
+
+  it('parallel wrong codes cannot get past 5 tries', async () => {
+    await invite({ phone: '5550003333' });
+    await accept('+15550003333');
+    await request(app).post('/api/portal/auth/login').send({ contact: '5550003333' }).expect(200);
+    const right = code('+15550003333');
+    const wrong = right === '000000' ? '111111' : '000000';
+    await Promise.all(
+      Array.from({ length: 8 }, () =>
+        request(app)
+          .post('/api/portal/auth/verify-code')
+          .send({ phone: '5550003333', code: wrong }),
+      ),
+    );
+    const [ch] = await t.db
+      .select()
+      .from(schema.signInChallenge)
+      .where(eq(schema.signInChallenge.contact, '+15550003333'));
+    expect(ch?.attempts).toBe(5);
+    await request(app)
+      .post('/api/portal/auth/verify-code')
+      .send({ phone: '5550003333', code: right })
+      .expect(400);
+  });
+
+  it('at most 10 code checks per phone in 15 minutes, across new codes', async () => {
+    await invite({ phone: '5550004444' });
+    await accept('+15550004444');
+    for (let round = 0; round < 3; round++) {
+      await request(app).post('/api/portal/auth/login').send({ contact: '5550004444' });
+      for (let i = 0; i < 4; i++) {
+        await request(app)
+          .post('/api/portal/auth/verify-code')
+          .send({
+            phone: '5550004444',
+            code: '999999' === code('+15550004444') ? '888888' : '999999',
+          });
+      }
+    }
+    const res = await request(app)
+      .post('/api/portal/auth/verify-code')
+      .send({ phone: '5550004444', code: code('+15550004444') });
+    expect(res.status).toBe(429);
+  });
+
+  it('a new sign-in link replaces the earlier one', async () => {
+    await invite({ email: 'n@example.test' });
+    await accept('n@example.test');
+    await request(app).post('/api/portal/auth/login').send({ contact: 'n@example.test' });
+    const first = linkToken('n@example.test');
+    await request(app).post('/api/portal/auth/login').send({ contact: 'n@example.test' });
+    const second = linkToken('n@example.test');
+    await request(app).post('/api/portal/auth/verify-link').send({ token: first }).expect(400);
+    await request(app).post('/api/portal/auth/verify-link').send({ token: second }).expect(200);
+  });
+
+  it('a phone sign-in over its limit still says "phone"', async () => {
+    for (let i = 0; i < 6; i++) {
+      const res = await request(app).post('/api/portal/auth/login').send({ contact: '5550005555' });
+      expect(res.body.kind).toBe('phone');
+    }
+  });
+
+  it('a made-up X-Forwarded-For does not get round the per-address limit', async () => {
+    for (let i = 0; i < 30; i++) {
+      await request(app)
+        .post('/api/portal/auth/login')
+        .set('X-Forwarded-For', `203.0.113.${i}`)
+        .send({ contact: `x${i}@example.test` })
+        .expect(200);
+    }
+    await request(app)
+      .post('/api/portal/auth/login')
+      .set('X-Forwarded-For', '198.51.100.7')
+      .send({ contact: 'y@example.test' })
+      .expect(429);
+  });
+
+  it('a disabled identity cannot sign in', async () => {
+    await invite({ email: 'd@example.test' });
+    const agent = await accept('d@example.test');
+    await t.db.update(schema.portalIdentity).set({ status: 'disabled' });
+    await agent.get('/api/portal/auth/me').expect(401);
+    const before = notes.sent.length;
+    await request(app).post('/api/portal/auth/login').send({ contact: 'd@example.test' });
+    expect(notes.sent.length).toBe(before);
+  });
+
+  it('request access: "Send a new code" works, and replaces the old code', async () => {
+    const created = await request(app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'M', phone: '5550006666', clientAs: 'x' })
+      .expect(201);
+    const id = created.body.requestId as string;
+    const old = code('+15550006666');
+    await request(app).post(`/api/portal/access-requests/${id}/resend`).expect(200);
+    const fresh = code('+15550006666');
+    if (old !== fresh) {
+      await request(app)
+        .post(`/api/portal/access-requests/${id}/confirm`)
+        .send({ code: old })
+        .expect(400);
+    }
+    await request(app)
+      .post(`/api/portal/access-requests/${id}/confirm`)
+      .send({ code: fresh })
+      .expect(200);
+    await request(app).post(`/api/portal/access-requests/${id}/resend`).expect(404);
+  });
+
+  it('at most 3 requests or new codes an hour for one phone', async () => {
+    for (let i = 0; i < 3; i++) {
+      await request(app)
+        .post('/api/portal/access-requests')
+        .send({ name: 'M', phone: '5550007777', clientAs: 'x' })
+        .expect(201);
+    }
+    await request(app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'M', phone: '5550007777', clientAs: 'x' })
       .expect(429);
   });
 });

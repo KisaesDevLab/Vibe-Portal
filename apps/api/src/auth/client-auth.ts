@@ -2,7 +2,7 @@
 //
 // Client sign-in (D4), the flow of Vibe-Time-Billing apps/api/src/auth/portal-routes.ts:
 //   email -> a one-time sign-in link (15 minutes)
-//   phone -> a 6-digit code by text (5 minutes, 5 tries)
+//   phone -> a 6-digit code by text (5 minutes, 5 tries; at most 10 checks per phone in 15 minutes)
 // The answer to /login never says whether the email or phone is known.
 //
 //   POST /api/portal/auth/login          { contact, keepSignedIn? }
@@ -19,17 +19,18 @@ import express, {
   type Response,
   type Router,
 } from 'express';
-import { and, desc, eq, gt, isNull, or } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
-import { firmName, type Ctx } from '../context';
+import { deliver, firmName, type Ctx } from '../context';
 import { detectLoginKind, normalizeEmail, normalizePhone } from '../lib/contact';
 import { record } from '../lib/events';
 import { body, clientIp, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { hit, LIMITS } from '../lib/rate-limit';
-import { randomToken, sameHash, sha256, sixDigitCode } from '../lib/secrets';
+import { randomToken, sha256, sixDigitCode } from '../lib/secrets';
+import { checkCode, issue, redeemToken } from './challenges';
 import { activeClientsOf } from './grant';
 import {
   clearSessionCookie,
@@ -44,7 +45,6 @@ import {
 
 export const LINK_MINUTES = 15;
 export const CODE_MINUTES = 5;
-export const MAX_ATTEMPTS = 5;
 
 export const GENERIC_LOGIN = {
   ok: true,
@@ -120,27 +120,33 @@ export function clientAuthRouter(ctx: Ctx): Router {
       if (kind === 'unknown' || !value) throw new HttpError(400, 'invalid_contact');
       // Over the per-contact limit: answer as usual but send nothing.
       if (!(await hit(ctx.db, `login:contact:${value}`, LIMITS.loginPerContact, now))) {
-        res.json(GENERIC_LOGIN);
+        res.json({ ...GENERIC_LOGIN, kind });
         return;
       }
       const field = kind === 'email' ? schema.portalIdentity.email : schema.portalIdentity.phone;
       const [identity] = await ctx.db
-        .select()
+        .select({ id: schema.portalIdentity.id })
         .from(schema.portalIdentity)
-        .where(and(eq(field, value), eq(schema.portalIdentity.status, 'active')));
+        .where(eq(field, value));
+      // activeClientsOf also requires the identity to be active.
       if (identity && (await activeClientsOf(ctx.db, identity.id)).length > 0) {
         const firm = await firmName(ctx);
         if (kind === 'email') {
           const token = randomToken();
-          await ctx.db.insert(schema.signInChallenge).values({
-            kind: 'magic_link',
-            identityId: identity.id,
-            contact: value,
-            secretHash: sha256(token),
-            keepSignedIn,
-            expiresAt: new Date(now.getTime() + LINK_MINUTES * 60_000),
-          });
-          await ctx.notifier.send(
+          await issue(
+            ctx.db,
+            {
+              kind: 'magic_link',
+              identityId: identity.id,
+              contact: value,
+              secretHash: sha256(token),
+              keepSignedIn,
+              expiresAt: new Date(now.getTime() + LINK_MINUTES * 60_000),
+            },
+            now,
+          );
+          deliver(
+            ctx,
             messageTo(
               value,
               `Sign in to ${firm}'s client portal`,
@@ -151,17 +157,19 @@ export function clientAuthRouter(ctx: Ctx): Router {
           );
         } else {
           const code = sixDigitCode();
-          await ctx.db.insert(schema.signInChallenge).values({
-            kind: 'sms_code',
-            identityId: identity.id,
-            contact: value,
-            secretHash: sha256(code),
-            keepSignedIn,
-            expiresAt: new Date(now.getTime() + CODE_MINUTES * 60_000),
-          });
-          await ctx.notifier.send(
-            messageTo(value, '', `${code} is your ${firm} portal sign-in code.`),
+          await issue(
+            ctx.db,
+            {
+              kind: 'sms_code',
+              identityId: identity.id,
+              contact: value,
+              secretHash: sha256(code),
+              keepSignedIn,
+              expiresAt: new Date(now.getTime() + CODE_MINUTES * 60_000),
+            },
+            now,
           );
+          deliver(ctx, messageTo(value, '', `${code} is your ${firm} portal sign-in code.`));
         }
       }
       res.json({ ...GENERIC_LOGIN, kind });
@@ -176,18 +184,7 @@ export function clientAuthRouter(ctx: Ctx): Router {
       if (!(await hit(ctx.db, `verify:ip:${clientIp(req)}`, LIMITS.verifyPerIp, now))) {
         throw new HttpError(429, 'too_many_requests');
       }
-      const [ch] = await ctx.db
-        .update(schema.signInChallenge)
-        .set({ usedAt: now })
-        .where(
-          and(
-            eq(schema.signInChallenge.kind, 'magic_link'),
-            eq(schema.signInChallenge.secretHash, sha256(token)),
-            isNull(schema.signInChallenge.usedAt),
-            gt(schema.signInChallenge.expiresAt, now),
-          ),
-        )
-        .returning();
+      const ch = await redeemToken(ctx.db, 'magic_link', token, now);
       if (!ch?.identityId) throw new HttpError(400, 'link_expired');
       await signIn(ctx, res, ch.identityId, ch.keepSignedIn);
       res.json({ ok: true });
@@ -204,26 +201,16 @@ export function clientAuthRouter(ctx: Ctx): Router {
       }
       const phone = normalizePhone(input.phone);
       if (!phone) throw new HttpError(400, 'code_wrong');
-      const [ch] = await ctx.db
-        .select()
-        .from(schema.signInChallenge)
-        .where(
-          and(
-            eq(schema.signInChallenge.kind, 'sms_code'),
-            eq(schema.signInChallenge.contact, phone),
-            isNull(schema.signInChallenge.usedAt),
-            gt(schema.signInChallenge.expiresAt, now),
-          ),
-        )
-        .orderBy(desc(schema.signInChallenge.createdAt))
-        .limit(1);
-      if (!ch?.identityId || ch.attempts >= MAX_ATTEMPTS) throw new HttpError(400, 'code_wrong');
-      const right = sameHash(ch.secretHash, sha256(input.code));
-      await ctx.db
-        .update(schema.signInChallenge)
-        .set(right ? { usedAt: now } : { attempts: ch.attempts + 1 })
-        .where(eq(schema.signInChallenge.id, ch.id));
-      if (!right) throw new HttpError(400, 'code_wrong');
+      if (!(await hit(ctx.db, `verify:contact:${phone}`, LIMITS.verifyPerContact, now))) {
+        throw new HttpError(429, 'too_many_requests');
+      }
+      const ch = await checkCode(
+        ctx.db,
+        and(eq(schema.signInChallenge.kind, 'sms_code'), eq(schema.signInChallenge.contact, phone)),
+        input.code,
+        now,
+      );
+      if (!ch?.identityId) throw new HttpError(400, 'code_wrong');
       await signIn(ctx, res, ch.identityId, ch.keepSignedIn);
       res.json({ ok: true });
     }),

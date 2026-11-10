@@ -14,14 +14,14 @@
 //   POST   /api/firm/v1/access-requests/:id/deny
 
 import express, { type Request, type Router } from 'express';
-import { and, asc, eq, isNotNull, isNull, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
 import { voidChallenges } from '../auth/client-auth';
-import { grantAccess } from '../auth/grant';
+import { grantAccess, type Executor } from '../auth/grant';
 import { endSessionsOf } from '../auth/sessions';
-import { firmName, type Ctx } from '../context';
+import { deliver, firmName, type Ctx } from '../context';
 import { normalizeEmail, normalizePhone } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
@@ -72,6 +72,29 @@ export function firmRouter(ctx: Ctx): Router {
         .where(eq(schema.clients.id, id))
     ).length > 0;
 
+  /** Withdraws a client's pending invitations: all of them, or those to some contacts. */
+  const withdrawInvites = async (clientId: string, to?: (string | null)[]) => {
+    const contacts = (to ?? []).filter((c): c is string => !!c);
+    if (to && contacts.length === 0) return [];
+    return ctx.db
+      .update(schema.portalInvitation)
+      .set({ revokedAt: ctx.now() })
+      .where(
+        and(
+          eq(schema.portalInvitation.clientId, clientId),
+          isNull(schema.portalInvitation.acceptedAt),
+          isNull(schema.portalInvitation.revokedAt),
+          to
+            ? or(
+                inArray(schema.portalInvitation.email, contacts),
+                inArray(schema.portalInvitation.phone, contacts),
+              )
+            : undefined,
+        ),
+      )
+      .returning({ id: schema.portalInvitation.id });
+  };
+
   r.get(
     '/status',
     h(async (_req, res) => {
@@ -102,6 +125,24 @@ export function firmRouter(ctx: Ctx): Router {
             updatedAt: now,
           },
         });
+      if (input.active === false) {
+        // A client switched off: its invitations stop working and its users are signed out
+        // (they can sign in again to their other clients).
+        await withdrawInvites(id);
+        const users = await ctx.db
+          .select({ identityId: schema.clientAccess.identityId })
+          .from(schema.clientAccess)
+          .where(eq(schema.clientAccess.clientId, id));
+        for (const u of users) await endSessionsOf(ctx.db, u.identityId);
+      }
+      await record(ctx.db, 'client_updated', actorOf(req), {
+        clientId: id,
+        detail: {
+          clientCode: input.clientCode,
+          displayName: input.displayName,
+          ...(input.active === undefined ? {} : { active: input.active }),
+        },
+      });
       res.json({ ok: true });
     }),
   );
@@ -171,12 +212,13 @@ export function firmRouter(ctx: Ctx): Router {
         .from(schema.clients)
         .where(eq(schema.clients.id, clientId));
       if (!client) throw new HttpError(404, 'client_not_found');
+      if (!client.active) throw new HttpError(409, 'client_inactive');
 
-      // Someone with this email or phone already has active access to this client.
-      const contactMatch = or(
-        email ? eq(schema.portalIdentity.email, email) : undefined,
-        phone ? eq(schema.portalIdentity.phone, phone) : undefined,
-      );
+      // The person the link goes to already has active access to this client. Only the contact
+      // the link goes to counts: a couple can share a phone (QA 2026-11-09).
+      const contactMatch = email
+        ? eq(schema.portalIdentity.email, email)
+        : eq(schema.portalIdentity.phone, sendTo);
       const has = await ctx.db
         .select({ id: schema.portalIdentity.id })
         .from(schema.clientAccess)
@@ -196,21 +238,7 @@ export function firmRouter(ctx: Ctx): Router {
       const actor = actorOf(req);
       const now = ctx.now();
       // A new invitation replaces any earlier one to the same contact for this client (Resend).
-      const replaced = await ctx.db
-        .update(schema.portalInvitation)
-        .set({ revokedAt: now })
-        .where(
-          and(
-            eq(schema.portalInvitation.clientId, clientId),
-            isNull(schema.portalInvitation.acceptedAt),
-            isNull(schema.portalInvitation.revokedAt),
-            or(
-              email ? eq(schema.portalInvitation.email, email) : undefined,
-              phone ? eq(schema.portalInvitation.phone, phone) : undefined,
-            ),
-          ),
-        )
-        .returning({ id: schema.portalInvitation.id });
+      const replaced = await withdrawInvites(clientId, [sendTo]);
 
       const token = randomToken();
       const expiresAt = new Date(now.getTime() + INVITE_DAYS * 86_400_000);
@@ -230,7 +258,8 @@ export function firmRouter(ctx: Ctx): Router {
       if (!inv) throw new Error('invitation insert returned nothing');
       const firm = await firmName(ctx);
       const link = `${ctx.portalUrl}/invite#t=${token}`;
-      await ctx.notifier.send(
+      deliver(
+        ctx,
         messageTo(
           sendTo,
           `${firm} invites you to its client portal`,
@@ -294,6 +323,12 @@ export function firmRouter(ctx: Ctx): Router {
         // Signed-in sessions end at once; the person can sign in again to their other clients.
         await endSessionsOf(ctx.db, identityId);
         await voidChallenges(ctx, identityId);
+        // An invitation still waiting would quietly turn them back on (QA 2026-11-09).
+        const [who] = await ctx.db
+          .select({ email: schema.portalIdentity.email, phone: schema.portalIdentity.phone })
+          .from(schema.portalIdentity)
+          .where(eq(schema.portalIdentity.id, identityId));
+        await withdrawInvites(clientId, [who?.email ?? null, who?.phone ?? null]);
       }
       await record(ctx.db, active ? 'enable' : 'disable', actorOf(req), { clientId, identityId });
       res.json({ ok: true });
@@ -319,6 +354,8 @@ export function firmRouter(ctx: Ctx): Router {
           name: a.name,
           email: a.email,
           phone: a.phone,
+          // The contact that received and returned the code; only it is used on approval.
+          confirmedContact: a.confirmedContact,
           clientAs: a.clientAs,
           note: a.note,
           createdAt: a.createdAt,
@@ -327,66 +364,72 @@ export function firmRouter(ctx: Ctx): Router {
     }),
   );
 
-  const pendingRequest = async (id: string) => {
-    const [row] = await ctx.db
-      .select()
-      .from(schema.accessRequest)
+  /** Moves a pending, confirmed request on, in one conditional update; nothing comes back when
+   *  it was not pending (already decided, or decided at the same moment by another call). */
+  const decide = (
+    db: Executor,
+    id: string,
+    set: Partial<typeof schema.accessRequest.$inferInsert>,
+  ) =>
+    db
+      .update(schema.accessRequest)
+      .set({ ...set, decidedAt: ctx.now() })
       .where(
         and(
           eq(schema.accessRequest.id, id),
           eq(schema.accessRequest.status, 'pending'),
           isNotNull(schema.accessRequest.confirmedAt),
         ),
-      );
-    if (!row) throw new HttpError(404, 'not_found');
-    return row;
-  };
+      )
+      .returning();
 
   r.post(
     '/access-requests/:id/approve',
     h(async (req, res) => {
       const id = param(req, 'id');
       const input = body(ApproveSchema, req);
-      const request = await pendingRequest(id);
-      if (!(await clientExists(input.clientId))) throw new HttpError(404, 'client_not_found');
+      const [client] = await ctx.db
+        .select()
+        .from(schema.clients)
+        .where(eq(schema.clients.id, input.clientId));
+      if (!client) throw new HttpError(404, 'client_not_found');
+      if (!client.active) throw new HttpError(409, 'client_inactive');
       const actor = actorOf(req);
-      const { identityId } = await ctx.db.transaction(async (tx) => {
+      const done = await ctx.db.transaction(async (tx) => {
+        const [request] = await decide(tx, id, {
+          status: 'approved',
+          clientId: input.clientId,
+          decidedBy: actor.name,
+        });
+        if (!request) return null;
+        if (!request.confirmedContact) throw new Error('confirmed request without its contact');
+        // Only the contact the person proved is used (QA 2026-11-09).
         const granted = await grantAccess(tx, {
           clientId: input.clientId,
-          email: request.email,
-          phone: request.phone,
+          proved: request.confirmedContact,
+          other: null,
           name: request.name,
           roleLabel: input.roleLabel,
           by: actor.name,
         });
-        await tx
-          .update(schema.accessRequest)
-          .set({
-            status: 'approved',
-            clientId: input.clientId,
-            decidedBy: actor.name,
-            decidedAt: ctx.now(),
-          })
-          .where(eq(schema.accessRequest.id, id));
-        return granted;
+        return { to: request.confirmedContact, identityId: granted.identityId };
       });
+      if (!done) throw new HttpError(404, 'not_found');
       const firm = await firmName(ctx);
-      const to = request.email ?? request.phone;
-      if (to) {
-        await ctx.notifier.send(
-          messageTo(
-            to,
-            `Your access to ${firm}'s client portal`,
-            `${firm} has given you access to its client portal. Sign in at ${ctx.portalUrl}`,
-          ),
-        );
-      }
+      deliver(
+        ctx,
+        messageTo(
+          done.to,
+          `Your access to ${firm}'s client portal`,
+          `${firm} has given you access to its client portal. Sign in at ${ctx.portalUrl}`,
+        ),
+      );
       await record(ctx.db, 'approve', actor, {
         clientId: input.clientId,
-        identityId,
+        identityId: done.identityId,
         detail: { accessRequestId: id },
       });
-      res.json({ ok: true, identityId });
+      res.json({ ok: true, identityId: done.identityId });
     }),
   );
 
@@ -394,12 +437,9 @@ export function firmRouter(ctx: Ctx): Router {
     '/access-requests/:id/deny',
     h(async (req, res) => {
       const id = param(req, 'id');
-      await pendingRequest(id);
       const actor = actorOf(req);
-      await ctx.db
-        .update(schema.accessRequest)
-        .set({ status: 'denied', decidedBy: actor.name, decidedAt: ctx.now() })
-        .where(eq(schema.accessRequest.id, id));
+      const [request] = await decide(ctx.db, id, { status: 'denied', decidedBy: actor.name });
+      if (!request) throw new HttpError(404, 'not_found');
       await record(ctx.db, 'deny', actor, { detail: { accessRequestId: id } });
       res.json({ ok: true });
     }),

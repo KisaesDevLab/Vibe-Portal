@@ -130,6 +130,7 @@ export const accessRequest = pgTable('access_request', {
   decidedAt: ts('decided_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
   confirmedAt: ts('confirmed_at'),
+  confirmedContact: text('confirmed_contact'),
 });
 
 export const files = pgTable('files', {

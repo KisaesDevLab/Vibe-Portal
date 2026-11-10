@@ -8,7 +8,7 @@
 //   POST /api/portal/invitations/accept   { token, name?, keepSignedIn? }
 
 import express, { type Router } from 'express';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -30,12 +30,20 @@ const AcceptSchema = TokenSchema.extend({
 export function invitationsRouter(ctx: Ctx): Router {
   const r = express.Router();
 
+  // Live: not used, not withdrawn, not expired, and for a client that is still active.
   const live = (token: string) =>
     and(
       eq(schema.portalInvitation.tokenHash, sha256(token)),
       isNull(schema.portalInvitation.acceptedAt),
       isNull(schema.portalInvitation.revokedAt),
       gt(schema.portalInvitation.expiresAt, ctx.now()),
+      inArray(
+        schema.portalInvitation.clientId,
+        ctx.db
+          .select({ id: schema.clients.id })
+          .from(schema.clients)
+          .where(eq(schema.clients.active, true)),
+      ),
     );
 
   r.post(
@@ -73,20 +81,29 @@ export function invitationsRouter(ctx: Ctx): Router {
       if (!(await hit(ctx.db, `verify:ip:${clientIp(req)}`, LIMITS.verifyPerIp, now))) {
         throw new HttpError(429, 'too_many_requests');
       }
-      const [inv] = await ctx.db
-        .update(schema.portalInvitation)
-        .set({ acceptedAt: now })
-        .where(live(input.token))
-        .returning();
-      if (!inv) throw new HttpError(404, 'invite_expired');
-      const { identityId } = await grantAccess(ctx.db, {
-        clientId: inv.clientId,
-        email: inv.email,
-        phone: inv.phone,
-        name: input.name || inv.name,
-        roleLabel: inv.roleLabel,
-        by: inv.invitedBy,
+      // One transaction: if granting fails, the invitation is not used up.
+      const accepted = await ctx.db.transaction(async (tx) => {
+        const [inv] = await tx
+          .update(schema.portalInvitation)
+          .set({ acceptedAt: now })
+          .where(live(input.token))
+          .returning();
+        if (!inv) return null;
+        // The link went to the email when there was one, else by text: that contact is proved.
+        const proved = inv.email ?? inv.phone;
+        if (!proved) throw new Error('invitation without a contact');
+        const granted = await grantAccess(tx, {
+          clientId: inv.clientId,
+          proved,
+          other: inv.email ? inv.phone : null,
+          name: input.name || inv.name,
+          roleLabel: inv.roleLabel,
+          by: inv.invitedBy,
+        });
+        return { inv, identityId: granted.identityId };
       });
+      if (!accepted) throw new HttpError(404, 'invite_expired');
+      const { inv, identityId } = accepted;
       await record(
         ctx.db,
         'invite_accepted',

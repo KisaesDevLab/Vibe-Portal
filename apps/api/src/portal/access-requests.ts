@@ -1,25 +1,27 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
 // "Request access" (D5). The person confirms their email or phone with a code first; only
-// confirmed requests reach staff (P16).
+// confirmed requests reach staff (P16). The code goes to the email when one is given, else by
+// text; only that contact counts as confirmed and is used when staff approve (QA 2026-11-09).
 //
 //   POST /api/portal/access-requests              { name, email?, phone?, clientAs, note? }
-//        -> { requestId, sentTo }  (code by email when given, else by text)
+//        -> { requestId, sentTo }
+//   POST /api/portal/access-requests/:id/resend   -> { sentTo }  (a new code)
 //   POST /api/portal/access-requests/:id/confirm  { code }
 
 import express, { type Router } from 'express';
-import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
-import { MAX_ATTEMPTS } from '../auth/client-auth';
-import { firmName, type Ctx } from '../context';
+import { checkCode, issue } from '../auth/challenges';
+import { deliver, firmName, type Ctx } from '../context';
 import { maskContact, normalizeEmail, normalizePhone } from '../lib/contact';
 import { record } from '../lib/events';
 import { body, clientIp, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { hit, LIMITS } from '../lib/rate-limit';
-import { sameHash, sha256, sixDigitCode } from '../lib/secrets';
+import { sha256, sixDigitCode } from '../lib/secrets';
 
 export const CONFIRM_MINUTES = 15;
 
@@ -35,6 +37,37 @@ const ConfirmSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
 export function accessRequestsRouter(ctx: Ctx): Router {
   const r = express.Router();
 
+  /** Sends a new confirmation code for a request to `to`. */
+  async function sendCode(requestId: string, to: string, now: Date): Promise<void> {
+    const code = sixDigitCode();
+    await issue(
+      ctx.db,
+      {
+        kind: 'request_confirm',
+        accessRequestId: requestId,
+        contact: to,
+        secretHash: sha256(code),
+        expiresAt: new Date(now.getTime() + CONFIRM_MINUTES * 60_000),
+      },
+      now,
+    );
+    const firm = await firmName(ctx);
+    deliver(
+      ctx,
+      messageTo(
+        to,
+        `Confirm your request to ${firm}`,
+        `${code} is your code to confirm your request for access to ${firm}'s client portal.`,
+      ),
+    );
+  }
+
+  const requestId = (raw: string | undefined): string => {
+    const id = z.string().uuid().safeParse(raw);
+    if (!id.success) throw new HttpError(404, 'not_found');
+    return id.data;
+  };
+
   r.post(
     '/',
     h(async (req, res) => {
@@ -49,6 +82,9 @@ export function accessRequestsRouter(ctx: Ctx): Router {
       if (input.phone && !phone) throw new HttpError(400, 'invalid_phone');
       const sendTo = email ?? phone;
       if (!sendTo) throw new HttpError(400, 'contact_required');
+      if (!(await hit(ctx.db, `request:contact:${sendTo}`, LIMITS.requestPerContact, now))) {
+        throw new HttpError(429, 'too_many_requests');
+      }
 
       const [request] = await ctx.db
         .insert(schema.accessRequest)
@@ -61,22 +97,7 @@ export function accessRequestsRouter(ctx: Ctx): Router {
         })
         .returning({ id: schema.accessRequest.id });
       if (!request) throw new Error('access request insert returned nothing');
-      const code = sixDigitCode();
-      await ctx.db.insert(schema.signInChallenge).values({
-        kind: 'request_confirm',
-        accessRequestId: request.id,
-        contact: sendTo,
-        secretHash: sha256(code),
-        expiresAt: new Date(now.getTime() + CONFIRM_MINUTES * 60_000),
-      });
-      const firm = await firmName(ctx);
-      await ctx.notifier.send(
-        messageTo(
-          sendTo,
-          `Confirm your request to ${firm}`,
-          `${code} is your code to confirm your request for access to ${firm}'s client portal.`,
-        ),
-      );
+      await sendCode(request.id, sendTo, now);
       await record(
         ctx.db,
         'request',
@@ -90,45 +111,62 @@ export function accessRequestsRouter(ctx: Ctx): Router {
   );
 
   r.post(
+    '/:id/resend',
+    h(async (req, res) => {
+      const id = requestId(req.params['id']);
+      const now = ctx.now();
+      if (!(await hit(ctx.db, `request:ip:${clientIp(req)}`, LIMITS.requestPerIp, now))) {
+        throw new HttpError(429, 'too_many_requests');
+      }
+      const [request] = await ctx.db
+        .select()
+        .from(schema.accessRequest)
+        .where(
+          and(
+            eq(schema.accessRequest.id, id),
+            eq(schema.accessRequest.status, 'pending'),
+            isNull(schema.accessRequest.confirmedAt),
+          ),
+        );
+      const sendTo = request?.email ?? request?.phone;
+      if (!request || !sendTo) throw new HttpError(404, 'not_found');
+      if (!(await hit(ctx.db, `request:contact:${sendTo}`, LIMITS.requestPerContact, now))) {
+        throw new HttpError(429, 'too_many_requests');
+      }
+      await sendCode(id, sendTo, now);
+      res.json({ sentTo: maskContact(sendTo) });
+    }),
+  );
+
+  r.post(
     '/:id/confirm',
     h(async (req, res) => {
-      const id = z.string().uuid().safeParse(req.params['id']);
-      if (!id.success) throw new HttpError(404, 'not_found');
+      const id = requestId(req.params['id']);
       const { code } = body(ConfirmSchema, req);
       const now = ctx.now();
       if (!(await hit(ctx.db, `verify:ip:${clientIp(req)}`, LIMITS.verifyPerIp, now))) {
         throw new HttpError(429, 'too_many_requests');
       }
-      const [ch] = await ctx.db
-        .select()
-        .from(schema.signInChallenge)
-        .where(
-          and(
-            eq(schema.signInChallenge.kind, 'request_confirm'),
-            eq(schema.signInChallenge.accessRequestId, id.data),
-            isNull(schema.signInChallenge.usedAt),
-            gt(schema.signInChallenge.expiresAt, now),
-          ),
-        )
-        .orderBy(desc(schema.signInChallenge.createdAt))
-        .limit(1);
-      if (!ch || ch.attempts >= MAX_ATTEMPTS) throw new HttpError(400, 'code_wrong');
-      const right = sameHash(ch.secretHash, sha256(code));
-      await ctx.db
-        .update(schema.signInChallenge)
-        .set(right ? { usedAt: now } : { attempts: ch.attempts + 1 })
-        .where(eq(schema.signInChallenge.id, ch.id));
-      if (!right) throw new HttpError(400, 'code_wrong');
+      const ch = await checkCode(
+        ctx.db,
+        and(
+          eq(schema.signInChallenge.kind, 'request_confirm'),
+          eq(schema.signInChallenge.accessRequestId, id),
+        ),
+        code,
+        now,
+      );
+      if (!ch) throw new HttpError(400, 'code_wrong');
       await ctx.db
         .update(schema.accessRequest)
-        .set({ confirmedAt: now })
-        .where(eq(schema.accessRequest.id, id.data));
+        .set({ confirmedAt: now, confirmedContact: ch.contact })
+        .where(and(eq(schema.accessRequest.id, id), isNull(schema.accessRequest.confirmedAt)));
       await record(
         ctx.db,
         'request_confirmed',
         { kind: 'system', name: 'portal' },
         {
-          detail: { accessRequestId: id.data },
+          detail: { accessRequestId: id },
         },
       );
       res.json({

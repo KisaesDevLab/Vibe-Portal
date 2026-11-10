@@ -77,10 +77,6 @@ function clean(v: string | undefined): string {
 export function requireFirmKey(ctx: Ctx): RequestHandler {
   return h(async (req: Request, res: Response, next: NextFunction) => {
     const now = ctx.now();
-    const bucket = `badkey:ip:${clientIp(req)}`;
-    if (await isBlocked(ctx.db, bucket, LIMITS.badKeyPerIp, now)) {
-      throw new HttpError(429, 'too_many_requests');
-    }
     const auth = req.header('authorization') ?? '';
     const key = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
     const [row] = key.startsWith(KEY_PREFIX)
@@ -90,6 +86,12 @@ export function requireFirmKey(ctx: Ctx): RequestHandler {
           .where(and(eq(schema.firmKeys.keyHash, sha256(key)), isNull(schema.firmKeys.revokedAt)))
       : [];
     if (!row) {
+      // Only failures count, and a right key is never blocked: someone else's bad tries from the
+      // same address cannot lock Vibe Files out (QA 2026-11-09).
+      const bucket = `badkey:ip:${clientIp(req)}`;
+      if (await isBlocked(ctx.db, bucket, LIMITS.badKeyPerIp, now)) {
+        throw new HttpError(429, 'too_many_requests');
+      }
       await hit(ctx.db, bucket, LIMITS.badKeyPerIp, now);
       res.setHeader('WWW-Authenticate', 'Bearer');
       throw new HttpError(401, 'bad_firm_key');

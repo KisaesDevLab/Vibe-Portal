@@ -16,11 +16,15 @@ export interface Notifier {
   send(msg: Message): Promise<void>;
 }
 
-/** Logs messages instead of sending them (development). */
-export function consoleNotifier(log: Logger): Notifier {
+/**
+ * Logs messages instead of sending them (development). With `redact` the text is left out: it
+ * holds sign-in links and codes, and anyone who can read the log could use them.
+ */
+export function consoleNotifier(log: Logger, opts: { redact: boolean }): Notifier {
   return {
     async send(msg) {
-      log.info({ ...msg }, `notify (${msg.channel}, console)`);
+      const shown = opts.redact ? { ...msg, body: '[redacted]' } : msg;
+      log.info({ ...shown }, `notify (${msg.channel}, console)`);
     },
   };
 }

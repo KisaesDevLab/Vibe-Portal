@@ -46,11 +46,14 @@ async function main(): Promise<void> {
     ctx: {
       db,
       log,
-      // Real email and SMS come from the appliance's Email & SMS settings (Phase 5).
-      notifier: consoleNotifier(log),
+      // Real email and SMS come from the appliance's Email & SMS settings (Phase 5). Until then
+      // the console notifier; in production it leaves out the message text, which holds
+      // sign-in links and codes.
+      notifier: consoleNotifier(log, { redact: config.NODE_ENV === 'production' }),
       now: () => new Date(),
       portalUrl,
       cookie: { secure: portalUrl.startsWith('https://') },
+      trustCfIp: config.TRUST_CF_CONNECTING_IP,
     },
   });
   app.listen(config.PORT, () => {

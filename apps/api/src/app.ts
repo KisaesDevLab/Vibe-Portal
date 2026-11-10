@@ -8,7 +8,7 @@ import type { HealthResponse } from '@vibe-portal/types';
 import { clientAuthRouter } from './auth/client-auth';
 import type { Ctx } from './context';
 import { firmRouter } from './firm/routes';
-import { errorHandler, requireJson } from './lib/http';
+import { errorHandler, requireJson, TRUST_CF_IP } from './lib/http';
 import { accessRequestsRouter } from './portal/access-requests';
 import { invitationsRouter } from './portal/invitations';
 import { VERSION } from './version';
@@ -23,8 +23,8 @@ export interface AppDeps {
 export function createApp(deps: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
-  // Behind Caddy (and Cloudflare): trust the proxy for the client address.
-  app.set('trust proxy', 'loopback, linklocal, uniquelocal');
+  // Rate limits count by Cloudflare's client address behind the tunnel (see lib/http.ts).
+  app.set(TRUST_CF_IP, deps.ctx?.trustCfIp ?? false);
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');

@@ -17,8 +17,12 @@ export const LIMITS = {
   loginPerIp: { max: 30, windowSeconds: 15 * 60 },
   /** Code and link checks from one address. */
   verifyPerIp: { max: 30, windowSeconds: 15 * 60 },
+  /** Code checks for one email or phone, across all its codes. */
+  verifyPerContact: { max: 10, windowSeconds: 15 * 60 },
   /** Access requests from one address. */
   requestPerIp: { max: 5, windowSeconds: 60 * 60 },
+  /** Access requests and new confirmation codes for one email or phone. */
+  requestPerContact: { max: 3, windowSeconds: 60 * 60 },
   /** Wrong firm keys from one address. */
   badKeyPerIp: { max: 20, windowSeconds: 15 * 60 },
 } satisfies Record<string, Limit>;

@@ -29,7 +29,8 @@ async function main(): Promise<void> {
         process.stdout.write(`${k.id}  ${k.label}  ${state}  last used ${used}\n`);
       }
     } else if (cmd === 'revoke' && arg) {
-      const done = await revokeFirmKey(db, arg, new Date());
+      const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(arg);
+      const done = isId && (await revokeFirmKey(db, arg, new Date()));
       console.warn(done ? 'Revoked.' : 'No live key with that id.');
       if (!done) process.exitCode = 1;
     } else {

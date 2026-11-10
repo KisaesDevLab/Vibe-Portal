@@ -2,47 +2,73 @@
 //
 // Signed-in home. Files arrive in Phase 3; for now: who is signed in, which client, sign out.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { Button, Card } from '@vibe/ui';
 
 import { api, ApiError, say, type Me } from '../api';
 
+type State = 'loading' | 'ready' | 'signed_out' | 'error';
+
 export function Home(): JSX.Element {
   const navigate = useNavigate();
   const [me, setMe] = useState<Me | null>(null);
-  const [state, setState] = useState<'loading' | 'ready' | 'signed_out' | 'error'>('loading');
+  const [state, setState] = useState<State>('loading');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
-  useEffect(() => {
+  /** A failed call: signed out -> sign in; anything else -> a message. */
+  const fail = useCallback((err: unknown, whole: boolean) => {
+    if (err instanceof ApiError && err.status === 401) setState('signed_out');
+    else if (whole) {
+      setError(say(err));
+      setState('error');
+    } else setNotice(say(err));
+  }, []);
+
+  const load = useCallback(() => {
+    setState('loading');
     api<Me>('/auth/me')
       .then((m) => {
         setMe(m);
         setState('ready');
       })
-      .catch((err: unknown) => {
-        if (err instanceof ApiError && err.status === 401) setState('signed_out');
-        else {
-          setError(say(err));
-          setState('error');
-        }
-      });
-  }, []);
+      .catch((err: unknown) => fail(err, true));
+  }, [fail]);
+
+  useEffect(load, [load]);
 
   if (state === 'signed_out') return <Navigate to="/login" replace />;
   if (state === 'loading') return <p role="status">Loading…</p>;
-  if (state === 'error' || !me) return <p role="alert">{error}</p>;
+  if (state === 'error' || !me) {
+    return (
+      <main style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}>
+        <p role="alert">{error}</p>
+        <Button onClick={load}>Try again</Button>
+      </main>
+    );
+  }
 
   const active = me.clients.find((c) => c.id === me.activeClientId);
 
   async function switchTo(clientId: string): Promise<void> {
-    await api('/auth/switch-client', { body: { clientId } });
-    setMe((m) => (m ? { ...m, activeClientId: clientId } : m));
+    setNotice('');
+    try {
+      await api('/auth/switch-client', { body: { clientId } });
+      setMe((m) => (m ? { ...m, activeClientId: clientId } : m));
+    } catch (err) {
+      fail(err, false);
+    }
   }
 
   async function signOut(): Promise<void> {
-    await api('/auth/logout', { method: 'POST' });
-    navigate('/login', { replace: true });
+    setNotice('');
+    try {
+      await api('/auth/logout', { method: 'POST' });
+      navigate('/login', { replace: true });
+    } catch (err) {
+      fail(err, false);
+    }
   }
 
   return (
@@ -53,6 +79,7 @@ export function Home(): JSX.Element {
           Sign out
         </Button>
       </header>
+      {notice && <p role="alert">{notice}</p>}
       <Card title={active?.name ?? ''}>
         <p>Signed in as {me.identity.name || me.identity.email || me.identity.phone}.</p>
         {me.clients.length > 1 && (

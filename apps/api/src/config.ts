@@ -13,6 +13,14 @@ const Schema = z.object({
   DATA_DIR: z.string().min(1).default('/data/portal'),
   /** The address clients use (P7: its own hostname). */
   PORTAL_URL: z.string().url().default('http://localhost:5197'),
+  /**
+   * Count rate limits by Cloudflare's CF-Connecting-IP (the portal is reached through the
+   * Cloudflare Tunnel). Turn off only when the portal is reached some other way.
+   */
+  TRUST_CF_CONNECTING_IP: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 export type Config = z.infer<typeof Schema>;
