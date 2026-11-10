@@ -19,6 +19,7 @@ Owner decisions, 2026-11-09 (Q&A):
 | D9 | Lifetime | A shared file stays on the portal until staff remove it (hidden from every user, or **Remove from portal**). |
 | D10 | Uploads | Client uploads are fetched by Vibe Files into a Portal inbox and filed through Intake like scans. |
 | D11 | With full TB | The portals run side by side; the firm decides per client which one to use. No migration in v1. |
+| D12 | Not TB "files only" | Considered running TB itself with its portal feature switches (`@vibe/core/portal-features`) set to Documents only. Rejected: Vibe Portal stays a separate, smaller app (no worker, Redis or staff app) with its own license and releases; copied TB code is tracked in `VENDORED.md`. |
 
 ---
 
