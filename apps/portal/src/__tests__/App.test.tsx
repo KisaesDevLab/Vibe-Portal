@@ -317,7 +317,7 @@ describe('portal', () => {
   });
 
   it('sends chosen files one after another with one batch and note, and shows each result', async () => {
-    const sent: { url: string; type: string | null }[] = [];
+    const sent: { url: string; headers: Record<string, string> }[] = [];
     class FakeXhr {
       upload: {
         onprogress:
@@ -331,16 +331,16 @@ describe('portal', () => {
       onload: (() => void) | null = null;
       onerror: (() => void) | null = null;
       private url = '';
-      private type: string | null = null;
+      private headers: Record<string, string> = {};
       open(_m: string, url: string): void {
         this.url = url;
       }
-      setRequestHeader(_k: string, v: string): void {
-        this.type = v;
+      setRequestHeader(k: string, v: string): void {
+        this.headers[k] = v;
       }
       send(): void {
-        sent.push({ url: this.url, type: this.type });
-        const bad = this.url.includes('name=setup.exe');
+        sent.push({ url: this.url, headers: this.headers });
+        const bad = this.headers['X-Vibe-Name'] === 'setup.exe';
         this.status = bad ? 415 : 201;
         this.responseText = JSON.stringify(
           bad ? { error: 'type_not_allowed' } : { uploadId: `u${sent.length}`, name: 'x' },
@@ -369,9 +369,12 @@ describe('portal', () => {
     expect(sent).toHaveLength(2);
     const q = sent.map((x) => new URL(x.url, 'http://h').searchParams);
     expect(q[0]?.get('batchId')).toBe(q[1]?.get('batchId'));
-    expect(q.map((p) => p.get('note'))).toEqual(['Second job', 'Second job']);
     expect(q.map((p) => p.get('clientId'))).toEqual(['c1', 'c1']);
-    expect(sent[0]?.type).toBe('application/octet-stream');
+    // P47: names and notes in headers, not the URL (which the proxy logs).
+    expect(sent.map((x) => x.url).join()).not.toMatch(/name=|note=/);
+    expect(sent.map((x) => x.headers['X-Vibe-Note'])).toEqual(['Second%20job', 'Second%20job']);
+    expect(sent[0]?.headers['X-Vibe-Name']).toBe('W-2.pdf');
+    expect(sent[0]?.headers['Content-Type']).toBe('application/octet-stream');
   });
 
   it('says a file is too large without sending it', async () => {

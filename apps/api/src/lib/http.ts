@@ -93,3 +93,23 @@ export function clientIp(req: Request): string {
   }
   return req.socket.remoteAddress ?? '0.0.0.0';
 }
+
+/** Request headers that carry a file's name and note, percent-encoded (encodeURIComponent).
+ *  They keep names and notes out of the URL, which proxies such as Caddy write to their access
+ *  logs (P47). The query fields of the same name are still read, for older Vibe Files builds. */
+export const TEXT_HEADERS = { name: 'x-vibe-name', note: 'x-vibe-note' } as const;
+
+/** The query, with `name` and `note` taken from their headers when sent. */
+export function queryWithText(req: Request): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...req.query };
+  for (const [field, header] of Object.entries(TEXT_HEADERS)) {
+    const raw = req.headers[header];
+    if (typeof raw !== 'string') continue;
+    try {
+      out[field] = decodeURIComponent(raw);
+    } catch {
+      throw new HttpError(400, `invalid_${field}`);
+    }
+  }
+  return out;
+}

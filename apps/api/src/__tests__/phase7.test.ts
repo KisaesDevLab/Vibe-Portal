@@ -2,13 +2,17 @@
 //
 // Phase 7 security review fixes.
 
+import { createHash, randomUUID } from 'node:crypto';
+
 import { schema } from '@vibe-portal/db';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { purgeStale } from '../lib/housekeeping';
+import { isUsCanadaPhone } from '../lib/contact';
 import { TRUST_CF_IP } from '../lib/http';
 import { shortText } from '../lib/notify';
+import { WAITING_MAX_BYTES } from '../portal/uploads';
 import { CLIENT, OTHER, world, type World } from './harness';
 
 let w: World;
@@ -78,5 +82,76 @@ describe('Phase 7', () => {
     await purgeStale(w.t.db, w.ctx.now());
     expect(await w.t.db.select().from(schema.rateLimit)).toHaveLength(0);
     expect(await w.t.db.select().from(schema.accessRequest)).toHaveLength(0);
+  });
+});
+
+describe('P47', () => {
+  const send = (agent: ReturnType<typeof request.agent>, headers: Record<string, string> = {}) => {
+    let r = agent
+      .post(`/api/portal/uploads?clientId=${CLIENT}&batchId=${randomUUID()}`)
+      .set('Content-Type', 'application/octet-stream');
+    for (const [k, v] of Object.entries(headers)) r = r.set(k, v);
+    return r.send(Buffer.from('%PDF-1.7 test'));
+  };
+
+  it('names and notes travel in headers, not the URL', async () => {
+    const m = await w.member('a@example.test');
+    const up = await send(m.agent, {
+      'X-Vibe-Name': encodeURIComponent('Révisé W-2.pdf'),
+      'X-Vibe-Note': encodeURIComponent('for 2025 & more'),
+    }).expect(201);
+    expect(up.body.name).toBe('Révisé W-2.pdf');
+    const [row] = await w.t.db.select().from(schema.uploads);
+    expect(row?.note).toBe('for 2025 & more');
+    await send(m.agent, { 'X-Vibe-Name': '%E0%A4%A' }).expect(400);
+    // Vibe Files' firm API too.
+    const pdf = Buffer.from('%PDF x');
+    const sha = createHash('sha256').update(pdf).digest('hex');
+    await w
+      .firm('post', `/files?clientId=${CLIENT}&vfDocumentId=d1&sha256=${sha}`)
+      .set('X-Vibe-Name', encodeURIComponent('Smith 2025.pdf'))
+      .set('Content-Type', 'application/octet-stream')
+      .send(pdf)
+      .expect(201);
+    const [file] = await w.t.db.select().from(schema.files);
+    expect(file?.name).toBe('Smith 2025.pdf');
+  });
+
+  it('new batches cannot get past the daily limit, or fill the disk while nobody collects', async () => {
+    const m = await w.member('a@example.test');
+    const day = 24 * 60 * 60 * 1000;
+    await w.t.db.insert(schema.rateLimit).values({
+      bucket: `upload:identity-day:${m.id}`,
+      windowStart: new Date(Math.floor(w.ctx.now().getTime() / day) * day),
+      hits: 300,
+    });
+    await send(m.agent, { 'X-Vibe-Name': 'a.pdf' }).expect(429);
+
+    const n = await w.member('b@example.test');
+    await w.t.db.insert(schema.uploads).values({
+      clientId: CLIENT,
+      identityId: n.id,
+      name: 'big.pdf',
+      size: WAITING_MAX_BYTES,
+      sha256: '0'.repeat(64),
+    });
+    const full = await send(n.agent, { 'X-Vibe-Name': 'b.pdf' }).expect(429);
+    expect(full.body.error).toBe('too_much_waiting');
+  });
+
+  it('the access-request page only texts US and Canadian numbers', async () => {
+    expect(isUsCanadaPhone('+15555550100')).toBe(true);
+    expect(isUsCanadaPhone('+14165550100')).toBe(true); // Toronto
+    expect(isUsCanadaPhone('+18765550100')).toBe(false); // Jamaica
+    expect(isUsCanadaPhone('+447700900123')).toBe(false);
+    const abroad = await request(w.app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'X', phone: '+44 7700 900123', clientAs: 'X' })
+      .expect(400);
+    expect(abroad.body.error).toBe('phone_us_only');
+    await request(w.app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'X', phone: '(555) 555-0100', clientAs: 'X' })
+      .expect(201);
   });
 });

@@ -23,7 +23,7 @@ import { TooLarge } from '../files/blobs';
 import { drop, enqueue } from '../files/notify-queue';
 import { cleanName, contentTypeOf } from '../files/types';
 import { record, type Actor } from '../lib/events';
-import { body, h, HttpError, notForStaff } from '../lib/http';
+import { body, h, HttpError, notForStaff, queryWithText } from '../lib/http';
 
 const Uuid = z.string().uuid();
 const Sha = z
@@ -100,7 +100,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
   r.post(
     '/',
     h(async (req, res) => {
-      const q = AddQuery.parse(req.query);
+      const q = AddQuery.parse(queryWithText(req));
       const [client] = await ctx.db
         .select()
         .from(schema.clients)
@@ -169,7 +169,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
     '/:id/content',
     h(async (req, res) => {
       const id = fileId(req);
-      const q = ReplaceQuery.parse(req.query);
+      const q = ReplaceQuery.parse(queryWithText(req));
       const before = await liveFile(id);
       if (before.sha256 === q.sha256 && (!q.name || cleanName(q.name) === before.name)) {
         res.json({ ok: true, unchanged: true });

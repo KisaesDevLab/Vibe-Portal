@@ -26,12 +26,16 @@ export function sendFile(
   url: string,
   file: Blob,
   onProgress: (fraction: number) => void,
+  text: { name: string; note?: string },
 ): Promise<{ uploadId: string; name: string }> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', url);
     xhr.withCredentials = true;
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    // In headers, not the URL, so the proxy's access log does not keep them (P47).
+    xhr.setRequestHeader('X-Vibe-Name', encodeURIComponent(text.name));
+    if (text.note) xhr.setRequestHeader('X-Vibe-Note', encodeURIComponent(text.note));
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
@@ -84,8 +88,7 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
     const batchId = newBatchId();
     const done: { name: string; error?: string }[] = [];
     for (const [i, file] of chosen.entries()) {
-      const q = new URLSearchParams({ clientId, batchId, name: file.name });
-      if (note.trim()) q.set('note', note.trim());
+      const q = new URLSearchParams({ clientId, batchId });
       if (limitBytes > 0 && file.size > limitBytes) {
         done.push({
           name: file.name,
@@ -95,10 +98,14 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
         continue;
       }
       try {
-        await sendFile(`/api/portal/uploads?${q.toString()}`, file, (f) =>
-          setProgress(
-            `Sending ${i + 1} of ${chosen.length}: ${file.name} (${Math.round(f * 100)}%)`,
-          ),
+        await sendFile(
+          `/api/portal/uploads?${q.toString()}`,
+          file,
+          (f) =>
+            setProgress(
+              `Sending ${i + 1} of ${chosen.length}: ${file.name} (${Math.round(f * 100)}%)`,
+            ),
+          { name: file.name, note: note.trim() || undefined },
         );
         done.push({ name: file.name });
       } catch (err) {

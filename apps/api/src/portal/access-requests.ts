@@ -16,7 +16,7 @@ import { schema } from '@vibe-portal/db';
 
 import { checkCode, issue } from '../auth/challenges';
 import { deliver, firmName, type Ctx } from '../context';
-import { maskContact, normalizeEmail, normalizePhone } from '../lib/contact';
+import { isUsCanadaPhone, maskContact, normalizeEmail, normalizePhone } from '../lib/contact';
 import { record } from '../lib/events';
 import { body, clientIp, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
@@ -80,6 +80,8 @@ export function accessRequestsRouter(ctx: Ctx): Router {
       const phone = input.phone ? normalizePhone(input.phone) : null;
       if (input.email && !email) throw new HttpError(400, 'invalid_email');
       if (input.phone && !phone) throw new HttpError(400, 'invalid_phone');
+      // P47: this page is open to anyone, so it only texts US and Canadian numbers.
+      if (phone && !email && !isUsCanadaPhone(phone)) throw new HttpError(400, 'phone_us_only');
       const sendTo = email ?? phone;
       if (!sendTo) throw new HttpError(400, 'contact_required');
       if (!(await hit(ctx.db, `request:contact:${sendTo}`, LIMITS.requestPerContact, now))) {

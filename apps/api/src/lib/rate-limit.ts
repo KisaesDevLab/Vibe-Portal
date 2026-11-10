@@ -29,6 +29,10 @@ export const LIMITS = {
   requestPerContact: { max: 3, windowSeconds: 60 * 60 },
   /** Files one person uploads (P34: batches of up to 20). */
   uploadPerIdentity: { max: 100, windowSeconds: 60 * 60 },
+  /** Files one person uploads in a day: new batches cannot get past it (P47). */
+  uploadPerIdentityDay: { max: 300, windowSeconds: 24 * 60 * 60 },
+  /** Files sent for one client by all its people in an hour. */
+  uploadPerClient: { max: 200, windowSeconds: 60 * 60 },
   /** Wrong firm keys from one address. */
   badKeyPerIp: { max: 20, windowSeconds: 15 * 60 },
 } satisfies Record<string, Limit>;

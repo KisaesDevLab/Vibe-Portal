@@ -38,3 +38,36 @@ export function maskContact(contact: string): string {
   }
   return `***-***-${contact.slice(-4)}`;
 }
+
+/** North American area codes outside the US and Canada (Caribbean and Bermuda). Texts there
+ *  are charged as international, and they are a common target of text-message fraud. */
+const NANP_ABROAD = new Set([
+  '242',
+  '246',
+  '264',
+  '268',
+  '284',
+  '345',
+  '441',
+  '473',
+  '649',
+  '658',
+  '664',
+  '721',
+  '758',
+  '767',
+  '784',
+  '809',
+  '829',
+  '849',
+  '868',
+  '869',
+  '876',
+]);
+
+/** Whether a normalised phone is a US or Canadian number (P47: the access-request page, open
+ *  to anyone, only texts these). */
+export function isUsCanadaPhone(phone: string): boolean {
+  const m = /^\+1(\d{3})\d{7}$/.exec(phone);
+  return m !== null && !NANP_ABROAD.has(m[1] as string);
+}

@@ -52,6 +52,9 @@ export function say(err: unknown): string {
       'This kind of file cannot be sent. Send PDF, photos, Word, Excel, CSV or text.',
     too_large: 'This file is too large to send.',
     batch_full: 'At most 20 files at a time.',
+    too_much_waiting:
+      'The firm has not yet collected the files already sent. Please try again later.',
+    phone_us_only: 'Please give a US or Canadian mobile number, or use your email.',
     photo_unreadable: 'This photo could not be read. Try taking it again or saving it as JPG.',
     already_received: 'The firm has already received this file.',
     network: 'The portal cannot be reached right now. Try again later.',

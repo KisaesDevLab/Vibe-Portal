@@ -5,13 +5,15 @@
 // same batch id and note (P30). Type checked by content and name (P29); HEIC photos become JPG
 // (P33). A client can remove an upload until Vibe Files has fetched it (P32).
 //
-//   POST   /api/portal/uploads?clientId&batchId&name[&note]   body: the file
+//   POST   /api/portal/uploads?clientId&batchId   body: the file
+//          headers X-Vibe-Name and X-Vibe-Note, percent-encoded (P47: not in the URL, so not in
+//          the proxy's access log; ?name and ?note are still read)
 //   GET    /api/portal/uploads                                this person's uploads, active client
 //   DELETE /api/portal/uploads/:id
 
 import express, { type Router } from 'express';
 import { Readable } from 'node:stream';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import { generateKey } from '@vibe/crypto';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
@@ -26,10 +28,13 @@ import { peek } from '../files/send';
 import { allowedKind, SNIFF_BYTES } from '../files/sniff';
 import { cleanName, contentTypeOf } from '../files/types';
 import { record } from '../lib/events';
-import { h, HttpError } from '../lib/http';
+import { h, HttpError, queryWithText } from '../lib/http';
 import { hit, LIMITS } from '../lib/rate-limit';
 
 export const BATCH_MAX = 20;
+/** Uploads for one client that Vibe Files has not yet collected may hold at most this much:
+ *  with every office PC closed for a long weekend, the appliance's disk cannot fill (P47). */
+export const WAITING_MAX_BYTES = 5 * 1024 * 1024 * 1024;
 
 const Query = z.object({
   clientId: z.string().uuid(),
@@ -52,14 +57,33 @@ export function clientUploadsRouter(
     '/',
     h(async (req, res) => {
       const s = req.clientSession as ClientSession;
-      const q = Query.parse(req.query);
+      const q = Query.parse(queryWithText(req));
       const now = ctx.now();
       if (!req.is('application/octet-stream')) throw new HttpError(415, 'octet_stream_required');
-      if (!(await hit(ctx.db, `upload:identity:${s.identityId}`, LIMITS.uploadPerIdentity, now))) {
-        throw new HttpError(429, 'too_many_requests');
+      for (const [bucket, limit] of [
+        [`upload:identity:${s.identityId}`, LIMITS.uploadPerIdentity],
+        [`upload:identity-day:${s.identityId}`, LIMITS.uploadPerIdentityDay],
+      ] as const) {
+        if (!(await hit(ctx.db, bucket, limit, now))) throw new HttpError(429, 'too_many_requests');
       }
       const clients = await activeClientsOf(ctx.db, s.identityId);
       if (!clients.some((c) => c.id === q.clientId)) throw new HttpError(404, 'not_found');
+      if (!(await hit(ctx.db, `upload:client:${q.clientId}`, LIMITS.uploadPerClient, now))) {
+        throw new HttpError(429, 'too_many_requests');
+      }
+      const [waiting] = await ctx.db
+        .select({ bytes: sql<string>`coalesce(sum(${schema.uploads.size}), 0)` })
+        .from(schema.uploads)
+        .where(
+          and(
+            eq(schema.uploads.clientId, q.clientId),
+            isNull(schema.uploads.fetchedAt),
+            isNull(schema.uploads.removedAt),
+          ),
+        );
+      if (Number(waiting?.bytes ?? 0) >= WAITING_MAX_BYTES) {
+        throw new HttpError(429, 'too_much_waiting');
+      }
       const inBatch = await ctx.db
         .select({ id: schema.uploads.id })
         .from(schema.uploads)
