@@ -213,18 +213,22 @@ Each phase ends with its tests green and a ship gate.
 - **Gate:** clean install on the appliance test VM, reached over the tunnel from a phone
 
 ### Phase 6 — Vibe Files integration
-- [ ] `vf-portal` crate; Setup → Portal with Test
-- [ ] Share window in the file pane; portal mark in Browse; Portal users; Portal requests
-- [ ] Portal inbox + fetch timer → Intake
-- [ ] Audit trail; help pages
+- [x] `vf-portal` crate; Setup → Portal with Test (Admin › Portal in Vibe Files)
+- [x] Share window in the file pane; portal mark in Browse; Portal users; Portal requests
+- [x] Portal inbox + fetch timer → Intake
+- [x] Audit trail (Vibe Files' own portal actions; client events stay on the portal, P43); help pages
+- Gate checked by Vibe Files' `scripts/portal-e2e.sh` against this API (two PCs fetching at once
+  included)
 - **Gate:** from Vibe Files, invite a client, share a file to one of two users, client downloads,
   client uploads, the upload appears in Intake with the right client; all of it in the audit trail
 
 ### Phase 6b — Staff web page (D13)
-- [ ] Staff sign-in (P9); staff accounts in the appliance admin screen
-- [ ] Pages: Clients & users (invite, disable), Access requests (approve → client, deny), Uploads
+- [x] Staff sign-in (P9: local accounts, password + authenticator; Vibe Auth later, P44); staff
+  accounts and the other settings on the staff page itself, the first from
+  `vibe portal setup-link` (P36)
+- [x] Pages: Clients & users (invite, disable), Access requests (approve → client, deny), Uploads
   (list, download, mark fetched only through Vibe Files), Shared files (who sees each; hide; remove)
-- [ ] Every action in `events`, shown in Vibe Files' audit trail with the staff user's name
+- [x] Every action in `events` with the staff user's name, shown on the History page (P43)
 - **Gate:** a request approved on the page shows the client as active in Vibe Files' Share window;
   a file removed on the page shows as not on the portal in Vibe Files
 

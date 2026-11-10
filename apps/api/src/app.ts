@@ -7,7 +7,9 @@ import type { HealthResponse } from '@vibe-portal/types';
 
 import { clientAuthRouter } from './auth/client-auth';
 import type { Ctx } from './context';
-import { firmRouter } from './firm/routes';
+import { firmRouter, staffApi } from './firm/routes';
+import { requireStaff, staffAuthRouter } from './staff/auth';
+import { brandingRouter, staffSettingsRouter } from './staff/settings';
 import { errorHandler, requireJson, TRUST_CF_IP } from './lib/http';
 import { accessRequestsRouter } from './portal/access-requests';
 import { clientFilesRouter } from './portal/files';
@@ -66,6 +68,16 @@ export function createApp(deps: AppDeps): Express {
     app.use('/api/portal/files', clientFilesRouter(ctx));
     app.use('/api/portal/uploads', clientUploadsRouter(ctx, deps.convertHeic));
     app.use('/api/firm/v1', firmRouter(ctx));
+    // The staff web page (D13): staff sign-in, then the firm API's work and Settings.
+    app.use('/api/staff', requireJson);
+    app.use('/api/staff/auth', staffAuthRouter(ctx));
+    app.use(
+      '/api/staff/v1',
+      requireStaff(ctx),
+      staffSettingsRouter(ctx),
+      staffApi(ctx, (_req, _res, next) => next()),
+    );
+    app.use('/api/portal/branding', brandingRouter(ctx));
   }
 
   app.use('/api', (_req, res) => {

@@ -10,6 +10,8 @@ import { Home } from './pages/Home';
 import { Login } from './pages/Login';
 import { RequestAccess } from './pages/RequestAccess';
 import { VerifyLink } from './pages/VerifyLink';
+import { StaffLogin, StaffSetup } from './staff/StaffAuth';
+import { StaffHome } from './staff/StaffPages';
 
 export function App(): JSX.Element {
   return (
@@ -19,6 +21,9 @@ export function App(): JSX.Element {
       <Route path="/invite" element={<AcceptInvitation />} />
       <Route path="/request-access" element={<RequestAccess />} />
       <Route path="/files/:id" element={<FileView />} />
+      <Route path="/staff/login" element={<StaffLogin />} />
+      <Route path="/staff/setup" element={<StaffSetup />} />
+      <Route path="/staff/*" element={<StaffHome />} />
       <Route path="*" element={<Home />} />
     </Routes>
   );

@@ -28,6 +28,7 @@ declare global {
 export async function createFirmKey(
   db: Database,
   label: string,
+  by: Actor = { kind: 'system', name: 'admin' },
 ): Promise<{ id: string; key: string }> {
   const key = `${KEY_PREFIX}${randomToken(32)}`;
   const [row] = await db
@@ -35,32 +36,27 @@ export async function createFirmKey(
     .values({ label, keyHash: sha256(key) })
     .returning({ id: schema.firmKeys.id });
   if (!row) throw new Error('firm key insert returned nothing');
-  await record(
-    db,
-    'firm_key_created',
-    { kind: 'system', name: 'admin' },
-    {
-      detail: { keyId: row.id, label },
-    },
-  );
+  await record(db, 'firm_key_created', by, {
+    detail: { keyId: row.id, label },
+  });
   return { id: row.id, key };
 }
 
-export async function revokeFirmKey(db: Database, id: string, now: Date): Promise<boolean> {
+export async function revokeFirmKey(
+  db: Database,
+  id: string,
+  now: Date,
+  by: Actor = { kind: 'system', name: 'admin' },
+): Promise<boolean> {
   const rows = await db
     .update(schema.firmKeys)
     .set({ revokedAt: now })
     .where(and(eq(schema.firmKeys.id, id), isNull(schema.firmKeys.revokedAt)))
     .returning({ id: schema.firmKeys.id });
   if (rows.length) {
-    await record(
-      db,
-      'firm_key_revoked',
-      { kind: 'system', name: 'admin' },
-      {
-        detail: { keyId: id },
-      },
-    );
+    await record(db, 'firm_key_revoked', by, {
+      detail: { keyId: id },
+    });
   }
   return rows.length > 0;
 }

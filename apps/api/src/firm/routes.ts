@@ -13,8 +13,8 @@
 //   POST   /api/firm/v1/access-requests/:id/approve         { clientId, roleLabel? }
 //   POST   /api/firm/v1/access-requests/:id/deny
 
-import express, { type Request, type Router } from 'express';
-import { and, asc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm';
+import express, { type Request, type RequestHandler, type Router } from 'express';
+import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -63,9 +63,38 @@ function actorOf(req: Request): Actor {
   return req.firmActor ?? { kind: 'firm_key', name: 'Vibe Files' };
 }
 
+/** Vibe Files' firm API, authorised by the firm key. */
 export function firmRouter(ctx: Ctx): Router {
+  return firmApi(ctx, requireFirmKey(ctx), false);
+}
+
+/**
+ * The same API for the staff web page (D13), authorised by a staff session. Staff cannot share
+ * new files or replace their content (only Vibe Files reaches the cabinet), and downloading an
+ * upload never marks it fetched (P10): it still reaches Intake.
+ */
+export function staffApi(ctx: Ctx, auth: RequestHandler): Router {
+  return firmApi(ctx, auth, true);
+}
+
+const NOT_FOR_STAFF = [
+  ['POST', /^\/files\/?$/],
+  ['PUT', /^\/files\/[^/]+\/content\/?$/],
+  ['POST', /^\/uploads\/[^/]+\/fetched\/?$/],
+] as const;
+
+function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   const r = express.Router();
-  r.use(requireFirmKey(ctx));
+  r.use(auth);
+  if (staff) {
+    r.use((req, res, next) => {
+      if (NOT_FOR_STAFF.some(([m, p]) => req.method === m && p.test(req.path))) {
+        res.status(403).json({ error: 'not_for_staff' });
+        return;
+      }
+      next();
+    });
+  }
   r.use('/files', firmFilesRouter(ctx));
   r.use('/uploads', firmUploadsRouter(ctx));
   r.use('/events', firmEventsRouter(ctx));
@@ -105,6 +134,33 @@ export function firmRouter(ctx: Ctx): Router {
     '/status',
     h(async (_req, res) => {
       res.json({ version: VERSION, firmName: await firmName(ctx), portalUrl: ctx.portalUrl });
+    }),
+  );
+
+  // Every client on the portal, with how many people and live files each has.
+  r.get(
+    '/clients',
+    h(async (_req, res) => {
+      const rows = await ctx.db
+        .select({
+          id: schema.clients.id,
+          clientCode: schema.clients.clientCode,
+          displayName: schema.clients.displayName,
+          active: schema.clients.active,
+          users: sql<number>`(SELECT count(*) FROM client_access a WHERE a.client_id = ${schema.clients.id} AND a.active)`,
+          files: sql<number>`(SELECT count(*) FROM files f WHERE f.client_id = ${schema.clients.id} AND f.removed_at IS NULL)`,
+          waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = ${schema.clients.id} AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
+        })
+        .from(schema.clients)
+        .orderBy(asc(schema.clients.displayName));
+      res.json({
+        clients: rows.map((c) => ({
+          ...c,
+          users: Number(c.users),
+          files: Number(c.files),
+          waiting: Number(c.waiting),
+        })),
+      });
     }),
   );
 

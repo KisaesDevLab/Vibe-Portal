@@ -11,13 +11,15 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "firm-key": "tsx --env-file-if-exists=../../.env src/scripts/firm-key.ts"
+    "firm-key": "tsx --env-file-if-exists=../../.env src/scripts/firm-key.ts",
+    "staff-setup": "tsx --env-file-if-exists=../../.env src/scripts/staff-setup.ts"
   },
   "dependencies": {
     "@noble/ciphers": "^1.0.0",
     "@vibe-portal/db": "workspace:*",
     "@vibe-portal/types": "workspace:*",
     "@vibe/crypto": "workspace:*",
+    "argon2": "^0.41.1",
     "cookie": "^0.7.2",
     "drizzle-orm": "^0.45.2",
     "express": "^4.19.2",

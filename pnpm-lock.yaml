@@ -53,6 +53,9 @@ importers:
       '@vibe/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
+      argon2:
+        specifier: ^0.41.1
+        version: 0.41.1
       cookie:
         specifier: ^0.7.2
         version: 0.7.2

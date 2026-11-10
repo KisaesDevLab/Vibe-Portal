@@ -4,10 +4,10 @@
 // oldest first. Each carries the cabinet document id when it is about a shared file, so Vibe
 // Files can record "client opened" against the document.
 //
-//   GET /api/firm/v1/events?since=<id>&limit=<n>
+//   GET /api/firm/v1/events?since=<id>&limit=<n>[&latest=1]
 
 import express, { type Router } from 'express';
-import { asc, eq, gt } from 'drizzle-orm';
+import { asc, desc, eq, gt } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -17,6 +17,8 @@ import { h } from '../lib/http';
 const Query = z.object({
   since: z.coerce.number().int().min(0).default(0),
   limit: z.coerce.number().int().min(1).max(1000).default(500),
+  /** The newest `limit` events, newest first (the staff History page). */
+  latest: z.literal('1').optional(),
 });
 
 export function firmEventsRouter(ctx: Ctx): Router {
@@ -30,7 +32,7 @@ export function firmEventsRouter(ctx: Ctx): Router {
         .from(schema.events)
         .leftJoin(schema.files, eq(schema.files.id, schema.events.fileId))
         .where(gt(schema.events.id, q.since))
-        .orderBy(asc(schema.events.id))
+        .orderBy(q.latest ? desc(schema.events.id) : asc(schema.events.id))
         .limit(q.limit);
       res.json({
         events: rows.map(({ e, vfDocumentId }) => ({

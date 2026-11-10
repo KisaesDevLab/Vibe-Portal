@@ -55,6 +55,19 @@ export const staffUsers = pgTable('staff_users', {
   active: boolean('active').notNull().default(true),
   createdAt: ts('created_at').notNull().defaultNow(),
   lastSignInAt: ts('last_sign_in_at'),
+  totpConfirmedAt: ts('totp_confirmed_at'),
+  failedLogins: integer('failed_logins').notNull().default(0),
+  lockedUntil: ts('locked_until'),
+});
+
+export const staffSetupToken = pgTable('staff_setup_token', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  staffId: uuid('staff_id').references(() => staffUsers.id),
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: ts('expires_at').notNull(),
+  usedAt: ts('used_at'),
+  createdBy: text('created_by').notNull().default(''),
+  createdAt: ts('created_at').notNull().defaultNow(),
 });
 
 export const clients = pgTable('clients', {

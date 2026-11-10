@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
+//
+// Calls from the staff page (D13) to /api/staff.
+
+import { ApiError } from '../api';
+
+export async function staffApi<T>(
+  path: string,
+  init: { method?: string; body?: unknown; raw?: Blob } = {},
+): Promise<T> {
+  const headers: Record<string, string> = {};
+  let body: BodyInit | undefined;
+  if (init.raw) {
+    headers['Content-Type'] = 'application/octet-stream';
+    body = init.raw;
+  } else if (init.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(init.body);
+  }
+  const res = await fetch(`/api/staff${path}`, {
+    method: init.method ?? (body === undefined ? 'GET' : 'POST'),
+    credentials: 'same-origin',
+    headers,
+    body,
+  });
+  const data = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) throw new ApiError(res.status, data.error ?? 'error');
+  return data as T;
+}
+
+/** Plain words for the staff API's error codes. */
+export function staffSay(err: unknown): string {
+  const code = err instanceof ApiError ? err.code : 'network';
+  const words: Record<string, string> = {
+    sign_in_failed: 'Email, password or code not right.',
+    locked: 'Too many wrong tries: this account is locked for 15 minutes.',
+    setup_link_expired: 'This setup link has expired or was used. Ask for a new one.',
+    code_wrong: 'That code is not right. Check the time on your phone and try the newest code.',
+    invalid: 'Check the fields and try again.',
+    invalid_email: 'That email address does not look right.',
+    email_taken: 'There is already a staff account with that email.',
+    name_required: 'Enter your name.',
+    not_for_staff: 'Only Vibe Files can do that.',
+    cannot_turn_off_yourself: 'You cannot turn off your own account.',
+    already_has_access: 'That person already has access to this client.',
+    client_inactive: 'This client is switched off.',
+    png_or_jpeg: 'The logo must be a PNG or JPEG file of at most 512 KB.',
+    too_many_requests: 'Too many tries. Wait a few minutes.',
+    signed_out: 'You were signed out. Sign in again.',
+    network: 'The portal cannot be reached right now.',
+  };
+  return words[code] ?? 'Something went wrong. Try again.';
+}
+
+export interface StaffMe {
+  email: string;
+  name: string;
+  firmName: string;
+}
+
+export interface ClientRow {
+  id: string;
+  clientCode: string;
+  displayName: string;
+  active: boolean;
+  users: number;
+  files: number;
+  waiting: number;
+}
+
+export interface PortalUser {
+  identityId: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  roleLabel: string;
+  active: boolean;
+  lastSignInAt: string | null;
+}
+
+export interface Invitation {
+  invitationId: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  roleLabel: string;
+  expiresAt: string;
+  status: 'invited' | 'expired';
+}
+
+export interface SharedFile {
+  fileId: string;
+  name: string;
+  size: number;
+  taxYear: number | null;
+  sharedAt: string;
+  sharedBy: string;
+  contentUpdatedAt: string | null;
+  users: { identityId: string; visible: boolean; viewedAt: string | null }[];
+}
+
+export const when = (iso: string | null): string =>
+  iso ? new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—';
