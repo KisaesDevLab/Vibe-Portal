@@ -93,16 +93,37 @@ function darkQuery(): MediaQueryList | null {
     : null;
 }
 
-/** True while the device is set to dark mode (the portal follows the device). */
+/**
+ * True while the page is shown dark. The page's own theme (`data-theme` on <html>) decides: it
+ * follows the device, except that sign-in pages are always light (the design system's
+ * AuthLayout), so they get the usual logo (owner 2026-11-11). The device's setting only when the
+ * page has none.
+ */
+function pageIsDark(): boolean {
+  if (typeof document !== 'undefined') {
+    const t = document.documentElement.dataset.theme;
+    if (t === 'light') return false;
+    if (t === 'dark') return true;
+  }
+  return darkQuery()?.matches ?? false;
+}
+
 export function useDarkMode(): boolean {
-  const [dark, setDark] = useState(() => darkQuery()?.matches ?? false);
+  const [dark, setDark] = useState(pageIsDark);
   useEffect(() => {
+    const again = (): void => setDark(pageIsDark());
+    again();
     const m = darkQuery();
-    if (!m) return;
-    const on = (e: MediaQueryListEvent): void => setDark(e.matches);
-    setDark(m.matches);
-    m.addEventListener?.('change', on);
-    return () => m.removeEventListener?.('change', on);
+    m?.addEventListener?.('change', again);
+    const watch =
+      typeof MutationObserver === 'function' && typeof document !== 'undefined'
+        ? new MutationObserver(again)
+        : null;
+    watch?.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => {
+      m?.removeEventListener?.('change', again);
+      watch?.disconnect();
+    };
   }, []);
   return dark;
 }

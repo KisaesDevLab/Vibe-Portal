@@ -3,7 +3,7 @@
 // The firm's logo, name and colour on the pages (P53). In a file of its own: the branding is
 // read once per page load, and each test file starts fresh.
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,6 +12,7 @@ import { App } from '../App';
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  delete document.documentElement.dataset.theme;
 });
 
 describe('firm branding (P53)', () => {
@@ -88,6 +89,31 @@ describe('the logo for dark mode (P60)', () => {
     device(true);
     branding({ hasLogo: true, hasDarkLogo: false });
     expect(await shown()).toBe('/api/portal/branding/logo');
+  });
+
+  it('sign-in pages are always light, so they show the usual logo on a dark device', async () => {
+    device(true);
+    branding({ hasLogo: true, hasDarkLogo: true });
+    const { reloadBranding } = await import('../branding');
+    reloadBranding();
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <App />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByAltText('Example CPA logo').getAttribute('src')?.split('?')[0]).toBe(
+        '/api/portal/branding/logo',
+      ),
+    );
+    expect(document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('a page shown dark uses the dark-mode logo even if the device query says light', async () => {
+    device(false);
+    document.documentElement.dataset.theme = 'dark';
+    branding({ hasLogo: true, hasDarkLogo: true });
+    expect(await shown()).toBe('/api/portal/branding/logo/dark');
   });
 
   it('shows no logo in light mode when the firm has only a dark-mode one', async () => {
