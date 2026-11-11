@@ -435,17 +435,21 @@ export function firmSharesRouter(ctx: Ctx): Router {
         .select({ n: sql<number>`count(*)` })
         .from(schema.fileShareItem)
         .innerJoin(schema.files, eq(schema.files.id, schema.fileShareItem.fileId))
-        .where(and(eq(schema.fileShareItem.shareId, share.id), isNull(schema.files.removedAt)));
+        .where(
+          and(
+            eq(schema.fileShareItem.shareId, share.id),
+            isNull(schema.files.removedAt),
+            // A link a client sent (P55): only files the firm still shows them, as the page does.
+            share.sentByIdentityId
+              ? sql`EXISTS (SELECT 1 FROM file_visibility v WHERE v.file_id = ${schema.files.id}
+                    AND v.identity_id = ${share.sentByIdentityId} AND v.visible)`
+              : undefined,
+          ),
+        );
       if (Number(n?.n ?? 0) === 0) throw new HttpError(409, 'share_ended');
-      // Counts as a link sent, against the same daily limit.
-      if (
-        !(await hit(
-          ctx.db,
-          `outside-share:${staff.staffId}`,
-          LIMITS.outsideSharePerStaff,
-          ctx.now(),
-        ))
-      ) {
+      // Counts as a link sent, against the same daily limit (given back if nothing is sent).
+      const quota = `outside-share:${staff.staffId}`;
+      if (!(await hit(ctx.db, quota, LIMITS.outsideSharePerStaff, ctx.now()))) {
         throw new HttpError(429, 'too_many_shares');
       }
       const secret = randomToken();
@@ -463,7 +467,10 @@ export function firmSharesRouter(ctx: Ctx): Router {
           ),
         )
         .returning({ id: schema.fileShare.id });
-      if (took.length === 0) throw new HttpError(409, 'share_ended');
+      if (took.length === 0) {
+        await refund(ctx.db, quota, LIMITS.outsideSharePerStaff, ctx.now());
+        throw new HttpError(409, 'share_ended');
+      }
       try {
         await sendShareEmail(ctx, {
           email: share.recipientEmail,
@@ -489,6 +496,7 @@ export function firmSharesRouter(ctx: Ctx): Router {
           .where(
             and(eq(schema.fileShare.id, share.id), eq(schema.fileShare.secretHash, set.secretHash)),
           );
+        await refund(ctx.db, quota, LIMITS.outsideSharePerStaff, ctx.now());
         throw new HttpError(502, 'email_failed');
       }
       await ctx.db.delete(schema.fileShareGrant).where(eq(schema.fileShareGrant.shareId, share.id));

@@ -298,9 +298,17 @@ describe('People view (P66)', () => {
     const waiting = await w.firm('get', '/access-requests').expect(200);
     expect(waiting.body.requests.map((r: { id: string }) => r.id)).toContain(made.body.requestId);
 
-    // A number cannot be taken off a turned-off account.
+    // A number cannot be taken off a turned-off account (or an invitation to it would make a
+    // new account).
+    await boss.post(`${P}/${mary.id}/turn-on`).expect(200);
+    await boss.post(`${P}/${mary.id}/contact`).send({ phone: '5551230077' }).expect(200);
+    await request(w.app)
+      .post('/api/portal/auth/confirm-contact')
+      .send({ token: w.linkToken('+15551230077') })
+      .expect(200);
+    await boss.post(`${P}/${mary.id}/turn-off`).expect(200);
     const phone = await boss.delete(`${P}/${mary.id}/phone`);
-    expect(phone.status).toBe(404); // she has none; with one it would be account_off
+    expect([phone.status, phone.body.error]).toEqual([409, 'account_off']);
   });
 
   it('removing a client keeps a change of email waiting; a second change replaces it', async () => {
