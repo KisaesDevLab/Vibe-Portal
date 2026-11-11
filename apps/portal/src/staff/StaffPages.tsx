@@ -39,7 +39,7 @@ import { FirmLogo, reloadBranding } from '../branding';
 import { Select } from '../components/Field';
 import { Reveal } from '../components/Reveal';
 import { AuthSettingsPage } from '@kisaesdevlab/vibe-auth/react';
-import { usePages, useUrlState } from '../paging';
+import { usePages, useUrlSearch, useUrlState } from '../paging';
 import { ApiError } from '../api';
 import {
   staffApi,
@@ -133,6 +133,8 @@ function useAct(reload: () => void): {
   error: string;
   /** What went wrong with the last change made from this form. */
   errorAt: (at: string) => string;
+  /** Forgets what went wrong (a form cancelled or closed). */
+  clearError: () => void;
 } {
   const [busyAt, setBusyAt] = useState<string | null>(null);
   const [failed, setFailed] = useState({ text: '', at: '' });
@@ -159,6 +161,7 @@ function useAct(reload: () => void): {
     busyAt,
     error: failed.at ? '' : failed.text,
     errorAt: (at) => (failed.at === at ? failed.text : ''),
+    clearError: () => setFailed({ text: '', at: '' }),
   };
 }
 
@@ -432,7 +435,7 @@ const td = { padding: '6px 8px', borderTop: '1px solid var(--vibe-color-border)'
 
 function Clients({ limited }: { limited: boolean }): JSX.Element {
   const load = useLoad<{ clients: ClientRow[] }>('/v1/clients');
-  const [q, setQ] = useUrlState('q');
+  const [typed, q, setTyped] = useUrlSearch();
   const rows = (load.data?.clients ?? []).filter((c) =>
     `${c.displayName} ${c.clientCode}`.toLowerCase().includes(q.trim().toLowerCase()),
   );
@@ -444,7 +447,12 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
         shared from Vibe Files.
       </p>
       {limited && <p>You see the clients an admin chose for you.</p>}
-      <Input label="Find a client" name="q" value={q} onChange={(e) => setQ(e.target.value)} />
+      <Input
+        label="Find a client"
+        name="q"
+        value={typed}
+        onChange={(e) => setTyped(e.target.value)}
+      />
       <Status load={load} what="the clients" />
       {load.data && rows.length === 0 && (
         <p>
@@ -497,7 +505,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   /** The file "Send securely" was pressed on, while its form is open. */
   const [sending, setSending] = useState<string | null>(null);
   const [sentNote, setSentNote] = useState('');
-  const { act, actAt, busy, busyAt, error, errorAt } = useAct(reload);
+  const { act, actAt, busy, busyAt, error, errorAt, clearError } = useAct(reload);
   const [inv, setInv] = useState({ email: '', phone: '', name: '', roleLabel: '' });
   /** The invite form, shown only after "Invite someone" is pressed (P54). */
   const [inviting, setInviting] = useState(false);
@@ -656,6 +664,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                   type="button"
                   variant="secondary"
                   onClick={() => {
+                    clearError();
                     setInviting(false);
                     setInv({ email: '', phone: '', name: '', roleLabel: '' });
                   }}
@@ -932,10 +941,13 @@ function ClientFiles({
   onChanged: () => void;
   onSend: (fileId: string) => void;
 }): JSX.Element {
-  const [q, setQ] = useUrlState('q');
-  const [year, setYear] = useUrlState('year', 'all');
+  const [typed, q, setQ] = useUrlSearch();
+  const [yearRaw, setYear] = useUrlState('year', 'all');
   const [sortRaw, setSort] = useUrlState('sort', 'newest');
-  const sort = sortRaw as FileSort;
+  // From an old link: an unknown sort is the usual one.
+  const sort: FileSort = (['newest', 'name', 'year'] as const).includes(sortRaw as FileSort)
+    ? (sortRaw as FileSort)
+    : 'newest';
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [who, setWho] = useState<Set<string> | null>(null);
   const [working, setWorking] = useState(false);
@@ -945,6 +957,11 @@ function ClientFiles({
   // Everyone with access, until the staff member narrows it.
   const chosen = who ?? new Set(activePeople.map((p) => p.identityId));
   const years = [...new Set(all.map((f) => f.taxYear))].sort((a, b) => (b ?? 0) - (a ?? 0));
+  // A year not among the files (an old link) is every year, so the list is never stuck empty.
+  const year =
+    yearRaw === 'all' || !load.data || years.some((y) => String(y ?? 'none') === yearRaw)
+      ? yearRaw
+      : 'all';
   const shown = all
     .filter((f) => f.name.toLowerCase().includes(q.trim().toLowerCase()))
     .filter((f) => year === 'all' || String(f.taxYear ?? 'none') === year)
@@ -1097,7 +1114,7 @@ function ClientFiles({
             <Input
               label="Find a file"
               name="fileSearch"
-              value={q}
+              value={typed}
               onChange={(e) => setQ(e.target.value)}
             />
           </div>
@@ -1147,7 +1164,7 @@ function ClientFiles({
                 margin: 0,
               }}
             >
-              <legend style={{ float: 'left', marginRight: 12, padding: 0 }}>For:</legend>
+              <legend style={{ float: 'left', padding: 0 }}>For:</legend>
               {activePeople.map((p) => (
                 <label key={p.identityId} style={{ display: 'inline-flex', gap: 4 }}>
                   <input
@@ -1964,12 +1981,7 @@ const personLabel = (p: { name: string; email: string | null; phone: string | nu
 
 /** Everyone on the portal, turned-off accounts too (P66). */
 function People(): JSX.Element {
-  const [q, setQ] = useUrlState('q');
-  const [typed, setTyped] = useState(q);
-  useEffect(() => {
-    const t = window.setTimeout(() => setQ(typed.trim()), 300);
-    return () => window.clearTimeout(t);
-  }, [typed, setQ]);
+  const [typed, q, setTyped] = useUrlSearch();
   const path = `/v1/people/list?q=${encodeURIComponent(q)}`;
   const load = useLoad<{ people: PersonRow[]; more: boolean }>(path);
   const [later, setLater] = useState<PersonRow[]>([]);
@@ -2096,7 +2108,7 @@ function Person(): JSX.Element {
     load.reload();
     history.reload();
   };
-  const { act, actAt, busy, busyAt, error, errorAt } = useAct(reload);
+  const { act, actAt, busy, busyAt, error, errorAt, clearError } = useAct(reload);
   const [note, setNote] = useState('');
   const [name, setName] = useState('');
   const [notify, setNotify] = useState<PersonData['person']['notify']>('email');
@@ -2280,7 +2292,14 @@ function Person(): JSX.Element {
                 <Button type="submit" disabled={busy || !contact.trim()}>
                   {busyAt === 'contact' ? 'Sending…' : 'Send confirmation link'}
                 </Button>
-                <Button type="button" variant="secondary" onClick={() => setChanging(null)}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    clearError();
+                    setChanging(null);
+                  }}
+                >
                   Cancel
                 </Button>
               </div>

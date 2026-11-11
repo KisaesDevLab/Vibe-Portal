@@ -1144,6 +1144,25 @@ describe('staff page', () => {
     await waitFor(() => expect(document.title).toBe('Client · Example CPA'));
   });
 
+  it('keeps the page of a list in the address, also under StrictMode (UI review)', async () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({
+      ...CLIENT,
+      id: `c${i}`,
+      displayName: `Client ${String(i).padStart(3, '0')}`,
+      clientCode: String(1000 + i),
+    }));
+    serve({ '/auth/me': ME, '/v1/clients': { body: { clients: many } } });
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/staff?page=2']}>
+          <App />
+        </MemoryRouter>
+      </StrictMode>,
+    );
+    expect(await screen.findByText('51–100 of 120')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Client 050' })).toBeTruthy();
+  });
+
   it('keeps the client search in the address (UI review)', async () => {
     serve({
       '/auth/me': ME,

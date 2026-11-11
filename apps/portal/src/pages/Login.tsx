@@ -117,7 +117,10 @@ export function Login(): JSX.Element {
           spellCheck={false}
           error={fieldError || undefined}
           value={contact}
-          onChange={(e) => setContact(e.target.value)}
+          onChange={(e) => {
+            setContact(e.target.value);
+            setFieldError('');
+          }}
           required
         />
         <KeepSignedIn checked={keep} onChange={setKeep} />

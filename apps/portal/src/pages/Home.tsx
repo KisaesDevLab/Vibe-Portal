@@ -77,7 +77,11 @@ export function Home(): JSX.Element {
   if (state === 'loading') return <p role="status">Loading…</p>;
   if (state === 'error' || !me) {
     return (
-      <main style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}>
+      <main
+        id="main-content"
+        tabIndex={-1}
+        style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}
+      >
         <p role="alert">{error}</p>
         <Button onClick={load}>Try again</Button>
       </main>

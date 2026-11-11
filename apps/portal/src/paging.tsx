@@ -6,7 +6,7 @@
 // UI review 2026-11-11: the page shown, and the search and filters of a list, are in the
 // address (?page=2&q=smith), so Back, a reload or a link shared keeps them.
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@vibe/ui';
 
@@ -32,6 +32,18 @@ export function useUrlState(key: string, fallback = ''): [string, (v: string) =>
   return [value, set];
 }
 
+/** A search box kept in the address: what is typed shows at once; the address (and the search)
+ *  follows after a short pause, not on every key. */
+export function useUrlSearch(key = 'q', delay = 300): [string, string, (v: string) => void] {
+  const [q, setQ] = useUrlState(key);
+  const [typed, setTyped] = useState(q);
+  useEffect(() => {
+    const t = window.setTimeout(() => setQ(typed.trim()), delay);
+    return () => window.clearTimeout(t);
+  }, [typed, setQ, delay]);
+  return [typed, q, setTyped];
+}
+
 /** One page of `items`, and the controls to move between pages. A change to what is listed
  *  (a search, a filter: `resetOn`) starts again at the first page. `param` names the page in
  *  the address, different for two lists on one page. */
@@ -45,13 +57,12 @@ export function usePages<T>(
   const page = Math.max(0, (Number.parseInt(raw, 10) || 1) - 1);
   const setPage = (n: number): void => setRaw(String(n + 1));
   const pages = Math.max(1, Math.ceil(items.length / size));
-  // Not on the first showing: the page in the address is kept then.
-  const first = useRef(true);
+  // Only when what is listed changes: on the first showing (and React's second run of it in
+  // development) the page in the address is kept.
+  const listed = useRef(resetOn);
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
+    if (Object.is(listed.current, resetOn)) return;
+    listed.current = resetOn;
     setRaw('1');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetOn]);

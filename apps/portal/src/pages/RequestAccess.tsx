@@ -55,8 +55,11 @@ export function RequestAccess(): JSX.Element {
     setPhoto(null);
     setPick((n) => n + 1);
   };
-  const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => {
     setForm({ ...form, [k]: e.target.value });
+    // What was wrong with this field goes once it is edited.
+    setFieldError((f) => (f.field === k ? { field: '', text: '' } : f));
+  };
 
   async function send(e: FormEvent): Promise<void> {
     e.preventDefault();

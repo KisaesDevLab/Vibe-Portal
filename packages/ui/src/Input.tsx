@@ -25,7 +25,8 @@ export function Input({
   ...rest
 }: InputProps): JSX.Element {
   const auto = useId();
-  const inputId = id ?? (rest.name ? `input-${rest.name}` : `input-${auto}`);
+  // Unique on the page even when two forms have a field of the same name.
+  const inputId = id ?? `input-${rest.name ? `${rest.name}-` : ''}${auto.replace(/:/g, '')}`;
   const bad = Boolean(invalid || error);
   const hintId = hint ? `${inputId}-hint` : undefined;
   const errorId = error ? `${inputId}-error` : undefined;

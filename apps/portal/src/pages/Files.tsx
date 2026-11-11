@@ -49,8 +49,10 @@ export function Files({
   onSend?: (f: PortalFile) => void;
 }): JSX.Element {
   const [files, setFiles] = useState<PortalFile[] | null>(null);
-  const [years, setYears] = useState<number[]>([]);
-  const [year, setYear] = useUrlState('year');
+  const [yearRaw, setYear] = useUrlState('year');
+  // A year from an old link that this client has no files of: every year (never stuck empty).
+  const [years, setYears] = useState<number[] | null>(null);
+  const year = yearRaw && years && !years.includes(Number(yearRaw)) ? '' : yearRaw;
   const [query, setQuery] = useUrlState('q');
   const [search, setSearch] = useState(query);
   const [error, setError] = useState('');
@@ -107,7 +109,7 @@ export function Files({
             placeholder="File name"
           />
         </div>
-        {years.length > 0 && (
+        {years && years.length > 0 && (
           <div style={{ flex: '0 1 160px' }}>
             <Select label="Year" value={year} onChange={(e) => setYear(e.target.value)}>
               <option value="">All years</option>

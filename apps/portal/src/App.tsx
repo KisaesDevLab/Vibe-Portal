@@ -21,11 +21,20 @@ function FocusOnNavigate(): null {
   const { pathname } = useLocation();
   const shown = useRef(pathname);
   useEffect(() => {
-    if (shown.current === pathname || pathname.startsWith('/staff')) return;
+    if (shown.current === pathname) return;
     shown.current = pathname;
-    // After the new page is drawn.
-    const t = window.setTimeout(() => document.getElementById('main-content')?.focus(), 0);
-    return () => window.clearTimeout(t);
+    // The staff page moves focus itself.
+    if (pathname.startsWith('/staff')) return undefined;
+    // When the new page's content is there: it may still be loading (for up to 5 s).
+    let tries = 0;
+    const t = window.setInterval(() => {
+      const main = document.getElementById('main-content');
+      if (main || ++tries > 50) {
+        window.clearInterval(t);
+        main?.focus();
+      }
+    }, 100);
+    return () => window.clearInterval(t);
   }, [pathname]);
   return null;
 }
