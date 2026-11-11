@@ -67,7 +67,7 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
   const [limitBytes, setLimitBytes] = useState(0);
   const [chosen, setChosen] = useState<File[]>([]);
   const [note, setNote] = useState('');
-  const [progress, setProgress] = useState('');
+  const [progress, setProgress] = useState<{ label: string; pct: number } | null>(null);
   const [results, setResults] = useState<{ name: string; error?: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -119,9 +119,10 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
           `/api/portal/uploads?${q.toString()}`,
           file,
           (f) =>
-            setProgress(
-              `Sending ${i + 1} of ${chosen.length}: ${file.name} (${Math.round(f * 100)}%)`,
-            ),
+            setProgress({
+              label: `Sending ${i + 1} of ${chosen.length}: ${file.name}`,
+              pct: Math.round(f * 100),
+            }),
           { name: file.name, note: note.trim() || undefined },
         );
         done.push({ name: file.name });
@@ -130,7 +131,7 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
       }
       setResults([...done]);
     }
-    setProgress('');
+    setProgress(null);
     // P56: tell the chosen person once, if anything arrived.
     const who = staff.find((p) => p.id === tell);
     if (who && done.some((d) => !d.error)) {
@@ -215,9 +216,22 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
           </Select>
         )}
         <Button type="submit" disabled={busy || chosen.length === 0 || tooMany}>
-          {chosen.length > 1 ? `Send ${chosen.length} files` : 'Send'}
+          {busy ? 'Sending…' : chosen.length > 1 ? `Send ${chosen.length} files` : 'Send'}
         </Button>
-        {progress && <p role="status">{progress}</p>}
+        {progress && (
+          <div style={{ display: 'grid', gap: 4 }}>
+            {/* Announced when a new file starts; the bar shows how far (not read out). */}
+            <p role="status" style={{ margin: 0, overflowWrap: 'anywhere' }}>
+              {progress.label}
+            </p>
+            <progress
+              value={progress.pct}
+              max={100}
+              aria-label={`${progress.label}, ${progress.pct}%`}
+              style={{ width: '100%' }}
+            />
+          </div>
+        )}
         {told && <p role="status">{told}</p>}
         {results.length > 0 && (
           <ul aria-label="Sent" style={{ margin: 0 }}>

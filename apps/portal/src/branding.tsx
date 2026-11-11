@@ -35,12 +35,32 @@ export function textOn(color: string): '#000' | '#fff' {
   return 1.05 / (lum + 0.05) >= (lum + 0.05) / 0.05 ? '#fff' : '#000';
 }
 
+function luminance(color: string): number {
+  const ch = [1, 3, 5].map((i) => {
+    const c = parseInt(color.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * (ch[0] ?? 0) + 0.7152 * (ch[1] ?? 0) + 0.0722 * (ch[2] ?? 0);
+}
+
+/** The firm colour as link text on a light page: darkened, if need be, until it reads at
+ *  4.5:1 on the lightest background (UI review 2026-11-11: a pale firm colour). */
+export function readableOnLight(color: string): string {
+  let rgb = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+  const hex = (): string => `#${rgb.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+  for (let i = 0; i < 40 && 1.05 / (luminance(hex()) + 0.05) < 4.5; i++) {
+    rgb = rgb.map((c) => Math.round(c * 0.92));
+  }
+  return hex();
+}
+
 function applyAccent(color: string): void {
   if (typeof document === 'undefined' || !HEX.test(color)) return;
   const root = document.documentElement.style;
   root.setProperty('--vibe-color-accent', color);
   // P59: text on the firm colour stays readable, whatever colour the firm chose.
   root.setProperty('--vibe-on-accent', textOn(color));
+  root.setProperty('--vibe-link-light', readableOnLight(color));
 }
 
 async function fetchBranding(): Promise<Branding | null> {

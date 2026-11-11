@@ -118,7 +118,7 @@ export function AcceptInvitation(): JSX.Element {
         <KeepSignedIn checked={keep} onChange={setKeep} />
         {error && <p role="alert">{error}</p>}
         <Button type="submit" disabled={busy}>
-          Accept and sign in
+          {busy ? 'Signing in…' : 'Accept and sign in'}
         </Button>
       </form>
     </FirmAuthLayout>

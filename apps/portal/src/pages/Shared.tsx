@@ -240,7 +240,7 @@ export function Shared(): JSX.Element {
             {error && <p role="alert">{error}</p>}
             {!sent ? (
               <Button disabled={busy} onClick={() => void sendCode()}>
-                Send access code
+                {busy ? 'Sending…' : 'Send access code'}
               </Button>
             ) : (
               <form onSubmit={verify} style={{ display: 'grid', gap: 12 }}>
@@ -254,7 +254,7 @@ export function Shared(): JSX.Element {
                   onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                 />
                 <Button type="submit" disabled={busy || code.length !== 6}>
-                  Verify code
+                  {busy ? 'Checking…' : 'Verify code'}
                 </Button>
                 <Button
                   type="button"
@@ -291,6 +291,7 @@ export function Shared(): JSX.Element {
   return (
     <main
       id="main-content"
+      tabIndex={-1}
       style={{ maxWidth: 960, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}
     >
       <header>

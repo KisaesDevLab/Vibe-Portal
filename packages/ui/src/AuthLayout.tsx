@@ -66,6 +66,7 @@ export function AuthLayout({
   return (
     <main
       id="main-content"
+      tabIndex={-1}
       style={{
         minHeight: '100dvh',
         background: tokens.color.bg,

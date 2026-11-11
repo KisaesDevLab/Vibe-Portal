@@ -1144,6 +1144,46 @@ describe('staff page', () => {
     await waitFor(() => expect(document.title).toBe('Client · Example CPA'));
   });
 
+  it('keeps the client search in the address (UI review)', async () => {
+    serve({
+      '/auth/me': ME,
+      '/v1/clients': {
+        body: {
+          clients: [CLIENT, { ...CLIENT, id: 'c2', displayName: 'Jones LLC', clientCode: '2002' }],
+        },
+      },
+    });
+    at('/staff?q=jones');
+    expect(await screen.findByRole('link', { name: 'Jones LLC' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: CLIENT.displayName })).toBeNull();
+    expect((screen.getByLabelText('Find a client') as HTMLInputElement).value).toBe('jones');
+  });
+
+  it("shows a form's error beside the form, and says it is working (UI review)", async () => {
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}`]: { body: CLIENT },
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+      [`/v1/clients/${CLIENT.id}/history?limit=50`]: { body: { events: [] } },
+      [`POST /v1/clients/${CLIENT.id}/invites`]: {
+        status: 400,
+        body: { error: 'invalid_email' },
+      },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Invite someone' }));
+    const email = screen.getByLabelText('Email');
+    // Brought into view with its first field focused.
+    await waitFor(() => expect(document.activeElement).toBe(email));
+    fireEvent.change(email, { target: { value: 'mary@example' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    const alert = await screen.findByText('That email address does not look right.');
+    // In the invite form, not at the top of the page.
+    expect(alert.closest('form')).toBe(email.closest('form'));
+  });
+
   it('asks before denying an access request (UI review)', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const calls = serve({

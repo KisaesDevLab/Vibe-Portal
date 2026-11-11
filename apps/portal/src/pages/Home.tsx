@@ -110,6 +110,7 @@ export function Home(): JSX.Element {
   return (
     <main
       id="main-content"
+      tabIndex={-1}
       style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}
     >
       <header

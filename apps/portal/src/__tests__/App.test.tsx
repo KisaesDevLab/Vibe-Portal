@@ -302,6 +302,34 @@ describe('portal', () => {
     expect(calls.filter((c) => c.path === '/access-requests/r1/id-photo')).toHaveLength(2);
   });
 
+  it('a bad email is shown under its field and marks it invalid (UI review)', async () => {
+    serve({ '/access-requests': { status: 400, body: { error: 'invalid_email' } } });
+    at('/request-access');
+    fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Mary' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'mary@example' } });
+    fireEvent.change(screen.getByLabelText(/Whose files/), { target: { value: 'Smith' } });
+    fireEvent.change(screen.getByLabelText(/Photo of your ID/), {
+      target: { files: [new File(['x'], 'id.png', { type: 'image/png' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
+    await screen.findByText('That email address does not look right.');
+    const email = screen.getByLabelText('Email');
+    expect(email.getAttribute('aria-invalid')).toBe('true');
+    // The message is what describes the field.
+    const ids = (email.getAttribute('aria-describedby') ?? '').split(' ');
+    expect(ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ')).toContain(
+      'That email address does not look right.',
+    );
+  });
+
+  it('says what the request still needs before it can be sent (UI review)', async () => {
+    serve({});
+    at('/request-access');
+    expect(
+      screen.getByText('To send it, add your email or mobile number and a photo of your ID.'),
+    ).toBeTruthy();
+  });
+
   it('request access can send a new code', async () => {
     const calls = serve({
       '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },

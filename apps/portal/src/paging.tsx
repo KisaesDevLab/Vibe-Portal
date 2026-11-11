@@ -2,22 +2,59 @@
 //
 // Long lists a page at a time (P57): the staff client list, uploads, a client's files and
 // secure links. Lists that are already on the page; History pages from the server instead.
+//
+// UI review 2026-11-11: the page shown, and the search and filters of a list, are in the
+// address (?page=2&q=smith), so Back, a reload or a link shared keeps them.
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@vibe/ui';
 
 export const PAGE_SIZE = 50;
 
+/** A value kept in the address's query (`fallback` when absent, and then left out of it). */
+export function useUrlState(key: string, fallback = ''): [string, (v: string) => void] {
+  const [params, setParams] = useSearchParams();
+  const value = params.get(key) ?? fallback;
+  const set = useCallback(
+    (v: string) =>
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (!v || v === fallback) next.delete(key);
+          else next.set(key, v);
+          return next;
+        },
+        { replace: true },
+      ),
+    [key, fallback, setParams],
+  );
+  return [value, set];
+}
+
 /** One page of `items`, and the controls to move between pages. A change to what is listed
- *  (a search, a filter) starts again at the first page. */
+ *  (a search, a filter: `resetOn`) starts again at the first page. `param` names the page in
+ *  the address, different for two lists on one page. */
 export function usePages<T>(
   items: T[],
-  resetOn: unknown = items.length,
+  resetOn: unknown = '',
   size = PAGE_SIZE,
+  param = 'page',
 ): { slice: T[]; pager: JSX.Element | null } {
-  const [page, setPage] = useState(0);
+  const [raw, setRaw] = useUrlState(param, '1');
+  const page = Math.max(0, (Number.parseInt(raw, 10) || 1) - 1);
+  const setPage = (n: number): void => setRaw(String(n + 1));
   const pages = Math.max(1, Math.ceil(items.length / size));
-  useEffect(() => setPage(0), [resetOn]);
+  // Not on the first showing: the page in the address is kept then.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    setRaw('1');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetOn]);
   const at = Math.min(page, pages - 1);
   const slice = items.slice(at * size, at * size + size);
   if (items.length <= size) return { slice, pager: null };
@@ -33,7 +70,7 @@ export function usePages<T>(
         <Button size="sm" variant="secondary" disabled={at === 0} onClick={() => setPage(at - 1)}>
           Previous
         </Button>
-        <span>
+        <span aria-live="polite" style={{ fontVariantNumeric: 'tabular-nums' }}>
           {from}–{to} of {items.length}
         </span>
         <Button

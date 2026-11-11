@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 // Copied from Vibe-Time-Billing packages/ui/src/Input.tsx @ 4b14d2f5
-import type { InputHTMLAttributes } from 'react';
+// Vibe Portal (UI review 2026-11-11): a stable id (useId), the hint and an error tied to the
+// field (aria-describedby), the field marked invalid (aria-invalid), and the hint outside the
+// label's name.
+import { useId, type InputHTMLAttributes } from 'react';
 
 import { tokens } from './tokens';
 
@@ -8,46 +11,81 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   hint?: string;
   invalid?: boolean;
+  /** What is wrong with this field, shown under it (and marks it invalid). */
+  error?: string;
 }
 
-export function Input({ label, hint, invalid, id, style, ...rest }: InputProps): JSX.Element {
-  const inputId = id ?? `input-${rest.name ?? Math.random().toString(36).slice(2)}`;
+export function Input({
+  label,
+  hint,
+  invalid,
+  error,
+  id,
+  style,
+  ...rest
+}: InputProps): JSX.Element {
+  const auto = useId();
+  const inputId = id ?? (rest.name ? `input-${rest.name}` : `input-${auto}`);
+  const bad = Boolean(invalid || error);
+  const hintId = hint ? `${inputId}-hint` : undefined;
+  const errorId = error ? `${inputId}-error` : undefined;
+  const describedBy =
+    [rest['aria-describedby'], hintId, errorId].filter(Boolean).join(' ') || undefined;
   // A page may set a stronger field border (Vibe Portal: --vibe-control-border, 3:1).
-  const borderColor = invalid
+  const borderColor = bad
     ? tokens.color.danger
     : 'var(--vibe-control-border, var(--vibe-color-border))';
   return (
-    <label htmlFor={inputId} style={{ display: 'block', fontFamily: tokens.font.body }}>
-      {label && (
-        <div style={{ fontSize: 12, color: tokens.color.textMuted, marginBottom: 4 }}>{label}</div>
-      )}
-      <input
-        id={inputId}
-        style={{
-          width: '100%',
-          boxSizing: 'border-box',
-          padding: '10px 12px',
-          background: tokens.color.surface,
-          color: tokens.color.text,
-          border: `1px solid ${borderColor}`,
-          borderRadius: tokens.radius.md,
-          fontFamily: tokens.font.body,
-          fontSize: 14,
-          ...style,
-        }}
-        {...rest}
-      />
+    <div style={{ fontFamily: tokens.font.body }}>
+      <label htmlFor={inputId} style={{ display: 'block' }}>
+        {label && (
+          <div style={{ fontSize: 12, color: tokens.color.textMuted, marginBottom: 4 }}>
+            {label}
+          </div>
+        )}
+        <input
+          id={inputId}
+          aria-invalid={bad || undefined}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            padding: '10px 12px',
+            background: tokens.color.surface,
+            color: tokens.color.text,
+            border: `1px solid ${borderColor}`,
+            borderRadius: tokens.radius.md,
+            fontFamily: tokens.font.body,
+            fontSize: 14,
+            ...style,
+          }}
+          {...rest}
+          aria-describedby={describedBy}
+        />
+      </label>
       {hint && (
         <div
+          id={hintId}
           style={{
             fontSize: 12,
-            color: invalid ? tokens.color.danger : tokens.color.textMuted,
+            color: tokens.color.textMuted,
             marginTop: 4,
           }}
         >
           {hint}
         </div>
       )}
-    </label>
+      {error && (
+        <div
+          id={errorId}
+          role="alert"
+          style={{ fontSize: 13, color: 'inherit', marginTop: 4, display: 'flex', gap: 6 }}
+        >
+          <span aria-hidden="true" style={{ color: tokens.color.danger }}>
+            ●
+          </span>
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
   );
 }

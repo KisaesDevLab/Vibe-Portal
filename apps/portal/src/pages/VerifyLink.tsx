@@ -50,7 +50,7 @@ export function VerifyLink(): JSX.Element {
       <div style={{ display: 'grid', gap: 12 }}>
         <p>Press the button to finish signing in.</p>
         <Button onClick={() => void signIn()} disabled={busy}>
-          Sign in
+          {busy ? 'Signing in…' : 'Sign in'}
         </Button>
       </div>
     </FirmAuthLayout>

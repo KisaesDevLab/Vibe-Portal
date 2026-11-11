@@ -75,7 +75,7 @@ export function ConfirmContact(): JSX.Element {
           client portal. If that is right, confirm it.
         </p>
         <Button onClick={() => void confirm()} disabled={busy}>
-          Confirm
+          {busy ? 'Confirming…' : 'Confirm'}
         </Button>
       </div>
     </FirmAuthLayout>

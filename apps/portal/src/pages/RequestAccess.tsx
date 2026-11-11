@@ -46,6 +46,9 @@ export function RequestAccess(): JSX.Element {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [photo, setPhoto] = useState<File | null>(null);
+  const [fieldError, setFieldError] = useState({ field: '', text: '' });
+  const errorFor = (f: string): string | undefined =>
+    fieldError.field === f ? fieldError.text : undefined;
   // Changed to give the file chooser a fresh start (choosing the same file again works).
   const [pick, setPick] = useState(0);
   const forget = (): void => {
@@ -59,6 +62,7 @@ export function RequestAccess(): JSX.Element {
     e.preventDefault();
     setBusy(true);
     setError('');
+    setFieldError({ field: '', text: '' });
     try {
       const r = await api<{ requestId: string; sentTo: string }>('/access-requests', {
         body: {
@@ -80,7 +84,16 @@ export function RequestAccess(): JSX.Element {
       }
       setStep({ at: 'confirm', id: r.requestId, sentTo: r.sentTo, idSent });
     } catch (err) {
-      setError(say(err));
+      // About one field: shown under it (and the field marked invalid).
+      const code = err instanceof ApiError ? err.code : '';
+      const field =
+        code === 'invalid_email'
+          ? 'email'
+          : code === 'invalid_phone' || code === 'phone_us_only'
+            ? 'phone'
+            : '';
+      if (field) setFieldError({ field, text: say(err) });
+      else setError(say(err));
     } finally {
       setBusy(false);
     }
@@ -186,7 +199,7 @@ export function RequestAccess(): JSX.Element {
           />
           {error && <p role="alert">{error}</p>}
           <Button type="submit" disabled={busy || !step.idSent || code.trim().length !== 6}>
-            Confirm
+            {busy ? 'Confirming…' : 'Confirm'}
           </Button>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => void resend()}>
             Send a new code
@@ -222,6 +235,7 @@ export function RequestAccess(): JSX.Element {
           autoComplete="email"
           autoCapitalize="none"
           spellCheck={false}
+          error={errorFor('email')}
           value={form.email}
           onChange={set('email')}
         />
@@ -230,6 +244,7 @@ export function RequestAccess(): JSX.Element {
           name="phone"
           type="tel"
           autoComplete="tel"
+          error={errorFor('phone')}
           value={form.phone}
           onChange={set('phone')}
           hint="Give an email, a mobile number, or both. We send a code to confirm it."
@@ -262,11 +277,23 @@ export function RequestAccess(): JSX.Element {
           </span>
         </label>
         {error && <p role="alert">{error}</p>}
+        {!busy && (!photo || !(form.email.trim() || form.phone.trim())) && (
+          <p style={{ margin: 0, fontSize: 13 }}>
+            To send it, add{' '}
+            {[
+              !(form.email.trim() || form.phone.trim()) && 'your email or mobile number',
+              !photo && 'a photo of your ID',
+            ]
+              .filter(Boolean)
+              .join(' and ')}
+            .
+          </p>
+        )}
         <Button
           type="submit"
           disabled={busy || !photo || !(form.email.trim() || form.phone.trim())}
         >
-          Send request
+          {busy ? 'Sending…' : 'Send request'}
         </Button>
       </form>
     </FirmAuthLayout>

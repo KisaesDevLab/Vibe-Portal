@@ -39,7 +39,7 @@ import { FirmLogo, reloadBranding } from '../branding';
 import { Select } from '../components/Field';
 import { Reveal } from '../components/Reveal';
 import { AuthSettingsPage } from '@kisaesdevlab/vibe-auth/react';
-import { usePages } from '../paging';
+import { usePages, useUrlState } from '../paging';
 import { ApiError } from '../api';
 import {
   staffApi,
@@ -115,35 +115,68 @@ const TITLES: Record<string, string> = {
   log: 'Log',
 };
 
-/** Runs a change, then reloads; shows what went wrong. */
+type ActInit = { method?: string; body?: unknown; raw?: Blob };
+type Act = (path: string, init: ActInit, at?: string) => Promise<unknown>;
+
+/**
+ * Runs a change, then reloads; shows what went wrong. A change made from a form names it (`at`,
+ * through `actAt`): the form shows its own error beside its buttons and its button says it is
+ * working ("Sending…"); other errors show at the top (UI review 2026-11-11).
+ */
 function useAct(reload: () => void): {
-  act: (path: string, init: { method?: string; body?: unknown; raw?: Blob }) => Promise<unknown>;
+  act: Act;
+  actAt: (at: string) => (path: string, init: ActInit) => Promise<unknown>;
   busy: boolean;
+  /** The form whose change is under way. */
+  busyAt: string | null;
+  /** What went wrong with a change made from no form. */
   error: string;
+  /** What went wrong with the last change made from this form. */
+  errorAt: (at: string) => string;
 } {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [busyAt, setBusyAt] = useState<string | null>(null);
+  const [failed, setFailed] = useState({ text: '', at: '' });
   const signedOut = useSignedOut();
-  const act = async (path: string, init: { method?: string; body?: unknown; raw?: Blob }) => {
-    setBusy(true);
-    setError('');
+  const act: Act = async (path, init, at = '') => {
+    setBusyAt(at);
+    setFailed({ text: '', at: '' });
     try {
       const r = await staffApi(path, init);
       reload();
       return r;
     } catch (err) {
       rightsChanged(err);
-      if (!signedOut(err)) setError(staffSay(err));
+      if (!signedOut(err)) setFailed({ text: staffSay(err), at });
       return null;
     } finally {
-      setBusy(false);
+      setBusyAt(null);
     }
   };
-  return { act, busy, error };
+  return {
+    act,
+    actAt: (at) => (path, init) => act(path, init, at),
+    busy: busyAt !== null,
+    busyAt,
+    error: failed.at ? '' : failed.text,
+    errorAt: (at) => (failed.at === at ? failed.text : ''),
+  };
 }
 
+/** What went wrong, in the danger colour's mark, announced. */
 function Problem({ text }: { text: string }): JSX.Element | null {
-  return text ? <p role="alert">{text}</p> : null;
+  return text ? (
+    <p
+      role="alert"
+      style={{
+        margin: 0,
+        padding: '6px 10px',
+        borderLeft: `3px solid ${tokens.color.danger}`,
+        overflowWrap: 'anywhere',
+      }}
+    >
+      {text}
+    </p>
+  ) : null;
 }
 
 /** Loading, or what went wrong with Try again; nothing once loaded. */
@@ -176,6 +209,14 @@ export function StaffHome(): JSX.Element {
   useEffect(() => {
     if (firm) document.title = `${TITLES[section] ?? 'Clients'} · ${firm}`;
   }, [firm, section]);
+  // A new page: focus goes to its content, so a screen reader starts there (not the first load).
+  const shownPath = useRef(location.pathname);
+  useEffect(() => {
+    if (shownPath.current === location.pathname) return;
+    shownPath.current = location.pathname;
+    setMenuOpen(false);
+    document.getElementById('main-content')?.focus();
+  }, [location.pathname]);
   // The phone menu closes on Escape.
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -318,6 +359,10 @@ export function StaffHome(): JSX.Element {
         )}
       </header>
       <main id="main-content" tabIndex={-1} style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+        {/* One h1 per page (a client's and a person's page show theirs). */}
+        {!/^\/staff\/(clients|people)\/./.test(path) && (
+          <h1 className="visually-hidden">Staff page: {TITLES[section] ?? 'Clients'}</h1>
+        )}
         <Routes>
           <Route index element={<Clients limited={!allClients} />} />
           <Route path="clients/:id" element={<ClientDetail allClients={allClients} />} />
@@ -387,11 +432,11 @@ const td = { padding: '6px 8px', borderTop: '1px solid var(--vibe-color-border)'
 
 function Clients({ limited }: { limited: boolean }): JSX.Element {
   const load = useLoad<{ clients: ClientRow[] }>('/v1/clients');
-  const [q, setQ] = useState('');
+  const [q, setQ] = useUrlState('q');
   const rows = (load.data?.clients ?? []).filter((c) =>
     `${c.displayName} ${c.clientCode}`.toLowerCase().includes(q.trim().toLowerCase()),
   );
-  const { slice, pager } = usePages(rows, `${q}|${rows.length}`);
+  const { slice, pager } = usePages(rows, q);
   return (
     <Card title="Clients">
       <p>
@@ -452,7 +497,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   /** The file "Send securely" was pressed on, while its form is open. */
   const [sending, setSending] = useState<string | null>(null);
   const [sentNote, setSentNote] = useState('');
-  const { act, busy, error } = useAct(reload);
+  const { act, actAt, busy, busyAt, error, errorAt } = useAct(reload);
   const [inv, setInv] = useState({ email: '', phone: '', name: '', roleLabel: '' });
   /** The invite form, shown only after "Invite someone" is pressed (P54). */
   const [inviting, setInviting] = useState(false);
@@ -462,7 +507,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   const invite = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
     const body = Object.fromEntries(Object.entries(inv).filter(([, v]) => v.trim() !== ''));
-    if (await act(`/v1/clients/${id}/invites`, { body })) {
+    if (await actAt('invite')(`/v1/clients/${id}/invites`, { body })) {
       setInv({ email: '', phone: '', name: '', roleLabel: '' });
       setInviting(false);
       head.reload();
@@ -567,53 +612,59 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
           </div>
         )}
         {inviting && (
-          <form onSubmit={invite} style={{ display: 'grid', gap: 8, maxWidth: 420, marginTop: 12 }}>
-            <strong>Invite someone</strong>
-            <Input
-              label="Email"
-              name="email"
-              type="email"
-              autoComplete="off"
-              spellCheck={false}
-              value={inv.email}
-              onChange={(e) => setInv({ ...inv, email: e.target.value })}
-            />
-            <Input
-              label="Mobile number"
-              name="phone"
-              type="tel"
-              autoComplete="off"
-              value={inv.phone}
-              onChange={(e) => setInv({ ...inv, phone: e.target.value })}
-            />
-            <Input
-              label="Name"
-              name="name"
-              value={inv.name}
-              onChange={(e) => setInv({ ...inv, name: e.target.value })}
-            />
-            <Input
-              label="Role (e.g. Spouse)"
-              name="role"
-              value={inv.roleLabel}
-              onChange={(e) => setInv({ ...inv, roleLabel: e.target.value })}
-            />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Button type="submit" disabled={busy || !(inv.email.trim() || inv.phone.trim())}>
-                Send invitation
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => {
-                  setInviting(false);
-                  setInv({ email: '', phone: '', name: '', roleLabel: '' });
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </form>
+          <Reveal>
+            <form
+              onSubmit={invite}
+              style={{ display: 'grid', gap: 8, maxWidth: 420, marginTop: 12 }}
+            >
+              <strong>Invite someone</strong>
+              <Input
+                label="Email"
+                name="email"
+                type="email"
+                autoComplete="off"
+                spellCheck={false}
+                value={inv.email}
+                onChange={(e) => setInv({ ...inv, email: e.target.value })}
+              />
+              <Input
+                label="Mobile number"
+                name="phone"
+                type="tel"
+                autoComplete="off"
+                value={inv.phone}
+                onChange={(e) => setInv({ ...inv, phone: e.target.value })}
+              />
+              <Input
+                label="Name"
+                name="name"
+                value={inv.name}
+                onChange={(e) => setInv({ ...inv, name: e.target.value })}
+              />
+              <Input
+                label="Role (e.g. Spouse)"
+                name="role"
+                value={inv.roleLabel}
+                onChange={(e) => setInv({ ...inv, roleLabel: e.target.value })}
+              />
+              <Problem text={errorAt('invite')} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button type="submit" disabled={busy || !(inv.email.trim() || inv.phone.trim())}>
+                  {busyAt === 'invite' ? 'Sending…' : 'Send invitation'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setInviting(false);
+                    setInv({ email: '', phone: '', name: '', roleLabel: '' });
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </Reveal>
         )}
       </Card>
       <ClientFiles
@@ -881,9 +932,10 @@ function ClientFiles({
   onChanged: () => void;
   onSend: (fileId: string) => void;
 }): JSX.Element {
-  const [q, setQ] = useState('');
-  const [year, setYear] = useState('all');
-  const [sort, setSort] = useState<FileSort>('newest');
+  const [q, setQ] = useUrlState('q');
+  const [year, setYear] = useUrlState('year', 'all');
+  const [sortRaw, setSort] = useUrlState('sort', 'newest');
+  const sort = sortRaw as FileSort;
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [who, setWho] = useState<Set<string> | null>(null);
   const [working, setWorking] = useState(false);
@@ -903,7 +955,7 @@ function ClientFiles({
           ? (b.taxYear ?? 0) - (a.taxYear ?? 0) || a.name.localeCompare(b.name)
           : b.sharedAt.localeCompare(a.sharedAt),
     );
-  const { slice: page, pager } = usePages(shown, `${q}|${year}|${sort}|${shown.length}`);
+  const { slice: page, pager } = usePages(shown, `${q}|${year}|${sort}`);
   const folders = years
     .map((y) => ({ year: y, files: page.filter((f) => f.taxYear === y) }))
     .filter((g) => g.files.length > 0);
@@ -1085,8 +1137,17 @@ function ClientFiles({
             {picked.size} {picked.size === 1 ? 'file' : 'files'} selected
           </strong>
           {activePeople.length > 0 && (
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <span>For:</span>
+            <fieldset
+              style={{
+                display: 'flex',
+                gap: 12,
+                flexWrap: 'wrap',
+                border: 0,
+                padding: 0,
+                margin: 0,
+              }}
+            >
+              <legend style={{ float: 'left', marginRight: 12, padding: 0 }}>For:</legend>
               {activePeople.map((p) => (
                 <label key={p.identityId} style={{ display: 'inline-flex', gap: 4 }}>
                   <input
@@ -1102,7 +1163,7 @@ function ClientFiles({
                   {label(p)}
                 </label>
               ))}
-            </div>
+            </fieldset>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button
@@ -1148,19 +1209,22 @@ function ClientFiles({
         const allPicked = ids.every((i) => picked.has(i));
         return (
           <details key={g.year ?? 'none'} open style={{ marginTop: 12 }}>
-            <summary style={{ cursor: 'pointer', display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                aria-label={`Select every file in ${g.year ?? 'No tax year'}`}
-                checked={allPicked}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) => toggle(ids, e.target.checked)}
-              />
-              <strong>{g.year ?? 'No tax year'}</strong>
-              <span style={{ opacity: 0.7 }}>
+            <summary style={{ cursor: 'pointer', padding: '4px 0' }}>
+              <strong>{g.year ?? 'No tax year'}</strong>{' '}
+              <span style={{ color: tokens.color.textMuted }}>
                 {g.files.length} {g.files.length === 1 ? 'file' : 'files'}
               </span>
             </summary>
+            <label
+              style={{ display: 'inline-flex', gap: 6, alignItems: 'center', margin: '4px 0' }}
+            >
+              <input
+                type="checkbox"
+                checked={allPicked}
+                onChange={(e) => toggle(ids, e.target.checked)}
+              />
+              Select every file in {g.year ?? 'No tax year'}
+            </label>
             <Table head={['', 'File', 'Who sees it', 'Actions']}>{g.files.map(row)}</Table>
           </details>
         );
@@ -1335,7 +1399,7 @@ function SendSecurely({
         <Problem text={error} />
         <div style={{ display: 'flex', gap: 8 }}>
           <Button type="submit" disabled={busy || picked.size === 0 || !to.email.trim()}>
-            Send secure link
+            {busy ? 'Sending…' : 'Send secure link'}
           </Button>
           <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>
             Cancel
@@ -1368,7 +1432,7 @@ function SecureLinks({
   onRevoke: (share: OutsideShare) => void;
 }): JSX.Element {
   const shares = load.data?.shares ?? [];
-  const { slice, pager } = usePages(shares);
+  const { slice, pager } = usePages(shares, '', undefined, 'linksPage');
   return (
     <Card title="Secure links sent outside">
       <Status load={load} what="the secure links" />
@@ -1900,12 +1964,12 @@ const personLabel = (p: { name: string; email: string | null; phone: string | nu
 
 /** Everyone on the portal, turned-off accounts too (P66). */
 function People(): JSX.Element {
-  const [typed, setTyped] = useState('');
-  const [q, setQ] = useState('');
+  const [q, setQ] = useUrlState('q');
+  const [typed, setTyped] = useState(q);
   useEffect(() => {
     const t = window.setTimeout(() => setQ(typed.trim()), 300);
     return () => window.clearTimeout(t);
-  }, [typed]);
+  }, [typed, setQ]);
   const path = `/v1/people/list?q=${encodeURIComponent(q)}`;
   const load = useLoad<{ people: PersonRow[]; more: boolean }>(path);
   const [later, setLater] = useState<PersonRow[]>([]);
@@ -2032,7 +2096,7 @@ function Person(): JSX.Element {
     load.reload();
     history.reload();
   };
-  const { act, busy, error } = useAct(reload);
+  const { act, actAt, busy, busyAt, error, errorAt } = useAct(reload);
   const [note, setNote] = useState('');
   const [name, setName] = useState('');
   const [notify, setNotify] = useState<PersonData['person']['notify']>('email');
@@ -2067,9 +2131,14 @@ function Person(): JSX.Element {
   const done = (r: unknown, text: string): void => {
     if (r) setNote(text);
   };
-  const run = (path: string, init: { method?: string; body?: unknown }, text: string): void => {
+  const run = (
+    path: string,
+    init: { method?: string; body?: unknown },
+    text: string,
+    at?: string,
+  ): void => {
     setNote('');
-    void act(path, init).then((r) => done(r, text));
+    void act(path, init, at).then((r) => done(r, text));
   };
   const has = new Set(d.clients.filter((c) => c.active).map((c) => c.id));
   const canAdd = (all.data?.clients ?? []).filter((c) => c.active && !has.has(c.id));
@@ -2101,6 +2170,7 @@ function Person(): JSX.Element {
               `/v1/people/${p.identityId}`,
               { method: 'PATCH', body: { name, notify } },
               'Saved.',
+              'details',
             );
           }}
         >
@@ -2121,9 +2191,10 @@ function Person(): JSX.Element {
               </option>
             ))}
           </Select>
+          <Problem text={errorAt('details')} />
           <div>
             <Button type="submit" disabled={busy}>
-              Save
+              {busyAt === 'details' ? 'Saving…' : 'Save'}
             </Button>
           </div>
         </form>
@@ -2179,7 +2250,7 @@ function Person(): JSX.Element {
               onSubmit={(e) => {
                 e.preventDefault();
                 setNote('');
-                void act(`/v1/people/${p.identityId}/contact`, {
+                void actAt('contact')(`/v1/people/${p.identityId}/contact`, {
                   method: 'POST',
                   body: { [changing]: contact },
                 }).then((r) => {
@@ -2204,9 +2275,10 @@ function Person(): JSX.Element {
                 value={contact}
                 onChange={(e) => setContact(e.target.value)}
               />
+              <Problem text={errorAt('contact')} />
               <div style={{ display: 'flex', gap: 8 }}>
                 <Button type="submit" disabled={busy || !contact.trim()}>
-                  Send confirmation link
+                  {busyAt === 'contact' ? 'Sending…' : 'Send confirmation link'}
                 </Button>
                 <Button type="button" variant="secondary" onClick={() => setChanging(null)}>
                   Cancel
@@ -2282,17 +2354,18 @@ function Person(): JSX.Element {
             e.preventDefault();
             const name = canAdd.find((c) => c.id === adding.clientId)?.displayName ?? 'The client';
             setNote('');
-            void act(`/v1/people/${p.identityId}/clients`, { method: 'POST', body: adding }).then(
-              (r) => {
-                if (!r) return;
-                setAdding({ clientId: '', roleLabel: '' });
-                setNote(
-                  (r as { told?: boolean }).told
-                    ? `${name} added. ${who} was told.`
-                    : `${name} added.`,
-                );
-              },
-            );
+            void actAt('addClient')(`/v1/people/${p.identityId}/clients`, {
+              method: 'POST',
+              body: adding,
+            }).then((r) => {
+              if (!r) return;
+              setAdding({ clientId: '', roleLabel: '' });
+              setNote(
+                (r as { told?: boolean }).told
+                  ? `${name} added. ${who} was told.`
+                  : `${name} added.`,
+              );
+            });
           }}
         >
           <strong>Add a client</strong>
@@ -2317,9 +2390,10 @@ function Person(): JSX.Element {
             value={adding.roleLabel}
             onChange={(e) => setAdding({ ...adding, roleLabel: e.target.value })}
           />
+          <Problem text={errorAt('addClient')} />
           <div>
             <Button type="submit" disabled={busy || !adding.clientId}>
-              Add client
+              {busyAt === 'addClient' ? 'Adding…' : 'Add client'}
             </Button>
           </div>
         </form>
@@ -2342,6 +2416,7 @@ function Person(): JSX.Element {
               once, for 24 hours.
             </span>
           )}
+          <Problem text={errorAt('link')} />
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {!off && (
               <Button
@@ -2349,14 +2424,14 @@ function Person(): JSX.Element {
                 disabled={busy}
                 onClick={() => {
                   setNote('');
-                  void act(`/v1/people/${p.identityId}/sign-in-link`, { method: 'POST' }).then(
-                    (r) => {
-                      if (r) setNote(`A sign-in link was sent to ${(r as { to: string }).to}.`);
-                    },
-                  );
+                  void actAt('link')(`/v1/people/${p.identityId}/sign-in-link`, {
+                    method: 'POST',
+                  }).then((r) => {
+                    if (r) setNote(`A sign-in link was sent to ${(r as { to: string }).to}.`);
+                  });
                 }}
               >
-                Send sign-in link
+                {busyAt === 'link' ? 'Sending…' : 'Send sign-in link'}
               </Button>
             )}
             {off ? (
@@ -2518,7 +2593,7 @@ function Settings(): JSX.Element {
     keys.reload();
     staff.reload();
   };
-  const { act: run, busy, error } = useAct(reload);
+  const { act: run, busy, busyAt, error, errorAt } = useAct(reload);
   const [form, setForm] = useState<SettingsData | null>(null);
   const [newKey, setNewKey] = useState('');
   const [keyLabel, setKeyLabel] = useState('');
@@ -2529,11 +2604,15 @@ function Settings(): JSX.Element {
   // Bumped when the logo changes, so the browser shows the new one (it caches it).
   const [logoV, setLogoV] = useState(0);
   // A key or setup link is shown until the next thing done here.
-  const act: typeof run = (path, init) => {
+  const act: typeof run = (path, init, at) => {
     setNewKey('');
     setLink(null);
-    return run(path, init);
+    return run(path, init, at);
   };
+  const actAt =
+    (at: string) =>
+    (path: string, init: ActInit): Promise<unknown> =>
+      act(path, init, at);
   useEffect(() => {
     if (s.data && !form) setForm(s.data);
   }, [s.data, form]);
@@ -2549,7 +2628,7 @@ function Settings(): JSX.Element {
               e.preventDefault();
               // Empty is not 0 ("no limit"): nothing is saved until it is a number.
               if (form.shareDownloadLimit === '') return;
-              void act('/v1/settings', {
+              void actAt('firm')('/v1/settings', {
                 method: 'PUT',
                 body: {
                   firmName: form.firmName,
@@ -2627,8 +2706,9 @@ function Settings(): JSX.Element {
                 page and can revoke it.
               </span>
             </label>
+            <Problem text={errorAt('firm')} />
             <Button type="submit" disabled={busy || form.shareDownloadLimit === ''}>
-              Save
+              {busyAt === 'firm' ? 'Saving…' : 'Save'}
             </Button>
           </form>
           <LogoSetting
@@ -2701,7 +2781,7 @@ function Settings(): JSX.Element {
           style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 8 }}
           onSubmit={(e) => {
             e.preventDefault();
-            void act('/v1/keys', { body: { label: keyLabel } }).then((r) => {
+            void actAt('key')('/v1/keys', { body: { label: keyLabel } }).then((r) => {
               const k = (r as { key?: string } | null)?.key;
               if (k) {
                 setNewKey(k);
@@ -2717,9 +2797,10 @@ function Settings(): JSX.Element {
             onChange={(e) => setKeyLabel(e.target.value)}
           />
           <Button type="submit" disabled={busy || !keyLabel.trim()}>
-            Make a key
+            {busyAt === 'key' ? 'Making…' : 'Make a key'}
           </Button>
         </form>
+        <Problem text={errorAt('key')} />
         {newKey && (
           <p role="status">
             Paste this into Vibe Files › Admin › Portal now; it is not shown again:{' '}
@@ -2888,7 +2969,7 @@ function Settings(): JSX.Element {
           style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 8 }}
           onSubmit={(e) => {
             e.preventDefault();
-            void act('/v1/staff', { body: person }).then((r) => {
+            void actAt('staff')('/v1/staff', { body: person }).then((r) => {
               const l = (r as { setupLink?: string } | null)?.setupLink;
               if (l) {
                 setLink({ who: `${person.name} (${person.email.trim()})`, url: l });
@@ -2921,9 +3002,10 @@ function Settings(): JSX.Element {
             <span>Admin</span>
           </label>
           <Button type="submit" disabled={busy || !person.email.trim() || !person.name.trim()}>
-            Add staff
+            {busyAt === 'staff' ? 'Adding…' : 'Add staff'}
           </Button>
         </form>
+        <Problem text={errorAt('staff')} />
         {link && (
           <p role="status">
             Setup link for {link.who} (also emailed to them; works for 3 days, once):{' '}
@@ -2989,7 +3071,7 @@ const PLACE = { local: 'on the appliance', b2: 'in the B2 bucket' } as const;
 /** Where stored files live, the B2 bucket, and moving files there or back (P51). */
 function Storage(): JSX.Element {
   const s = useLoad<StorageData>('/v1/settings/storage');
-  const { act, busy, error } = useAct(s.reload);
+  const { act, actAt, busy, busyAt, error, errorAt } = useAct(s.reload);
   const [b2, setB2] = useState({ endpoint: '', bucket: '', keyId: '', appKey: '' });
   const [tested, setTested] = useState(false);
   const d = s.data;
@@ -3030,7 +3112,16 @@ function Storage(): JSX.Element {
             the appliance backup of the firm key: without it no file can be opened.
           </p>
           {d.move && (
-            <p role="status" style={{ margin: 0 }}>
+            <span role="status" className="visually-hidden">
+              {d.move.state === 'requested' || d.move.state === 'running'
+                ? `Moving ${PLACE[d.move.to]}.`
+                : d.move.state === 'done'
+                  ? `Moved ${PLACE[d.move.to]}.`
+                  : `The move ${PLACE[d.move.to]} stopped.`}
+            </span>
+          )}
+          {d.move && (
+            <p style={{ margin: 0 }}>
               {d.move.state === 'requested' &&
                 `Moving ${PLACE[d.move.to]}: ${d.move.attempts ? 'starting again after a restart' : 'starting'}…`}
               {d.move.state === 'running' &&
@@ -3087,7 +3178,7 @@ function Storage(): JSX.Element {
               e.preventDefault();
               setTested(false);
               const { appKey, ...rest } = b2;
-              void act('/v1/settings/storage/b2', {
+              void actAt('b2')('/v1/settings/storage/b2', {
                 method: 'PUT',
                 body: appKey ? { ...rest, appKey } : rest,
               }).then((r) => {
@@ -3132,9 +3223,10 @@ function Storage(): JSX.Element {
               value={b2.appKey}
               onChange={(e) => setB2({ ...b2, appKey: e.target.value })}
             />
+            <Problem text={errorAt('b2')} />
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <Button type="submit" disabled={busy || running}>
-                Check and save
+                {busyAt === 'b2' ? 'Checking the bucket…' : 'Check and save'}
               </Button>
               {d.b2.hasKey && (
                 <Button
@@ -3264,26 +3356,29 @@ function StaffAccess({
         <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
         <span>Admin: uses Settings (the firm, portal keys, staff) and sees every client</span>
       </label>
-      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <input
-          type="radio"
-          name="sees"
-          checked={!some}
-          disabled={admin}
-          onChange={() => setLimited(false)}
-        />
-        <span>Sees every client</span>
-      </label>
-      <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-        <input
-          type="radio"
-          name="sees"
-          checked={some}
-          disabled={admin}
-          onChange={() => setLimited(true)}
-        />
-        <span>Sees only these clients</span>
-      </label>
+      <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+        <legend style={{ padding: 0, marginBottom: 4 }}>Which clients they see</legend>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="radio"
+            name="sees"
+            checked={!some}
+            disabled={admin}
+            onChange={() => setLimited(false)}
+          />
+          <span>Sees every client</span>
+        </label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <input
+            type="radio"
+            name="sees"
+            checked={some}
+            disabled={admin}
+            onChange={() => setLimited(true)}
+          />
+          <span>Sees only these clients</span>
+        </label>
+      </fieldset>
       {some && (
         <>
           <p>

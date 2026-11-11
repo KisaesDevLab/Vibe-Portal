@@ -126,3 +126,20 @@ describe('the logo for dark mode (P60)', () => {
     expect(screen.queryByAltText('Example CPA logo')).toBeNull();
   });
 });
+
+describe('a pale firm colour as a link on a light page (UI review)', () => {
+  it('is darkened until it reads at 4.5:1, and a dark one is left as it is', async () => {
+    const { readableOnLight } = await import('../branding');
+    expect(readableOnLight('#0f6cbd')).toBe('#0f6cbd');
+    const pale = readableOnLight('#ffd966');
+    expect(pale).not.toBe('#ffd966');
+    const lum = (hex: string): number => {
+      const ch = [1, 3, 5].map((i) => {
+        const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * (ch[0] ?? 0) + 0.7152 * (ch[1] ?? 0) + 0.0722 * (ch[2] ?? 0);
+    };
+    expect(1.05 / (lum(pale) + 0.05)).toBeGreaterThanOrEqual(4.5);
+  });
+});

@@ -8,7 +8,7 @@ import { Button, Download, EmptyState, Eye, Input, Pill, ShareIcon } from '@vibe
 
 import { ActionButton, ActionDownload, ActionLink, Actions, ItemRow } from '../components/Action';
 import { Select } from '../components/Field';
-import { usePages } from '../paging';
+import { usePages, useUrlState } from '../paging';
 import { api, say } from '../api';
 
 export interface PortalFile {
@@ -50,16 +50,16 @@ export function Files({
 }): JSX.Element {
   const [files, setFiles] = useState<PortalFile[] | null>(null);
   const [years, setYears] = useState<number[]>([]);
-  const [year, setYear] = useState('');
-  const [search, setSearch] = useState('');
-  const [query, setQuery] = useState('');
+  const [year, setYear] = useUrlState('year');
+  const [query, setQuery] = useUrlState('q');
+  const [search, setSearch] = useState(query);
   const [error, setError] = useState('');
 
   // Search after a short pause in typing.
   useEffect(() => {
     const t = setTimeout(() => setQuery(search.trim()), 300);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [search, setQuery]);
 
   const load = useCallback(() => {
     setError('');

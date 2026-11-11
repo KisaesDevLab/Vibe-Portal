@@ -37,6 +37,7 @@ export function FileView(): JSX.Element {
   return (
     <main
       id="main-content"
+      tabIndex={-1}
       style={{ maxWidth: 960, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}
     >
       <nav>

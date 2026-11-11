@@ -7,7 +7,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Button, Input } from '@vibe/ui';
 
 import { FirmAuthLayout } from '../branding';
-import { api, say } from '../api';
+import { api, ApiError, say } from '../api';
 import { KeepSignedIn } from './KeepSignedIn';
 
 type Step = { at: 'ask' } | { at: 'email' } | { at: 'code'; phone: string };
@@ -20,18 +20,22 @@ export function Login(): JSX.Element {
   const [step, setStep] = useState<Step>({ at: 'ask' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [fieldError, setFieldError] = useState('');
 
   async function ask(e: FormEvent): Promise<void> {
     e.preventDefault();
     setBusy(true);
     setError('');
+    setFieldError('');
     try {
       const r = await api<{ kind: 'email' | 'phone' }>('/auth/login', {
         body: { contact, keepSignedIn: keep },
       });
       setStep(r.kind === 'phone' ? { at: 'code', phone: contact } : { at: 'email' });
     } catch (err) {
-      setError(say(err));
+      // About the field: shown under it (and the field marked invalid).
+      if (err instanceof ApiError && err.code === 'invalid_contact') setFieldError(say(err));
+      else setError(say(err));
     } finally {
       setBusy(false);
     }
@@ -84,7 +88,7 @@ export function Login(): JSX.Element {
           />
           {error && <p role="alert">{error}</p>}
           <Button type="submit" disabled={busy || code.trim().length !== 6}>
-            Sign in
+            {busy ? 'Signing in…' : 'Sign in'}
           </Button>
           <Button type="button" variant="ghost" onClick={() => setStep({ at: 'ask' })}>
             Send a new code
@@ -111,6 +115,7 @@ export function Login(): JSX.Element {
           autoComplete="username"
           autoCapitalize="none"
           spellCheck={false}
+          error={fieldError || undefined}
           value={contact}
           onChange={(e) => setContact(e.target.value)}
           required
@@ -118,7 +123,7 @@ export function Login(): JSX.Element {
         <KeepSignedIn checked={keep} onChange={setKeep} />
         {error && <p role="alert">{error}</p>}
         <Button type="submit" disabled={busy || contact.trim().length < 3}>
-          Continue
+          {busy ? 'Sending…' : 'Continue'}
         </Button>
       </form>
     </FirmAuthLayout>

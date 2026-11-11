@@ -106,7 +106,7 @@ export function PhoneSignIn({
           />
           <div>
             <Button type="submit" size="sm" disabled={busy || phone.trim().length < 7}>
-              Text me a code
+              {busy ? 'Sending…' : 'Text me a code'}
             </Button>
           </div>
         </form>
@@ -128,7 +128,7 @@ export function PhoneSignIn({
             />
             <div>
               <Button type="submit" size="sm" disabled={busy || phone.trim().length < 7}>
-                Text me a code
+                {busy ? 'Sending…' : 'Text me a code'}
               </Button>
             </div>
           </form>
@@ -149,7 +149,7 @@ export function PhoneSignIn({
           />
           <div style={{ display: 'flex', gap: 8 }}>
             <Button type="submit" size="sm" disabled={busy || code.trim().length !== 6}>
-              Confirm
+              {busy ? 'Confirming…' : 'Confirm'}
             </Button>
             <Button
               type="button"

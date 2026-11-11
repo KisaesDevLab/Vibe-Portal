@@ -173,7 +173,7 @@ export function SendLinkForm({
       {error && <p role="alert">{error}</p>}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button type="submit" disabled={busy || !f.email.trim()}>
-          Send secure link
+          {busy ? 'Sending…' : 'Send secure link'}
         </Button>
         <Button type="button" variant="secondary" onClick={onCancel}>
           Cancel
@@ -192,7 +192,7 @@ export function ClientLinksList({
   onChanged: () => void;
 }): JSX.Element | null {
   const [error, setError] = useState('');
-  const { slice, pager } = usePages(links);
+  const { slice, pager } = usePages(links, '', undefined, 'linksPage');
   if (links.length === 0) return null;
   async function stop(l: ClientLink): Promise<void> {
     if (!window.confirm(`End the link sent to ${l.email}? It stops working at once.`)) return;

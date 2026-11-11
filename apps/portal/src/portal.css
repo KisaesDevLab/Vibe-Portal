@@ -14,7 +14,7 @@
   --vibe-control-border: #6e7681;
 }
 [data-theme='light'] {
-  --vibe-link: var(--vibe-color-accent);
+  --vibe-link: var(--vibe-link-light, var(--vibe-color-accent));
   --vibe-control-border: #7d8590;
 }
 
@@ -41,6 +41,24 @@ a:hover {
 button:not(:disabled):hover,
 .vauth-button:hover {
   filter: brightness(1.12);
+}
+
+/* The content takes focus on a new page (for screen readers); it is not a control to outline. */
+#main-content:focus {
+  outline: none;
+}
+
+/* Read by screen readers, not shown. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* Shown on the first Tab: straight to the page's content. */
