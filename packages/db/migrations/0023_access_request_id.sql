@@ -15,4 +15,12 @@ ALTER TABLE access_request ADD COLUMN id_content_type text;
 ALTER TABLE access_request ADD COLUMN id_size bigint;
 ALTER TABLE access_request ADD COLUMN id_removed_at timestamptz;
 
+-- What the approval gave, so a record that could not be made at once is made whole later.
+ALTER TABLE access_request ADD COLUMN identity_id uuid REFERENCES portal_identity (id);
+ALTER TABLE access_request ADD COLUMN client_ids jsonb;
+ALTER TABLE access_request ADD COLUMN role_label text;
+
 ALTER TABLE uploads ADD COLUMN access_request_id uuid REFERENCES access_request (id);
+-- One record per request, however the approval and the hourly retry meet.
+CREATE UNIQUE INDEX uploads_access_request_once ON uploads (access_request_id)
+  WHERE access_request_id IS NOT NULL;

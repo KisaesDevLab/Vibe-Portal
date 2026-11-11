@@ -8,7 +8,7 @@ import { PDFDocument } from 'pdf-lib';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { imageSize, purgeIdPhotos } from '../portal/access-id';
+import { imageSize, purgeIdPhotos, stamp } from '../portal/access-id';
 import { schema } from '@vibe-portal/db';
 import { eq } from 'drizzle-orm';
 import { CLIENT, ID_PNG, OTHER, sendId, world, type World } from './harness';
@@ -95,7 +95,7 @@ describe('photo ID on access requests (P67)', () => {
         clientId: CLIENT,
         clientCode: '1001',
         clientName: 'Smith, John',
-        name: 'Access request - Mary Smith.pdf',
+        name: `Access request - Mary Smith - ${stamp(w.ctx.now())}.pdf`,
       }),
     );
     const pdf = await w
@@ -220,7 +220,9 @@ describe('photo ID on access requests (P67)', () => {
       .update(schema.accessRequest)
       .set({ idDekWrapped: Buffer.from('broken') })
       .where(eq(schema.accessRequest.id, id));
-    const ok = await w.firm('post', `/access-requests/${id}/approve`).send({ clientId: CLIENT });
+    const ok = await w
+      .firm('post', `/access-requests/${id}/approve`)
+      .send({ clientIds: [CLIENT, OTHER], roleLabel: 'Spouse' });
     expect(ok.body.recorded).toBe(false);
     expect((await w.firm('get', '/uploads').expect(200)).body.uploads).toHaveLength(0);
     // ...until it can: the next run makes it.
@@ -229,7 +231,17 @@ describe('photo ID on access requests (P67)', () => {
       .set({ idDekWrapped: held?.idDekWrapped ?? null })
       .where(eq(schema.accessRequest.id, id));
     await purgeIdPhotos(w.ctx);
+    await purgeIdPhotos(w.ctx); // once only
     const ups = (await w.firm('get', '/uploads').expect(200)).body.uploads;
-    expect(ups.map((u: { name: string }) => u.name)).toEqual(['Access request - Mary Smith.pdf']);
+    expect(ups).toHaveLength(1);
+    expect(ups[0].name).toMatch(/^Access request - Mary Smith - \d{4}-\d{2}-\d{2} \d{4}\.pdf$/);
+    // Whole: every client and the role, as at approval.
+    const [r] = await w.t.db
+      .select()
+      .from(schema.accessRequest)
+      .where(eq(schema.accessRequest.id, id));
+    expect(r?.clientIds).toEqual([CLIENT, OTHER]);
+    expect(r?.roleLabel).toBe('Spouse');
+    expect(r?.identityId).toBe(ok.body.identityId);
   });
 });

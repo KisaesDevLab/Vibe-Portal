@@ -5,8 +5,8 @@
 // - Stored encrypted with the firm key, like an upload (and in B2 when files are there).
 // - Shown to the staff who decide requests (those who see every client).
 // - On approval, a PDF of the request and its photo ID goes to Vibe Files' Portal inbox as an
-//   upload of the first client, named "Access request - <name>.pdf" (Vibe Files puts the
-//   client's name and code in front). The client never sees it among their uploads, nor do
+//   upload of the first client, named "Access request - <name> - <date time>.pdf" (Vibe Files
+//   puts the client's name and code in front). One per request (a unique index). The client never sees it among their uploads, nor do
 //   staff limited to some clients.
 // - Deleted 7 days after Vibe Files fetched the record (it fetches only once the checksum
 //   matches), the portal's copy of the PDF too; a denied request's 30 days after the decision;
@@ -27,9 +27,9 @@ import { HttpError } from '../lib/http';
 
 /** A phone photo or a scan: plenty for an ID, small enough to hold while checking it. */
 export const ID_MAX_BYTES = 15 * 1024 * 1024;
-/** A picture larger than this is refused: decoding it to put it in the PDF would take too much
- *  memory (a small PNG can declare an enormous image). A phone photo is about 12-50 MP. */
-export const ID_MAX_PIXELS = 60_000_000;
+/** A picture larger than this is refused: a small PNG can declare an enormous image, and a PNG
+ *  is decoded whole to go in the PDF (a JPEG is copied as it is). A phone photo is 12-50 MP. */
+export const ID_MAX_PIXELS = { jpeg: 60_000_000, png: 25_000_000 } as const;
 export const ID_MAX_SIDE = 12_000;
 /** Days a denied request's ID is kept (owner 2026-11-11). */
 export const ID_KEEP_DAYS = 30;
@@ -73,7 +73,7 @@ export function imageSize(b: Buffer, kind: 'png' | 'jpeg'): { w: number; h: numb
 function checkPicture(b: Buffer, kind: 'png' | 'jpeg'): void {
   const size = imageSize(b, kind);
   if (!size || size.w === 0 || size.h === 0) throw new HttpError(415, 'photo_unreadable');
-  if (size.w > ID_MAX_SIDE || size.h > ID_MAX_SIDE || size.w * size.h > ID_MAX_PIXELS) {
+  if (size.w > ID_MAX_SIDE || size.h > ID_MAX_SIDE || size.w * size.h > ID_MAX_PIXELS[kind]) {
     throw new HttpError(413, 'image_too_large');
   }
 }
@@ -241,7 +241,8 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
   return due.length;
 }
 
-/** An approved request whose record could not be made (it still has its ID): made again. */
+/** An approved request whose record could not be made (it still has its ID): made again, from
+ *  what the approval stored (the person, every client, the role). */
 async function remakeMissingRecords(ctx: Ctx): Promise<void> {
   const rows = await ctx.db
     .select({ r: schema.accessRequest, upload: schema.uploads.id })
@@ -251,25 +252,18 @@ async function remakeMissingRecords(ctx: Ctx): Promise<void> {
       and(
         eq(schema.accessRequest.status, 'approved'),
         isNotNull(schema.accessRequest.idBlobKey),
-        isNotNull(schema.accessRequest.clientId),
+        isNotNull(schema.accessRequest.identityId),
       ),
     );
   for (const { r, upload } of rows) {
-    if (upload || !r.clientId || !r.confirmedContact) continue;
-    const field = r.confirmedContact.includes('@')
-      ? schema.portalIdentity.email
-      : schema.portalIdentity.phone;
-    const [who] = await ctx.db
-      .select({ id: schema.portalIdentity.id })
-      .from(schema.portalIdentity)
-      .where(eq(field, r.confirmedContact));
-    if (!who) continue;
+    const clientIds = r.clientIds ?? (r.clientId ? [r.clientId] : []);
+    if (upload || !r.identityId || clientIds.length === 0) continue;
     await fileRequestRecord(ctx, {
       requestId: r.id,
-      identityId: who.id,
-      clientIds: [r.clientId],
+      identityId: r.identityId,
+      clientIds,
       approvedBy: r.decidedBy ?? '',
-      roleLabel: '',
+      roleLabel: r.roleLabel ?? '',
       firmName: await firmName(ctx),
     });
   }
@@ -311,6 +305,13 @@ function lines(text: string, font: PDFFont, size: number, width: number): string
 /** Only what the standard PDF font can draw (it has no glyphs beyond Latin-1). The PDF also
  *  carries the original photo ID, and the request is on the portal by its id. */
 const latin1 = (s: string): string => s.replace(/[^\x20-\x7e\xa0-\xff]/g, '?');
+
+/** "2026-11-11 1430": the approval's date and time on the appliance's clock, for the file name
+ *  (no colon: Windows file names cannot have one). Two people of the same name get two names. */
+export function stamp(d: Date): string {
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}${p(d.getMinutes())}`;
+}
 
 const fmt = (d: Date | null | undefined): string =>
   d ? `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC` : '-';
@@ -471,7 +472,7 @@ export async function fileRequestRecord(
       .values({
         clientId: o.clientIds[0],
         identityId: o.identityId,
-        name: `Access request - ${safe}.pdf`,
+        name: `Access request - ${safe} - ${stamp(request.decidedAt ?? ctx.now())}.pdf`,
         contentType: 'application/pdf',
         size: stored.size,
         sha256: stored.sha256,
@@ -481,15 +482,21 @@ export async function fileRequestRecord(
         uploadedAt: ctx.now(),
         accessRequestId: request.id,
       })
+      // One record per request: the approval and the hourly retry may meet.
+      .onConflictDoNothing()
       .returning({ id: schema.uploads.id });
+    if (!row) {
+      await ctx.blobs.remove(stored.blobKey);
+      return true;
+    }
     await record(
       ctx.db,
       'upload',
       { kind: 'system', name: 'portal' },
       {
-        clientId: o.clientIds[0],
+        // Not in the client's History (staff limited to the client see that): the person's.
         identityId: o.identityId,
-        uploadId: row?.id ?? null,
+        uploadId: row.id,
         detail: { accessRequestId: request.id, record: true },
       },
     );

@@ -359,7 +359,7 @@ describe('staff limited to some clients (P48)', () => {
     await mary.agent.get(`/api/staff/v1/access-requests/${id}/id-photo`).expect(403);
     const all = (await boss.get(`/api/staff/v1/uploads?clientId=${CLIENT}`).expect(200)).body
       .uploads as { uploadId: string; name: string }[];
-    const pdf = all.find((u) => u.name === 'Access request - Jane Smith.pdf');
+    const pdf = all.find((u) => u.name.startsWith('Access request - Jane Smith - '));
     expect(pdf).toBeTruthy();
     const theirs = (await mary.agent.get(`/api/staff/v1/uploads?clientId=${CLIENT}`).expect(200))
       .body.uploads as { uploadId: string }[];

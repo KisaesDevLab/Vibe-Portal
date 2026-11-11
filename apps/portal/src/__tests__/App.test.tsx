@@ -261,6 +261,30 @@ describe('portal', () => {
     expect(calls.filter((c) => c.path === '/access-requests/r1/id-photo')).toHaveLength(2);
   });
 
+  it('a photo ID that failed for a passing reason can be sent again as it is (P67)', async () => {
+    const routes: Record<string, { status?: number; body: unknown }> = {
+      '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },
+      '/access-requests/r1/id-photo': { status: 503, body: { error: 'down' } },
+    };
+    const calls = serve(routes);
+    at('/request-access');
+    fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Mary' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'm@example.test' } });
+    fireEvent.change(screen.getByLabelText(/Whose files/), { target: { value: 'Smith' } });
+    fireEvent.change(screen.getByLabelText(/Photo of your ID/), {
+      target: { files: [new File(['x'], 'id.png', { type: 'image/png' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
+    const again = (await screen.findByRole('button', {
+      name: 'Send photo ID',
+    })) as HTMLButtonElement;
+    expect(again.disabled).toBe(false);
+    routes['/access-requests/r1/id-photo'] = { status: 201, body: { ok: true } };
+    fireEvent.click(again);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Send photo ID' })).toBeNull());
+    expect(calls.filter((c) => c.path === '/access-requests/r1/id-photo')).toHaveLength(2);
+  });
+
   it('request access can send a new code', async () => {
     const calls = serve({
       '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },

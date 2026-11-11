@@ -663,6 +663,7 @@ const DID: Record<string, string> = {
   contact_changed: 'Confirmed a new email or number',
   client_added: 'Client added',
   sign_in_link_sent: 'Sign-in link sent',
+  id_viewed: 'Looked at a photo ID',
 };
 
 /** What happened on one client (P65), or what one person did and had done (P66), newest first. */

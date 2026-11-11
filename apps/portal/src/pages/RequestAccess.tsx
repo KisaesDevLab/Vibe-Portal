@@ -19,15 +19,12 @@ const ID_MAX_BYTES = 15 * 1024 * 1024;
 /** Sends the photo ID for a request (P67). */
 async function sendIdPhoto(requestId: string, file: File): Promise<void> {
   if (file.size > ID_MAX_BYTES) throw new ApiError(413, 'too_large');
-  const res = await fetch(
-    `/api/portal/access-requests/${requestId}/id-photo`,
-    {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: file,
-    },
-  );
+  const res = await fetch(`/api/portal/access-requests/${requestId}/id-photo`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: file,
+  });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     throw new ApiError(res.status, data.error ?? 'error');
@@ -36,6 +33,12 @@ async function sendIdPhoto(requestId: string, file: File): Promise<void> {
 
 const ID_ACCEPT = 'image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf';
 
+/** The file itself was refused: another must be chosen. Anything else (the network, too many
+ *  tries) can be sent again as it is. */
+const refusedFile = (err: unknown): boolean =>
+  err instanceof ApiError &&
+  ['id_type', 'image_too_large', 'photo_unreadable', 'too_large'].includes(err.code);
+
 export function RequestAccess(): JSX.Element {
   const [form, setForm] = useState({ name: '', email: '', phone: '', clientAs: '', note: '' });
   const [code, setCode] = useState('');
@@ -43,6 +46,12 @@ export function RequestAccess(): JSX.Element {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [photo, setPhoto] = useState<File | null>(null);
+  // Changed to give the file chooser a fresh start (choosing the same file again works).
+  const [pick, setPick] = useState(0);
+  const forget = (): void => {
+    setPhoto(null);
+    setPick((n) => n + 1);
+  };
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm({ ...form, [k]: e.target.value });
 
@@ -65,8 +74,8 @@ export function RequestAccess(): JSX.Element {
         if (photo) await sendIdPhoto(r.requestId, photo);
         idSent = Boolean(photo);
       } catch (err) {
-        // Chosen again on the next step.
-        setPhoto(null);
+        // Chosen again on the next step when the file itself was refused.
+        if (refusedFile(err)) forget();
         setError(say(err));
       }
       setStep({ at: 'confirm', id: r.requestId, sentTo: r.sentTo, idSent });
@@ -88,7 +97,7 @@ export function RequestAccess(): JSX.Element {
     } catch (err) {
       // The portal no longer has the photo ID: ask for it again.
       if (err instanceof ApiError && err.code === 'id_required') {
-        setPhoto(null);
+        forget();
         setStep({ ...step, idSent: false });
       }
       setError(say(err));
@@ -105,7 +114,7 @@ export function RequestAccess(): JSX.Element {
       await sendIdPhoto(step.id, photo);
       setStep({ ...step, idSent: true });
     } catch (err) {
-      setPhoto(null);
+      if (refusedFile(err)) forget();
       setError(say(err));
     } finally {
       setBusy(false);
@@ -149,6 +158,7 @@ export function RequestAccess(): JSX.Element {
               <label style={{ display: 'grid', gap: 4 }}>
                 <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
                 <input
+                  key={pick}
                   type="file"
                   accept={ID_ACCEPT}
                   onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
@@ -223,6 +233,7 @@ export function RequestAccess(): JSX.Element {
         <label style={{ display: 'grid', gap: 4 }}>
           <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
           <input
+            key={pick}
             type="file"
             name="idPhoto"
             accept={ID_ACCEPT}

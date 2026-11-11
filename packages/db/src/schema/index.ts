@@ -255,6 +255,10 @@ export const accessRequest = pgTable('access_request', {
   idContentType: text('id_content_type'),
   idSize: bigint('id_size', { mode: 'number' }),
   idRemovedAt: ts('id_removed_at'),
+  /** P67: what the approval gave (the record is made from these). */
+  identityId: uuid('identity_id'),
+  clientIds: jsonb('client_ids').$type<string[]>(),
+  roleLabel: text('role_label'),
 });
 
 export const files = pgTable('files', {

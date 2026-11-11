@@ -662,6 +662,11 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           });
           identityId = granted.identityId;
         }
+        // P67: kept for the record of the approval (made after, and again if it fails).
+        await tx
+          .update(schema.accessRequest)
+          .set({ identityId, clientIds, roleLabel: input.roleLabel })
+          .where(eq(schema.accessRequest.id, id));
         return { to: request.confirmedContact, identityId };
       });
       if (!done) throw new HttpError(404, 'not_found');
