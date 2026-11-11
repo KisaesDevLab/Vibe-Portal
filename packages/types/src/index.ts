@@ -59,6 +59,17 @@ export const EVENT_KINDS = [
   'outside_view',
   'outside_download',
   'outside_locked',
+  // P66: a secure link sent again (a new link; the old one stops working).
+  'outside_share_resent',
+  // P66: the People view: a person's account turned off or on, details changed, a new email or
+  // number asked for and confirmed, a client added by staff, a sign-in link sent by staff.
+  'account_off',
+  'account_on',
+  'person_updated',
+  'contact_change_sent',
+  'contact_changed',
+  'client_added',
+  'sign_in_link_sent',
   // Where stored files live (P51): the B2 bucket set or removed, a move asked for and its end.
   'storage_b2_saved',
   'storage_b2_removed',

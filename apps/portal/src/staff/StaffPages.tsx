@@ -173,7 +173,7 @@ export function StaffHome(): JSX.Element {
   const { admin, allClients } = me.data;
   const nav = [
     'Clients',
-    ...(allClients ? ['Requests'] : []),
+    ...(allClients ? ['Requests', 'People'] : []),
     'Uploads',
     'History',
     ...(admin ? ['Settings', 'Log'] : []),
@@ -182,7 +182,7 @@ export function StaffHome(): JSX.Element {
     <NavLink
       key={n}
       to={n === 'Clients' ? '/staff' : `/staff/${n.toLowerCase()}`}
-      end={n === 'Clients' ? false : true}
+      end={n === 'Clients' || n === 'People' ? false : true}
       onClick={() => setMenuOpen(false)}
       style={({ isActive }) => ({
         padding: narrow ? '12px 12px' : '8px 12px',
@@ -266,8 +266,10 @@ export function StaffHome(): JSX.Element {
       </header>
       <Routes>
         <Route index element={<Clients limited={!allClients} />} />
-        <Route path="clients/:id" element={<ClientDetail />} />
+        <Route path="clients/:id" element={<ClientDetail allClients={allClients} />} />
         {allClients && <Route path="requests" element={<Requests />} />}
+        {allClients && <Route path="people" element={<People />} />}
+        {allClients && <Route path="people/:identityId" element={<Person />} />}
         <Route path="uploads" element={<Uploads />} />
         <Route path="history" element={<History />} />
         {admin && <Route path="settings" element={<Settings />} />}
@@ -372,7 +374,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
   );
 }
 
-function ClientDetail(): JSX.Element {
+function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   const { id = '' } = useParams();
   const people = useLoad<{ users: PortalUser[]; invitations: Invitation[] }>(
     `/v1/clients/${id}/users`,
@@ -423,7 +425,11 @@ function ClientDetail(): JSX.Element {
           {(people.data?.users ?? []).map((u) => (
             <tr key={u.identityId}>
               <td style={td}>
-                {label(u)}
+                {allClients ? (
+                  <Link to={`/staff/people/${u.identityId}`}>{label(u)}</Link>
+                ) : (
+                  label(u)
+                )}
                 <ClientTags
                   label={`Clients ${label(u)} can see`}
                   tags={(u.clients ?? []).map((c) => ({
@@ -568,6 +574,18 @@ function ClientDetail(): JSX.Element {
       <SecureLinks
         load={links}
         busy={busy}
+        onResend={(s) => {
+          if (
+            window.confirm(
+              `Send ${s.email} a new link to the same files? The link they have now stops working.`,
+            )
+          ) {
+            setSentNote('');
+            void act(`/v1/shares/${s.id}/resend`, { method: 'POST' }).then((r) => {
+              if (r) setSentNote(`A new link was sent to ${s.email}.`);
+            });
+          }
+        }}
         onRevoke={(s) => {
           if (
             window.confirm(
@@ -578,7 +596,12 @@ function ClientDetail(): JSX.Element {
           }
         }}
       />
-      <ClientHistory clientId={id} load={history} />
+      <HistoryCard
+        title="History"
+        path={`/v1/clients/${id}/history`}
+        empty="Nothing has happened on this client yet."
+        load={history}
+      />
     </div>
   );
 }
@@ -591,6 +614,8 @@ interface ClientEvent {
   person: string | null;
   file: string | null;
   recipient: string | null;
+  /** The client it was on (P66). */
+  client?: string | null;
 }
 
 const CLIENT_HISTORY_PAGE = 50;
@@ -630,15 +655,30 @@ const DID: Record<string, string> = {
   outside_view: 'Viewed by secure link',
   outside_download: 'Downloaded by secure link',
   outside_locked: 'Secure link locked after wrong codes',
+  outside_share_resent: 'Sent a secure link again',
+  account_off: 'Account turned off',
+  account_on: 'Account turned on',
+  person_updated: 'Details changed',
+  contact_change_sent: 'Asked to confirm a new email or number',
+  contact_changed: 'Confirmed a new email or number',
+  client_added: 'Client added',
+  sign_in_link_sent: 'Sign-in link sent',
 };
 
-/** Everything that happened on one client, newest first (P65). */
-function ClientHistory({
-  clientId,
+/** What happened on one client (P65), or what one person did and had done (P66), newest first. */
+function HistoryCard({
+  title,
+  path,
+  empty,
   load,
+  showClient = false,
 }: {
-  clientId: string;
+  title: string;
+  /** The API path without its query. */
+  path: string;
+  empty: string;
   load: Load<{ events: ClientEvent[] }>;
+  showClient?: boolean;
 }): JSX.Element {
   const [older, setOlder] = useState<ClientEvent[]>([]);
   const [more, setMore] = useState(true);
@@ -657,7 +697,7 @@ function ClientHistory({
     setProblem('');
     try {
       const r = await staffApi<{ events: ClientEvent[] }>(
-        `/v1/clients/${clientId}/history?limit=${CLIENT_HISTORY_PAGE}&before=${last.id}`,
+        `${path}?limit=${CLIENT_HISTORY_PAGE}&before=${last.id}`,
       );
       setOlder((o) => [...o, ...r.events]);
       setMore(r.events.length === CLIENT_HISTORY_PAGE);
@@ -668,16 +708,21 @@ function ClientHistory({
     }
   };
   return (
-    <Card title="History">
-      <Status load={load} what="this client's history" />
+    <Card title={title}>
+      <Status load={load} what={title.toLowerCase()} />
       <Problem text={problem} />
-      {load.data && rows.length === 0 && <p>Nothing has happened on this client yet.</p>}
-      <Table head={['When', 'What', 'Who', 'About']}>
+      {load.data && rows.length === 0 && <p>{empty}</p>}
+      <Table
+        head={
+          showClient ? ['When', 'What', 'Who', 'Client', 'About'] : ['When', 'What', 'Who', 'About']
+        }
+      >
         {rows.map((e) => (
           <tr key={e.id}>
             <td style={{ ...td, whiteSpace: 'nowrap' }}>{when(e.at)}</td>
             <td style={td}>{DID[e.kind] ?? e.kind.replace(/_/g, ' ')}</td>
             <td style={td}>{e.who}</td>
+            {showClient && <td style={td}>{e.client ?? ''}</td>}
             <td style={{ ...td, overflowWrap: 'anywhere' }}>
               {[
                 e.file,
@@ -1232,10 +1277,13 @@ const SHARE_STATE: Record<OutsideShare['status'], string> = {
 function SecureLinks({
   load,
   busy,
+  onResend,
   onRevoke,
 }: {
   load: Load<{ shares: OutsideShare[] }>;
   busy: boolean;
+  /** Sends a new link to the same files (P66). */
+  onResend: (share: OutsideShare) => void;
   onRevoke: (share: OutsideShare) => void;
 }): JSX.Element {
   const shares = load.data?.shares ?? [];
@@ -1287,18 +1335,31 @@ function SecureLinks({
                   : `${s.opens} ${s.opens === 1 ? 'time' : 'times'}, last ${when(s.lastOpenedAt)}`}
               </td>
               <td style={td}>
-                {(s.status === 'sent' || s.status === 'opened') && (
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    disabled={busy}
-                    aria-label={`Revoke the link sent to ${s.email}`}
-                    onClick={() => onRevoke(s)}
-                  >
-                    <CloseIcon size={16} />
-                    Revoke
-                  </Button>
-                )}
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {(s.status === 'sent' || s.status === 'opened' || s.status === 'locked') && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={busy}
+                      aria-label={`Resend the link to ${s.email}`}
+                      onClick={() => onResend(s)}
+                    >
+                      Resend
+                    </Button>
+                  )}
+                  {(s.status === 'sent' || s.status === 'opened') && (
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={busy}
+                      aria-label={`Revoke the link sent to ${s.email}`}
+                      onClick={() => onRevoke(s)}
+                    >
+                      <CloseIcon size={16} />
+                      Revoke
+                    </Button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}
@@ -1683,6 +1744,510 @@ function Log(): JSX.Element {
         </div>
       )}
     </Card>
+  );
+}
+
+interface PersonRow {
+  identityId: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  status: 'active' | 'disabled';
+  lastSignInAt: string | null;
+  clients: { id: string; name: string }[];
+}
+
+const personLabel = (p: { name: string; email: string | null; phone: string | null }): string =>
+  p.name || p.email || p.phone || '?';
+
+/** Everyone on the portal, turned-off accounts too (P66). */
+function People(): JSX.Element {
+  const [typed, setTyped] = useState('');
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    const t = window.setTimeout(() => setQ(typed.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [typed]);
+  const path = `/v1/people/list?q=${encodeURIComponent(q)}`;
+  const load = useLoad<{ people: PersonRow[]; more: boolean }>(path);
+  const [later, setLater] = useState<PersonRow[]>([]);
+  const [more, setMore] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  useEffect(() => {
+    setLater([]);
+    setMore(load.data?.more ?? false);
+  }, [load.data]);
+  const rows = [...(load.data?.people ?? []), ...later];
+  const showMore = async (): Promise<void> => {
+    setBusy(true);
+    setProblem('');
+    try {
+      const r = await staffApi<{ people: PersonRow[]; more: boolean }>(
+        `${path}&offset=${rows.length}`,
+      );
+      setLater((l) => [...l, ...r.people]);
+      setMore(r.more);
+    } catch (err) {
+      setProblem(staffSay(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card title="People">
+      <p style={{ marginTop: 0 }}>
+        Everyone who can sign in to the portal. Open a person to change their details, their clients
+        or their account, send them a sign-in link, or see what they did.
+      </p>
+      <div style={{ maxWidth: 360, marginBottom: 8 }}>
+        <Input
+          label="Find a person (name, email or mobile number)"
+          name="peopleFind"
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+        />
+      </div>
+      <Status load={load} what="the people" />
+      <Problem text={problem} />
+      {load.data && rows.length === 0 && (
+        <p>{q ? 'Nobody matches.' : 'Nobody is on the portal yet.'}</p>
+      )}
+      <Table head={['Name', 'Email / phone', 'Clients', 'Last sign-in']}>
+        {rows.map((p) => (
+          <tr key={p.identityId}>
+            <td style={td}>
+              <Link to={`/staff/people/${p.identityId}`}>{personLabel(p)}</Link>
+              {p.status === 'disabled' && (
+                <span style={{ ...tagStyle, marginLeft: 6 }}>Turned off</span>
+              )}
+            </td>
+            <td style={{ ...td, overflowWrap: 'anywhere' }}>
+              {[p.email, p.phone].filter(Boolean).join(', ')}
+            </td>
+            <td style={td}>
+              <ClientTags
+                label={`Clients ${personLabel(p)} can see`}
+                tags={p.clients.map((c) => ({
+                  id: c.id,
+                  content: <Link to={`/staff/clients/${c.id}`}>{c.name}</Link>,
+                }))}
+              />
+            </td>
+            <td style={td}>{when(p.lastSignInAt)}</td>
+          </tr>
+        ))}
+      </Table>
+      {more && (
+        <div style={{ marginTop: 8 }}>
+          <Button variant="secondary" disabled={busy} onClick={() => void showMore()}>
+            Show more
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+interface PersonData {
+  person: {
+    identityId: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+    notify: 'email' | 'sms' | 'both' | 'none';
+    status: 'active' | 'disabled';
+    createdAt: string;
+    lastSignInAt: string | null;
+  };
+  clients: {
+    id: string;
+    name: string;
+    roleLabel: string;
+    active: boolean;
+    clientActive: boolean;
+  }[];
+  pendingContact: { contact: string; expiresAt: string } | null;
+  textsOn: boolean;
+}
+
+const NOTIFY_WORDS = {
+  email: 'By email',
+  sms: 'By text',
+  both: 'By email and text',
+  none: 'Not at all',
+} as const;
+
+/** One person: details, clients, account and activity (P66). */
+function Person(): JSX.Element {
+  const { identityId = '' } = useParams();
+  const load = useLoad<PersonData>(`/v1/people/${identityId}`);
+  const history = useLoad<{ events: ClientEvent[] }>(
+    `/v1/people/${identityId}/history?limit=${CLIENT_HISTORY_PAGE}`,
+  );
+  const all = useLoad<{ clients: ClientRow[] }>('/v1/clients');
+  const reload = (): void => {
+    load.reload();
+    history.reload();
+  };
+  const { act, busy, error } = useAct(reload);
+  const [note, setNote] = useState('');
+  const [name, setName] = useState('');
+  const [notify, setNotify] = useState<PersonData['person']['notify']>('email');
+  const [changing, setChanging] = useState<'email' | 'phone' | null>(null);
+  const [contact, setContact] = useState('');
+  const [adding, setAdding] = useState({ clientId: '', roleLabel: '' });
+  const d = load.data;
+  useEffect(() => {
+    if (!d) return;
+    setName(d.person.name);
+    setNotify(d.person.notify);
+  }, [d]);
+  if (!d) {
+    return (
+      <div style={{ display: 'grid', gap: 16 }}>
+        <Link to="/staff/people">← All people</Link>
+        <Card title="Person">
+          <Status load={load} what="this person" />
+        </Card>
+      </div>
+    );
+  }
+  const p = d.person;
+  const off = p.status === 'disabled';
+  const who = personLabel(p);
+  const done = (r: unknown, text: string): void => {
+    if (r) setNote(text);
+  };
+  const run = (path: string, init: { method?: string; body?: unknown }, text: string): void => {
+    setNote('');
+    void act(path, init).then((r) => done(r, text));
+  };
+  const has = new Set(d.clients.filter((c) => c.active).map((c) => c.id));
+  const canAdd = (all.data?.clients ?? []).filter((c) => c.active && !has.has(c.id));
+  const notifyOptions = (Object.keys(NOTIFY_WORDS) as (keyof typeof NOTIFY_WORDS)[]).filter(
+    (k) =>
+      k === 'none' ||
+      k === p.notify ||
+      ((k === 'email' || k === 'both' ? Boolean(p.email) : true) &&
+        (k === 'sms' || k === 'both' ? Boolean(p.phone) && d.textsOn : true)),
+  );
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <Link to="/staff/people">← All people</Link>
+      <h2 style={{ margin: 0 }}>
+        {who}
+        {off && <span style={{ ...tagStyle, marginLeft: 8, fontWeight: 400 }}>Turned off</span>}
+      </h2>
+      <Problem text={error} />
+      {note && <p role="status">{note}</p>}
+
+      <Card title="Details">
+        <form
+          style={{ display: 'grid', gap: 8, maxWidth: 420 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            run(
+              `/v1/people/${p.identityId}`,
+              { method: 'PATCH', body: { name, notify } },
+              'Saved.',
+            );
+          }}
+        >
+          <Input
+            label="Name"
+            name="personName"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <Select
+            label="New files are announced"
+            value={notify}
+            onChange={(e) => setNotify(e.target.value as PersonData['person']['notify'])}
+          >
+            {notifyOptions.map((k) => (
+              <option key={k} value={k}>
+                {NOTIFY_WORDS[k]}
+              </option>
+            ))}
+          </Select>
+          <div>
+            <Button type="submit" disabled={busy}>
+              Save
+            </Button>
+          </div>
+        </form>
+        <div style={{ display: 'grid', gap: 8, marginTop: 16, maxWidth: 520 }}>
+          <strong>Signs in with</strong>
+          <span style={{ fontSize: 13 }}>
+            A new email or number is used only once they open the link sent to it, so a mistyped one
+            lets nobody in.
+          </span>
+          {(['email', 'phone'] as const).map((f) => (
+            <div
+              key={f}
+              style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}
+            >
+              <span style={{ minWidth: 120 }}>{f === 'email' ? 'Email' : 'Mobile number'}</span>
+              <span style={{ overflowWrap: 'anywhere' }}>{p[f] ?? 'None'}</span>
+              {!off && (f === 'email' || d.textsOn) && changing !== f && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    setChanging(f);
+                    setContact('');
+                  }}
+                >
+                  {p[f] ? 'Change' : 'Add'}
+                </Button>
+              )}
+              {f === 'phone' && p.phone && p.email && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => {
+                    if (window.confirm(`Remove ${p.phone}? They keep signing in by email.`)) {
+                      run(
+                        `/v1/people/${p.identityId}/phone`,
+                        { method: 'DELETE' },
+                        'Mobile number removed.',
+                      );
+                    }
+                  }}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          ))}
+          {changing && (
+            <form
+              style={{ display: 'grid', gap: 8 }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                setNote('');
+                void act(`/v1/people/${p.identityId}/contact`, {
+                  method: 'POST',
+                  body: { [changing]: contact },
+                }).then((r) => {
+                  if (r) {
+                    setNote(
+                      `A link was sent to ${contact.trim()}. The change takes effect when they open it.`,
+                    );
+                    setChanging(null);
+                  }
+                });
+              }}
+            >
+              <Input
+                label={changing === 'email' ? 'New email' : 'New mobile number'}
+                name="newContact"
+                type={changing === 'email' ? 'email' : 'tel'}
+                value={contact}
+                onChange={(e) => setContact(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button type="submit" disabled={busy || !contact.trim()}>
+                  Send confirmation link
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => setChanging(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          )}
+          {d.pendingContact && (
+            <p role="status" style={{ margin: 0 }}>
+              Waiting for {d.pendingContact.contact} to be confirmed (until{' '}
+              {when(d.pendingContact.expiresAt)}).{' '}
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() =>
+                  run(
+                    `/v1/people/${p.identityId}/contact`,
+                    { method: 'DELETE' },
+                    'The change was withdrawn.',
+                  )
+                }
+              >
+                Withdraw
+              </Button>
+            </p>
+          )}
+        </div>
+      </Card>
+
+      <Card title="Clients">
+        {d.clients.length === 0 && <p>No clients.</p>}
+        <Table head={['Client', 'Role', 'Access', 'Actions']}>
+          {d.clients.map((c) => (
+            <tr key={c.id}>
+              <td style={td}>
+                <Link to={`/staff/clients/${c.id}`}>{c.name}</Link>
+                {!c.clientActive && ' (client switched off)'}
+              </td>
+              <td style={td}>{c.roleLabel}</td>
+              <td style={td}>{c.active ? 'Can see it' : 'Removed'}</td>
+              <td style={td}>
+                {c.active && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={`Remove ${c.name} for ${who}`}
+                    onClick={() => {
+                      if (
+                        window.confirm(`Remove ${c.name} for ${who}? They stop seeing it at once.`)
+                      ) {
+                        run(
+                          `/v1/people/${p.identityId}/clients/${c.id}`,
+                          { method: 'DELETE' },
+                          `${c.name} removed.`,
+                        );
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </Table>
+        <form
+          style={{ display: 'grid', gap: 8, maxWidth: 420, marginTop: 12 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const name = canAdd.find((c) => c.id === adding.clientId)?.displayName ?? 'The client';
+            setNote('');
+            void act(`/v1/people/${p.identityId}/clients`, { method: 'POST', body: adding }).then(
+              (r) => {
+                if (!r) return;
+                setAdding({ clientId: '', roleLabel: '' });
+                setNote(
+                  (r as { told?: boolean }).told
+                    ? `${name} added. ${who} was told.`
+                    : `${name} added.`,
+                );
+              },
+            );
+          }}
+        >
+          <strong>Add a client</strong>
+          <span style={{ fontSize: 13 }}>
+            They can see it at once, and are told by email or text.
+          </span>
+          <Select
+            label="Client"
+            value={adding.clientId}
+            onChange={(e) => setAdding({ ...adding, clientId: e.target.value })}
+          >
+            <option value="">Choose a client</option>
+            {canAdd.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.displayName}
+              </option>
+            ))}
+          </Select>
+          <Input
+            label="Role (optional, e.g. Spouse)"
+            name="addRole"
+            value={adding.roleLabel}
+            onChange={(e) => setAdding({ ...adding, roleLabel: e.target.value })}
+          />
+          <div>
+            <Button type="submit" disabled={busy || !adding.clientId}>
+              Add client
+            </Button>
+          </div>
+        </form>
+      </Card>
+
+      <Card title="Account">
+        <div style={{ display: 'grid', gap: 8, maxWidth: 560 }}>
+          <span>
+            Created {when(p.createdAt)}; last signed in{' '}
+            {p.lastSignInAt ? when(p.lastSignInAt) : 'never'}.
+          </span>
+          {off ? (
+            <span>
+              This account is turned off: they cannot sign in to any client. Their clients and
+              history are kept.
+            </span>
+          ) : (
+            <span>
+              A sign-in link goes to their email (or by text if they have only a number). It works
+              once, for 24 hours.
+            </span>
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {!off && (
+              <Button
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  setNote('');
+                  void act(`/v1/people/${p.identityId}/sign-in-link`, { method: 'POST' }).then(
+                    (r) => {
+                      if (r) setNote(`A sign-in link was sent to ${(r as { to: string }).to}.`);
+                    },
+                  );
+                }}
+              >
+                Send sign-in link
+              </Button>
+            )}
+            {off ? (
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  run(
+                    `/v1/people/${p.identityId}/turn-on`,
+                    { method: 'POST' },
+                    'Account turned on.',
+                  )
+                }
+              >
+                Turn account on
+              </Button>
+            ) : (
+              <Button
+                variant="danger"
+                disabled={busy}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Turn off ${who}'s account? They are signed out at once and cannot sign in to any client until it is turned on again.`,
+                    )
+                  ) {
+                    run(
+                      `/v1/people/${p.identityId}/turn-off`,
+                      { method: 'POST' },
+                      'Account turned off.',
+                    );
+                  }
+                }}
+              >
+                Turn account off
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <HistoryCard
+        title="Activity"
+        path={`/v1/people/${p.identityId}/history`}
+        empty="Nothing yet."
+        load={history}
+        showClient
+      />
+    </div>
   );
 }
 

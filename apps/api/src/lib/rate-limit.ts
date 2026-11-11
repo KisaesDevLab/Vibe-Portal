@@ -37,6 +37,8 @@ export const LIMITS = {
   outsideSharePerStaff: { max: 50, windowSeconds: 24 * 60 * 60 },
   /** Secure links one client person may send a day (P55). */
   outsideSharePerClientPerson: { max: 10, windowSeconds: 24 * 60 * 60 },
+  /** Sign-in links and contact confirmations staff send one person (P66). */
+  staffSendPerPerson: { max: 5, windowSeconds: 60 * 60 },
   /** Every call about secure links from one address. */
   outsidePerIp: { max: 60, windowSeconds: 60 },
   /** Access codes asked for from one address. */

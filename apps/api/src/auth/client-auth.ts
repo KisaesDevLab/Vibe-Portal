@@ -32,10 +32,12 @@ import { hit, LIMITS } from '../lib/rate-limit';
 import { randomToken, sha256, sixDigitCode } from '../lib/secrets';
 import { checkCode, issue, redeemToken } from './challenges';
 import { activeClientsOf } from './grant';
+import { withdrawInvites } from '../firm/access';
 import {
   clearSessionCookie,
   createSession,
   endSession,
+  endSessionsOf,
   readSessionCookie,
   resolveSession,
   setActiveClient,
@@ -227,6 +229,70 @@ export function clientAuthRouter(ctx: Ctx): Router {
     }),
   );
 
+  // P66: the link staff had sent to a new email or number. Opening it proves the person gets
+  // messages there, so it becomes the one they sign in with. It signs nobody in.
+  r.post(
+    '/confirm-contact',
+    h(async (req, res) => {
+      const { token } = body(LinkSchema, req);
+      const now = ctx.now();
+      if (!(await hit(ctx.db, `verify:ip:${clientIp(req)}`, LIMITS.verifyPerIp, now))) {
+        throw new HttpError(429, 'too_many_requests');
+      }
+      const ch = await redeemToken(ctx.db, 'contact_confirm', token, now);
+      if (!ch?.identityId) throw new HttpError(400, 'link_expired');
+      const field = ch.contact.includes('@') ? 'email' : 'phone';
+      const [who] = await ctx.db
+        .select()
+        .from(schema.portalIdentity)
+        .where(eq(schema.portalIdentity.id, ch.identityId));
+      if (!who || who.status !== 'active') throw new HttpError(400, 'link_expired');
+      const old = who[field];
+      try {
+        await ctx.db
+          .update(schema.portalIdentity)
+          .set({ [field]: ch.contact })
+          .where(eq(schema.portalIdentity.id, who.id));
+      } catch (err) {
+        // Someone else signed up with it since the link was sent: never merge two people.
+        if ((err as { code?: string }).code === '23505') throw new HttpError(409, 'contact_taken');
+        throw err;
+      }
+      // Signed in elsewhere with the old one: sign in again with the new one.
+      await endSessionsOf(ctx.db, who.id);
+      await voidChallenges(ctx, who.id);
+      // An invitation waiting for the old contact would make a second account from it.
+      if (old) await withdrawInvites(ctx, null, [old]);
+      await record(
+        ctx.db,
+        'contact_changed',
+        { kind: 'client', name: who.id },
+        { identityId: who.id, detail: { field } },
+      );
+      // The old address or number hears of it (without the new one).
+      if (old) {
+        const firm = await firmName(ctx);
+        deliver(
+          ctx,
+          field === 'email'
+            ? messageTo(
+                old,
+                `Your email for ${firm}'s client portal was changed`,
+                `The email address you sign in to ${firm}'s client portal with was changed at ` +
+                  `${firm}'s request, and confirmed from the new address. This one no longer ` +
+                  `signs you in.\n\nIf you did not expect this, contact ${firm}.`,
+              )
+            : messageTo(
+                old,
+                '',
+                `${firm}: the mobile number for its client portal was changed; this one no longer signs you in. If unexpected, contact ${firm}.`,
+              ),
+        );
+      }
+      res.json({ ok: true, field });
+    }),
+  );
+
   r.post(
     '/logout',
     h(async (req, res) => {
@@ -313,6 +379,8 @@ export async function voidChallenges(ctx: Ctx, identityId: string): Promise<void
           eq(schema.signInChallenge.kind, 'magic_link'),
           eq(schema.signInChallenge.kind, 'sms_code'),
           eq(schema.signInChallenge.kind, 'phone_confirm'),
+          // P66: a new email or number staff asked for.
+          eq(schema.signInChallenge.kind, 'contact_confirm'),
         ),
       ),
     );

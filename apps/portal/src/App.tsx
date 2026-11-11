@@ -5,6 +5,7 @@
 import { Route, Routes } from 'react-router-dom';
 
 import { AcceptInvitation } from './pages/AcceptInvitation';
+import { ConfirmContact } from './pages/ConfirmContact';
 import { FileView } from './pages/FileView';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
@@ -19,6 +20,7 @@ export function App(): JSX.Element {
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/auth/verify" element={<VerifyLink />} />
+      <Route path="/auth/confirm-contact" element={<ConfirmContact />} />
       <Route path="/invite" element={<AcceptInvitation />} />
       <Route path="/request-access" element={<RequestAccess />} />
       <Route path="/files/:id" element={<FileView />} />

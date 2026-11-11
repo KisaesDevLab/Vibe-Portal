@@ -103,6 +103,15 @@ export function staffSay(err: unknown): string {
     local_login_disabled:
       'Staff sign in with Vibe Auth only. Use the Sign in with Vibe Auth button above.',
     snapshot_busy: 'A database copy is being sent right now. Try again in a minute.',
+    share_ended: 'That link has ended or was revoked. Send a new one instead.',
+    send_failed: 'The message could not be sent. Check the address or number and try again.',
+    notify_unreachable: 'They have no email or number for that. Choose another way.',
+    account_off: 'Their account is turned off. Turn it on first.',
+    no_access: 'They have no client to sign in to. Add a client first.',
+    texts_off: 'Text messages are not set up on this portal.',
+    same_contact: 'That is already the one they sign in with.',
+    contact_taken: 'Someone else on the portal already signs in with that.',
+    only_contact: 'It is the only way they sign in: add an email first.',
   };
   // The portal's own reason (Object Lock, another portal's bucket, no room), in full.
   if ((code === 'b2_refused' || code === 'no_room') && err instanceof StaffApiError && err.detail) {

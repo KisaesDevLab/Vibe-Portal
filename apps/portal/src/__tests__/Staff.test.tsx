@@ -904,6 +904,185 @@ describe('staff page', () => {
     expect(screen.queryByRole('button', { name: 'Show older' })).toBeNull();
   });
 
+  const PERSON = {
+    person: {
+      identityId: 'p1',
+      name: 'Mary Smith',
+      email: 'mary@example.test',
+      phone: null,
+      notify: 'email',
+      status: 'active',
+      createdAt: '2026-11-01T10:00:00Z',
+      lastSignInAt: '2026-11-10T10:00:00Z',
+    },
+    clients: [
+      { id: CLIENT.id, name: 'Smith, John', roleLabel: 'Spouse', active: true, clientActive: true },
+    ],
+    pendingContact: null,
+    textsOn: true,
+  };
+  const personRoutes = (more: Record<string, Reply> = {}): Record<string, Reply> => ({
+    '/auth/me': ME,
+    '/v1/people/p1': { body: PERSON },
+    '/v1/people/p1/history?limit=50': {
+      body: {
+        events: [
+          {
+            id: 4,
+            at: '2026-11-10T10:00:00Z',
+            kind: 'sign_in',
+            who: 'Mary Smith',
+            person: 'Mary Smith',
+            file: null,
+            recipient: null,
+            client: null,
+          },
+          {
+            id: 3,
+            at: '2026-11-09T10:00:00Z',
+            kind: 'download',
+            who: 'Mary Smith',
+            person: null,
+            file: '2025 Form 1040.pdf',
+            recipient: null,
+            client: 'Smith, John',
+          },
+        ],
+      },
+    },
+    '/v1/clients': {
+      body: {
+        clients: [
+          { ...CLIENT, active: true },
+          {
+            id: 'c2',
+            clientCode: '1002',
+            displayName: 'Smith Farms LLC',
+            active: true,
+            users: 0,
+            files: 0,
+            waiting: 0,
+          },
+        ],
+      },
+    },
+    ...more,
+  });
+
+  it('People lists everyone with their clients and opens a person (P66)', async () => {
+    serve({
+      '/auth/me': ME,
+      '/v1/people/list?q=': {
+        body: {
+          people: [
+            {
+              identityId: 'p1',
+              name: 'Mary Smith',
+              email: 'mary@example.test',
+              phone: null,
+              status: 'disabled',
+              lastSignInAt: null,
+              clients: [{ id: CLIENT.id, name: 'Smith, John' }],
+            },
+          ],
+          more: false,
+        },
+      },
+    });
+    at('/staff/people');
+    const link = await screen.findByRole('link', { name: 'Mary Smith' });
+    expect(link.getAttribute('href')).toBe('/staff/people/p1');
+    expect(screen.getByText('Turned off')).toBeTruthy();
+    expect(screen.getByRole('list', { name: 'Clients Mary Smith can see' })).toBeTruthy();
+  });
+
+  it("a person's page: details, clients, sign-in link, turning off, and activity (P66)", async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const calls = serve(
+      personRoutes({
+        'POST /v1/people/p1/sign-in-link': { body: { ok: true, to: 'mary@example.test' } },
+        'POST /v1/people/p1/clients': { status: 201, body: { ok: true, told: true } },
+        'POST /v1/people/p1/turn-off': { body: { ok: true } },
+        'POST /v1/people/p1/contact': { body: { ok: true } },
+      }),
+    );
+    at('/staff/people/p1');
+    expect(await screen.findByRole('heading', { name: 'Mary Smith' })).toBeTruthy();
+    // Activity, with the client each row was on.
+    expect(await screen.findByText('Downloaded a file')).toBeTruthy();
+    expect(screen.getByText('2025 Form 1040.pdf')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send sign-in link' }));
+    expect(await screen.findByText('A sign-in link was sent to mary@example.test.')).toBeTruthy();
+
+    // Only clients she cannot see yet are offered.
+    const pick = (await screen.findByLabelText('Client')) as HTMLSelectElement;
+    expect(Array.from(pick.options).map((o) => o.text)).toEqual([
+      'Choose a client',
+      'Smith Farms LLC',
+    ]);
+    fireEvent.change(pick, { target: { value: 'c2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add client' }));
+    expect(await screen.findByText('Smith Farms LLC added. Mary Smith was told.')).toBeTruthy();
+    expect(calls.find((c) => c.path === '/v1/people/p1/clients')?.body).toEqual({
+      clientId: 'c2',
+      roleLabel: '',
+    });
+
+    // A new email goes by a confirmation link.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Change' })[0] as HTMLElement);
+    fireEvent.change(screen.getByLabelText('New email'), { target: { value: 'm@new.test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send confirmation link' }));
+    expect(
+      await screen.findByText(
+        'A link was sent to m@new.test. The change takes effect when they open it.',
+      ),
+    ).toBeTruthy();
+    expect(calls.find((c) => c.path === '/v1/people/p1/contact')?.body).toEqual({
+      email: 'm@new.test',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Turn account off' }));
+    expect(await screen.findByText('Account turned off.')).toBeTruthy();
+  });
+
+  it('a secure link can be sent again (P66)', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const share = {
+      id: 's1',
+      email: 'pat@first-bank.test',
+      name: 'Pat Roe',
+      organization: '',
+      canDownload: true,
+      watermark: false,
+      createdAt: '2026-11-01T10:00:00Z',
+      createdBy: 'ann@firm.test',
+      byClient: false,
+      downloads: 0,
+      downloadLimit: 5,
+      expiresAt: '2026-12-01T10:00:00Z',
+      revokedAt: null,
+      opens: 1,
+      lastOpenedAt: '2026-11-02T10:00:00Z',
+      status: 'opened',
+      files: [{ fileId: 'f1', name: 'letter.pdf', removed: false, downloads: 0 }],
+    };
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [share] } },
+      [`/v1/clients/${CLIENT.id}/history?limit=50`]: { body: { events: [] } },
+      'POST /v1/shares/s1/resend': { body: { ok: true } },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Resend the link to pat@first-bank.test' }),
+    );
+    expect(await screen.findByText('A new link was sent to pat@first-bank.test.')).toBeTruthy();
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/v1/shares/s1/resend')).toBe(true);
+  });
+
   it('Log shows the server warnings and errors with their details (P64)', async () => {
     serve({
       '/auth/me': ME,

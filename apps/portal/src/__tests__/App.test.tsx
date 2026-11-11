@@ -171,6 +171,27 @@ describe('portal', () => {
     });
   });
 
+  it('a new email is confirmed only when the person presses Confirm (P66)', async () => {
+    const calls = serve({ '/auth/confirm-contact': { body: { ok: true, field: 'email' } } });
+    window.history.replaceState(null, '', '/auth/confirm-contact#t=abcdefghijklmnopqrstuvwxyz');
+    render(
+      <MemoryRouter initialEntries={['/auth/confirm-contact']}>
+        <App />
+      </MemoryRouter>,
+    );
+    await screen.findByRole('button', { name: 'Confirm' });
+    expect(calls).toEqual([]);
+    expect(window.location.hash).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    expect(
+      await screen.findByText('This email address is now the one you sign in with.'),
+    ).toBeTruthy();
+    expect(calls[0]).toMatchObject({
+      path: '/auth/confirm-contact',
+      body: { token: 'abcdefghijklmnopqrstuvwxyz' },
+    });
+  });
+
   it('offers Try again when the portal cannot be reached', async () => {
     serve({ '/auth/me': { status: 503, body: { error: 'down' } } });
     at('/');

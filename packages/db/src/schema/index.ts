@@ -434,7 +434,7 @@ export const sessions = pgTable('sessions', {
 export const signInChallenge = pgTable('sign_in_challenge', {
   id: uuid('id').primaryKey().defaultRandom(),
   kind: text('kind', {
-    enum: ['magic_link', 'sms_code', 'request_confirm', 'phone_confirm'],
+    enum: ['magic_link', 'sms_code', 'request_confirm', 'phone_confirm', 'contact_confirm'],
   }).notNull(),
   identityId: uuid('identity_id').references(() => portalIdentity.id),
   accessRequestId: uuid('access_request_id').references(() => accessRequest.id),

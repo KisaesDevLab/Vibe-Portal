@@ -237,34 +237,16 @@ export async function createOutsideShare(
   }
 
   // The link exists nowhere but in this email: if it cannot be sent, there is no share.
-  const firm = await firmName(ctx);
-  const what = files.length === 1 ? 'a document' : `${files.length} documents`;
-  const text = [
-    name ? `Hello ${name},` : 'Hello,',
-    '',
-    o.from
-      ? `${o.from.name}, a client of ${firm}, has shared ${what} with you securely through ${firm}'s client portal.`
-      : `${firm} has shared ${what} with you securely.`,
-    ...(message ? ['', message] : []),
-    '',
-    `View ${files.length === 1 ? 'it' : 'them'} here (expires ${expiresAt.toISOString().slice(0, 10)}):`,
-    shareLink(ctx, id, secret),
-    '',
-    "When you open the page, you'll receive a one-time access code at this address to unlock " +
-      `the ${files.length === 1 ? 'document' : 'documents'}.`,
-    '',
-    'This link is private. Please do not forward it.',
-  ].join('\n');
   try {
-    await ctx.notifier.send(
-      messageTo(
-        email,
-        o.from
-          ? `${o.from.name} shared a secure document with you`
-          : `${firm} shared a secure document with you`,
-        text,
-      ),
-    );
+    await sendShareEmail(ctx, {
+      email,
+      name,
+      from: o.from?.name ?? null,
+      message,
+      count: files.length,
+      expiresAt,
+      link: shareLink(ctx, id, secret),
+    });
   } catch (err) {
     ctx.log.error({ err, channel: 'email' }, 'notification failed');
     await ctx.db.delete(schema.fileShare).where(eq(schema.fileShare.id, id));
@@ -286,6 +268,53 @@ export async function createOutsideShare(
     },
   });
   return { shareId: id, expiresAt };
+}
+
+/** The email that carries a secure link: when it is made, and when staff send it again. */
+async function sendShareEmail(
+  ctx: Ctx,
+  m: {
+    email: string;
+    name: string;
+    /** The client's person who sent it (P55), or null for the firm. */
+    from: string | null;
+    message: string;
+    count: number;
+    expiresAt: Date;
+    link: string;
+    again?: boolean;
+  },
+): Promise<void> {
+  const firm = await firmName(ctx);
+  const what = m.count === 1 ? 'a document' : `${m.count} documents`;
+  const text = [
+    m.name ? `Hello ${m.name},` : 'Hello,',
+    '',
+    m.from
+      ? `${m.from}, a client of ${firm}, has shared ${what} with you securely through ${firm}'s client portal.`
+      : `${firm} has shared ${what} with you securely.`,
+    ...(m.again
+      ? ['', 'This is a new link: an earlier one for these documents no longer works.']
+      : []),
+    ...(m.message ? ['', m.message] : []),
+    '',
+    `View ${m.count === 1 ? 'it' : 'them'} here (expires ${m.expiresAt.toISOString().slice(0, 10)}):`,
+    m.link,
+    '',
+    "When you open the page, you'll receive a one-time access code at this address to unlock " +
+      `the ${m.count === 1 ? 'document' : 'documents'}.`,
+    '',
+    'This link is private. Please do not forward it.',
+  ].join('\n');
+  await ctx.notifier.send(
+    messageTo(
+      m.email,
+      m.from
+        ? `${m.from} shared a secure document with you`
+        : `${firm} shared a secure document with you`,
+      text,
+    ),
+  );
 }
 
 export function firmSharesRouter(ctx: Ctx): Router {
@@ -375,6 +404,62 @@ export function firmSharesRouter(ctx: Ctx): Router {
             })),
         })),
       });
+    }),
+  );
+
+  // Sends the link again (P66). Only a digest of the link is kept, so it is a new link to the
+  // same files, access and end date: the old one stops working, and browsers that gave a code
+  // must give one again. A link locked by wrong codes works again with the new one.
+  r.post(
+    '/:id/resend',
+    h(async (req, res) => {
+      const id = Uuid.safeParse(req.params['id']);
+      if (!id.success) throw new HttpError(404, 'not_found');
+      const [share] = await ctx.db
+        .select()
+        .from(schema.fileShare)
+        .where(and(eq(schema.fileShare.id, id.data), inScope(req, schema.fileShare.clientId)));
+      if (!share) throw new HttpError(404, 'not_found');
+      const status = shareStatus(share, ctx.now());
+      if (status === 'revoked' || status === 'expired') throw new HttpError(409, 'share_ended');
+      const [n] = await ctx.db
+        .select({ n: sql<number>`count(*)` })
+        .from(schema.fileShareItem)
+        .where(eq(schema.fileShareItem.shareId, share.id));
+      const secret = randomToken();
+      const set = { secretHash: sha256(secret), revokedAt: null, revokedBy: null };
+      await ctx.db.update(schema.fileShare).set(set).where(eq(schema.fileShare.id, share.id));
+      try {
+        await sendShareEmail(ctx, {
+          email: share.recipientEmail,
+          name: share.recipientName,
+          from: share.sentByIdentityId ? share.createdBy : null,
+          message: share.message,
+          count: Number(n?.n ?? 0),
+          expiresAt: share.expiresAt,
+          link: shareLink(ctx, share.id, secret),
+          again: true,
+        });
+      } catch (err) {
+        ctx.log.error({ err, channel: 'email' }, 'secure link resend failed');
+        // The old link keeps working: nothing was sent.
+        await ctx.db
+          .update(schema.fileShare)
+          .set({
+            secretHash: share.secretHash,
+            revokedAt: share.revokedAt,
+            revokedBy: share.revokedBy,
+          })
+          .where(eq(schema.fileShare.id, share.id));
+        throw new HttpError(502, 'email_failed');
+      }
+      await ctx.db.delete(schema.fileShareGrant).where(eq(schema.fileShareGrant.shareId, share.id));
+      await ctx.db.delete(schema.fileShareCode).where(eq(schema.fileShareCode.shareId, share.id));
+      await record(ctx.db, 'outside_share_resent', actorOf(req), {
+        clientId: share.clientId,
+        detail: { shareId: share.id, to: share.recipientEmail },
+      });
+      res.json({ ok: true });
     }),
   );
 

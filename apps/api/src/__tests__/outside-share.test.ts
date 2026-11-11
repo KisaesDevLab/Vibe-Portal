@@ -107,6 +107,42 @@ async function unlock(s: Sent, to = LENDER): Promise<Agent> {
 const wrongFor = (right: string): string => (right === '000000' ? '111111' : '000000');
 
 describe('a secure link to someone outside (P49)', () => {
+  it('staff resend it: a new link to the same files, and the old one stops (P66)', async () => {
+    const boss = await admin();
+    const fileId = await onPortal(CLIENT, 'Return-2025.pdf', await realPdf());
+    const first = await send(boss, [fileId], { canDownload: true, name: 'Pat Roe' });
+    const opened = await unlock(first);
+    expect(
+      (await opened.post(`${first.path}/open`).send({ key: first.key }).expect(200)).body.files,
+    ).toHaveLength(1);
+
+    await boss.post(`/api/staff/v1/shares/${first.id}/resend`).expect(200);
+    const again = linkOf(LENDER);
+    expect(again.id).toBe(first.id);
+    expect(again.key).not.toBe(first.key);
+    const mail = w.notes.last(LENDER);
+    expect(mail.body).toContain('This is a new link');
+    expect(mail.body).toContain('Hello Pat Roe,');
+    // The old link and the browser that unlocked it no longer work; the new one does.
+    const old = await request(w.app).post(`${first.path}/code`).send({ key: first.key });
+    expect(old.status).toBeGreaterThanOrEqual(400);
+    const stale = await opened.get(`${first.path}/files/${fileId}/content?mode=download`);
+    expect(stale.status).toBeGreaterThanOrEqual(400);
+    w.later(15); // past the limit on codes asked for
+    const fresh = await unlock(again);
+    await fresh.get(`${again.path}/files/${fileId}/content?mode=download`).expect(200);
+
+    const history = await w.firm('get', '/events?latest=1&limit=20').expect(200);
+    expect(history.body.events.map((e: { kind: string }) => e.kind)).toContain(
+      'outside_share_resent',
+    );
+
+    // A revoked link is not sent again.
+    await boss.delete(`/api/staff/v1/shares/${first.id}`).expect(200);
+    const ended = await boss.post(`/api/staff/v1/shares/${first.id}/resend`);
+    expect([ended.status, ended.body.error]).toEqual([409, 'share_ended']);
+  });
+
   it('staff send it; the recipient proves the mailbox, then views and downloads', async () => {
     const boss = await admin();
     const original = await realPdf();

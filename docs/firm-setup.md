@@ -164,7 +164,10 @@ What the recipient gets:
   again, as often as needed until the link expires.
 
 **Secure links sent outside**, on the client's page, lists every link: to whom, which files,
-whether it was opened and how often. **Revoke** ends a link at once, even while it is open. Also:
+whether it was opened and how often. **Revoke** ends a link at once, even while it is open.
+**Resend** emails the recipient a new link to the same files, with the same access and end date:
+the portal keeps no copy of a link, so the one they had stops working, and they give a new access
+code. Resend also opens a link that was **Locked**. Also:
 
 - 15 wrong codes in a row end a link (**Locked**), in case it reached the wrong hands. Send a new
   one.
@@ -296,6 +299,25 @@ as a `vibe portal` command yet.
 
 `sudo vibe backup portal` snapshots are still worth taking: they hold the database as of when
 they were taken, and a restore from one made before the last move may name the other place.
+
+## People on the portal
+
+Staff who see every client have **People** on the staff page: everyone who can sign in, with the
+clients each can see. Find a person by name, email or mobile number, and open them:
+
+- **Details**: their name, and how new files are announced to them. Their email or mobile number
+  is changed with **Change**: a link goes to the new one, and it is used only once they open it
+  and press Confirm, so a mistyped address lets nobody in. Until then the page shows it waiting,
+  with **Withdraw**. When they confirm, they are signed out, and the old address or number is told
+  it was changed. **Remove** takes a mobile number away (they keep signing in by email).
+- **Clients**: **Add a client** gives them access at once and tells them by email or text.
+  **Remove** takes it away at once. On a client's page, a person's name opens their page too.
+- **Account**: **Send sign-in link** emails them a link (by text if they have only a number) that
+  signs them in once, within 24 hours: for someone who cannot manage signing in. **Turn account
+  off** signs them out everywhere and stops them signing in to any client, and withdraws
+  invitations waiting for them; their clients and history are kept for **Turn account on**.
+- **Activity**: what they did and what staff did about them, newest first, with the client each
+  was on.
 
 ## When something is wrong
 

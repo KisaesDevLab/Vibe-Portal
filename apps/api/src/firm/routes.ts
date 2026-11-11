@@ -16,25 +16,10 @@
 //   POST   /api/firm/v1/access-requests/:id/deny
 
 import express, { type Request, type RequestHandler, type Router } from 'express';
-import { alias } from 'drizzle-orm/pg-core';
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  ilike,
-  inArray,
-  isNotNull,
-  isNull,
-  like,
-  lt,
-  or,
-  sql,
-} from 'drizzle-orm';
+import { and, asc, eq, ilike, inArray, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
-import { voidChallenges } from '../auth/client-auth';
 import { grantAccess, type Executor } from '../auth/grant';
 import { endSessionsOf } from '../auth/sessions';
 import { deliver, firmName, type Ctx } from '../context';
@@ -46,7 +31,10 @@ import { randomToken, sha256 } from '../lib/secrets';
 import { inScope, mustSee, requireAllClients } from '../staff/scope';
 import { storageSummary } from '../files/storage';
 import { VERSION } from '../version';
+import { setAccess, withdrawInvites } from './access';
 import { firmFilesRouter } from './files';
+import { historyRows, HistoryQuery } from './history';
+import { staffPeopleRouter } from './people';
 import { requireFirmKey } from './keys';
 import { firmEventsRouter } from './events';
 import { firmSharesRouter } from './shares';
@@ -141,6 +129,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   r.use('/access-requests', requireAllClients);
   // P63: everyone on the portal, whatever their client: for staff who see every client.
   r.use('/people', requireAllClients);
+  // P66: the staff page's People view (a person's details, clients, account, activity).
+  if (staff) r.use('/people', staffPeopleRouter(ctx));
 
   const clientExists = async (id: string): Promise<boolean> =>
     (
@@ -149,29 +139,6 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         .from(schema.clients)
         .where(eq(schema.clients.id, id))
     ).length > 0;
-
-  /** Withdraws a client's pending invitations: all of them, or those to some contacts. */
-  const withdrawInvites = async (clientId: string, to?: (string | null)[]) => {
-    const contacts = (to ?? []).filter((c): c is string => !!c);
-    if (to && contacts.length === 0) return [];
-    return ctx.db
-      .update(schema.portalInvitation)
-      .set({ revokedAt: ctx.now() })
-      .where(
-        and(
-          eq(schema.portalInvitation.clientId, clientId),
-          isNull(schema.portalInvitation.acceptedAt),
-          isNull(schema.portalInvitation.revokedAt),
-          to
-            ? or(
-                inArray(schema.portalInvitation.email, contacts),
-                inArray(schema.portalInvitation.phone, contacts),
-              )
-            : undefined,
-        ),
-      )
-      .returning({ id: schema.portalInvitation.id });
-  };
 
   r.get(
     '/status',
@@ -253,7 +220,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       if (input.active === false) {
         // A client switched off: its invitations stop working and its users are signed out
         // (they can sign in again to their other clients).
-        await withdrawInvites(id);
+        await withdrawInvites(ctx, id);
         const users = await ctx.db
           .select({ identityId: schema.clientAccess.identityId })
           .from(schema.clientAccess)
@@ -274,92 +241,45 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
 
   // P65: what happened on one client, newest first, for the client's page: its files, uploads,
   // people and secure links, and the sign-ins of the people who can see it.
-  const HistoryQuery = z.object({
-    limit: z.coerce.number().int().min(1).max(500).default(50),
-    before: z.coerce.number().int().min(1).optional(),
-  });
-  const PERSONAL = ['sign_in', 'sign_out', 'phone_added', 'phone_removed'] as const;
+  const PERSONAL = [
+    'sign_in',
+    'sign_out',
+    'phone_added',
+    'phone_removed',
+    // P66: their account turned off or on, their details or contact changed.
+    'account_off',
+    'account_on',
+    'person_updated',
+    'contact_change_sent',
+    'contact_changed',
+    'sign_in_link_sent',
+  ] as const;
   r.get(
     '/clients/:id/history',
     h(async (req, res) => {
       const id = param(req, 'id');
       if (!(await clientExists(id))) throw new HttpError(404, 'client_not_found');
       const q = HistoryQuery.parse(req.query);
-      const person = alias(schema.portalIdentity, 'person');
-      const actorPerson = alias(schema.portalIdentity, 'actor_person');
-      const rows = await ctx.db
-        .select({
-          id: schema.events.id,
-          at: schema.events.at,
-          kind: schema.events.kind,
-          actorKind: schema.events.actorKind,
-          actor: schema.events.actor,
-          actorName: actorPerson.name,
-          actorEmail: actorPerson.email,
-          actorPhone: actorPerson.phone,
-          personName: person.name,
-          personEmail: person.email,
-          personPhone: person.phone,
-          file: schema.files.name,
-          upload: schema.uploads.name,
-          detail: schema.events.detail,
-        })
-        .from(schema.events)
-        .leftJoin(schema.files, eq(schema.files.id, schema.events.fileId))
-        .leftJoin(schema.uploads, eq(schema.uploads.id, schema.events.uploadId))
-        .leftJoin(person, eq(person.id, schema.events.identityId))
-        .leftJoin(
-          actorPerson,
+      const events = await historyRows(
+        ctx,
+        or(
+          eq(schema.events.clientId, id),
+          // Sign-ins are not about one client: those of the people who can see this one.
           and(
-            eq(schema.events.actorKind, 'client'),
-            eq(sql`${actorPerson.id}::text`, schema.events.actor),
-          ),
-        )
-        .where(
-          and(
-            q.before ? lt(schema.events.id, q.before) : undefined,
-            or(
-              eq(schema.events.clientId, id),
-              // Sign-ins are not about one client: those of the people who can see this one.
-              and(
-                isNull(schema.events.clientId),
-                inArray(schema.events.kind, [...PERSONAL]),
-                inArray(
-                  schema.events.identityId,
-                  ctx.db
-                    .select({ id: schema.clientAccess.identityId })
-                    .from(schema.clientAccess)
-                    .where(eq(schema.clientAccess.clientId, id)),
-                ),
-              ),
+            isNull(schema.events.clientId),
+            inArray(schema.events.kind, [...PERSONAL]),
+            inArray(
+              schema.events.identityId,
+              ctx.db
+                .select({ id: schema.clientAccess.identityId })
+                .from(schema.clientAccess)
+                .where(eq(schema.clientAccess.clientId, id)),
             ),
           ),
-        )
-        .orderBy(desc(schema.events.id))
-        .limit(q.limit);
-      const named = (n: string | null, e: string | null, p: string | null): string | null =>
-        n || e || p || null;
-      res.json({
-        events: rows.map((e) => ({
-          id: e.id,
-          at: e.at,
-          kind: e.kind,
-          who:
-            e.actorKind === 'client'
-              ? (named(e.actorName, e.actorEmail, e.actorPhone) ?? 'a client')
-              : e.actorKind === 'system'
-                ? 'the portal'
-                : e.actorKind === 'firm_key'
-                  ? `Vibe Files (${e.actor})`
-                  : e.actor,
-          person: named(e.personName, e.personEmail, e.personPhone),
-          file: e.file ?? e.upload ?? null,
-          // A secure link's outside recipient (P49).
-          recipient: ((d) => (typeof d['to'] === 'string' ? d['to'] : null))(
-            (e.detail ?? {}) as Record<string, unknown>,
-          ),
-        })),
-      });
+        ),
+        q,
+      );
+      res.json({ events });
     }),
   );
 
@@ -485,7 +405,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       const actor = actorOf(req);
       const now = ctx.now();
       // A new invitation replaces any earlier one to the same contact for this client (Resend).
-      const replaced = await withdrawInvites(clientId, [sendTo]);
+      const replaced = await withdrawInvites(ctx, clientId, [sendTo]);
 
       const token = randomToken();
       const expiresAt = new Date(now.getTime() + INVITE_DAYS * 86_400_000);
@@ -555,27 +475,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       const clientId = param(req, 'id');
       const identityId = param(req, 'identityId');
       const { active } = body(AccessSchema, req);
-      const rows = await ctx.db
-        .update(schema.clientAccess)
-        .set({ active })
-        .where(
-          and(
-            eq(schema.clientAccess.clientId, clientId),
-            eq(schema.clientAccess.identityId, identityId),
-          ),
-        )
-        .returning({ id: schema.clientAccess.identityId });
-      if (!rows.length) throw new HttpError(404, 'not_found');
-      if (!active) {
-        // Signed-in sessions end at once; the person can sign in again to their other clients.
-        await endSessionsOf(ctx.db, identityId);
-        await voidChallenges(ctx, identityId);
-        // An invitation still waiting would quietly turn them back on (QA 2026-11-09).
-        const [who] = await ctx.db
-          .select({ email: schema.portalIdentity.email, phone: schema.portalIdentity.phone })
-          .from(schema.portalIdentity)
-          .where(eq(schema.portalIdentity.id, identityId));
-        await withdrawInvites(clientId, [who?.email ?? null, who?.phone ?? null]);
+      if (!(await setAccess(ctx, clientId, identityId, active))) {
+        throw new HttpError(404, 'not_found');
       }
       await record(ctx.db, active ? 'enable' : 'disable', actorOf(req), { clientId, identityId });
       res.json({ ok: true });
