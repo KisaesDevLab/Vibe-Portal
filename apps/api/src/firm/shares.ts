@@ -3,11 +3,13 @@
 // Files sent to someone outside the client (P49): a lender, a lawyer, another accountant. As
 // Vibe Time & Billing's secure share. Staff pick files already on the portal for one client and
 // give the recipient's email; the recipient gets a private link (see portal/shared.ts for their
-// side). Only the staff page has this: Vibe Files, with the firm key, does not.
+// side). Vibe Files does the same with the firm key (P68: Send secure link… on a document it
+// has put on the portal, shown to nobody if it was not shared with the client): the history
+// names the Windows user, and each user has the staff member's daily count.
 //
 //   POST   /api/staff/v1/shares            { clientId, fileIds, email, name?, organization?,
-//                                            message?, canDownload?, watermark?, days? }
-//   GET    /api/staff/v1/shares?clientId=
+//   POST   /api/firm/v1/shares               message?, canDownload?, watermark?, days? }
+//   GET    /api/staff/v1/shares?clientId=     (staff only, as every call below)
 //   DELETE /api/staff/v1/shares/:id        ends the link (again is fine)
 
 import { randomUUID } from 'node:crypto';
@@ -318,13 +320,13 @@ async function sendShareEmail(
   );
 }
 
-export function firmSharesRouter(ctx: Ctx): Router {
+export function firmSharesRouter(ctx: Ctx, staff: boolean): Router {
   const r = express.Router();
 
   r.post(
     '/',
     h(async (req, res) => {
-      const staff = req.staff as StaffSession;
+      const session = req.staff as StaffSession | undefined;
       const input = body(CreateSchema, req);
       await mustSee(ctx.db, req, input.clientId, 'client_not_found');
       const [client] = await ctx.db
@@ -333,16 +335,26 @@ export function firmSharesRouter(ctx: Ctx): Router {
         .where(eq(schema.clients.id, input.clientId));
       if (!client) throw new HttpError(404, 'client_not_found');
       if (!client.active) throw new HttpError(409, 'client_inactive');
+      const actor = actorOf(req);
       const made = await createOutsideShare(ctx, {
         client,
         input,
-        actor: actorOf(req),
-        quota: `outside-share:${staff.staffId}`,
+        actor,
+        // Each staff member, and each Windows user of Vibe Files (P68), has the day's count. The
+        // user is what Vibe Files says (X-Vibe-PC / X-Vibe-User): the firm key is trusted, so
+        // this paces people, it does not police the key.
+        quota: session
+          ? `outside-share:${session.staffId}`
+          : `outside-share:vibe-files:${actor.name}`,
         limit: LIMITS.outsideSharePerStaff,
       });
       res.status(201).json(made);
     }),
   );
+
+  // Vibe Files (the firm key) only makes links (P68 QA): listing, resending and ending them stay
+  // on the staff page, so a firm key never reads the people links went to.
+  if (!staff) return r;
 
   r.get(
     '/',

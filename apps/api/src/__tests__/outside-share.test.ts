@@ -751,7 +751,7 @@ describe('what staff may send (P49)', () => {
     expect(w.notes.last('q@first-bank.test').body).toContain('Hello Pat Roe,');
   });
 
-  it('only the staff page, signed in; Vibe Files has no such call', async () => {
+  it('staff signed in, or Vibe Files with the firm key (P68); nobody else', async () => {
     const boss = await admin();
     const fileId = await onPortal(CLIENT, 'a.pdf', await realPdf());
     const s = await send(boss, [fileId]);
@@ -759,13 +759,16 @@ describe('what staff may send (P49)', () => {
     await request(w.app).post('/api/staff/v1/shares').send(send1).expect(401);
     await request(w.app).get(`/api/staff/v1/shares?clientId=${CLIENT}`).expect(401);
     await request(w.app).delete(`/api/staff/v1/shares/${s.id}`).expect(401);
-    await w.firm('post', '/shares').send(send1).expect(404);
+    // P68: Vibe Files sends one too (its Send secure link…).
+    await w.firm('post', '/shares').send(send1).expect(201);
+    // It only makes links: listing, resending and ending them stay on the staff page (P68 QA).
     await w.firm('get', `/shares?clientId=${CLIENT}`).expect(404);
     await w.firm('delete', `/shares/${s.id}`).expect(404);
+    await w.firm('post', `/shares/${s.id}/resend`).expect(404);
     // A client's person is not staff.
     const person = await w.member('a@example.test', CLIENT);
     await person.agent.post('/api/staff/v1/shares').send(send1).expect(401);
-    expect(await w.t.db.select().from(schema.fileShare)).toHaveLength(1);
+    expect(await w.t.db.select().from(schema.fileShare)).toHaveLength(2);
   });
 
   it('staff limited to some clients send, see and end links for those alone (P48)', async () => {

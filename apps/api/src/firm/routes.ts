@@ -114,8 +114,9 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   r.use('/files', firmFilesRouter(ctx, staff));
   r.use('/uploads', firmUploadsRouter(ctx, staff));
   r.use('/events', firmEventsRouter(ctx));
-  // Secure links to people outside the client (P49): the staff page only.
-  if (staff) r.use('/shares', firmSharesRouter(ctx));
+  // Secure links to people outside the client (P49), from the staff page and (P68) from Vibe
+  // Files' Send secure link… with the firm key.
+  r.use('/shares', firmSharesRouter(ctx, staff));
   // P48: a staff member limited to some clients reaches only those; any other answers as if it
   // were not on the portal. Access requests are not about one client yet, so they are for staff
   // who see every client. (Vibe Files, with the firm key, sees everything.)
