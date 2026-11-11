@@ -269,6 +269,33 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         )
         .where(eq(schema.clientAccess.clientId, id))
         .orderBy(asc(schema.portalIdentity.name));
+      // P62: every client each person can see (this one too), for the tags under their name.
+      // Staff limited to some clients see only those among them.
+      const theirs = users.length
+        ? await ctx.db
+            .select({
+              identityId: schema.clientAccess.identityId,
+              id: schema.clients.id,
+              name: schema.clients.displayName,
+            })
+            .from(schema.clientAccess)
+            .innerJoin(schema.clients, eq(schema.clients.id, schema.clientAccess.clientId))
+            .where(
+              and(
+                inArray(
+                  schema.clientAccess.identityId,
+                  users.map((u) => u.identityId),
+                ),
+                eq(schema.clientAccess.active, true),
+                inScope(req, schema.clientAccess.clientId),
+              ),
+            )
+            .orderBy(asc(schema.clients.displayName))
+        : [];
+      const clientsOf = (identityId: string): { id: string; name: string }[] =>
+        theirs
+          .filter((c) => c.identityId === identityId)
+          .map(({ id: cid, name }) => ({ id: cid, name }));
       const now = ctx.now();
       const invites = await ctx.db
         .select()
@@ -282,7 +309,11 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         )
         .orderBy(asc(schema.portalInvitation.createdAt));
       res.json({
-        users: users.map((u) => ({ ...u, status: u.active ? 'active' : 'disabled' })),
+        users: users.map((u) => ({
+          ...u,
+          status: u.active ? 'active' : 'disabled',
+          clients: clientsOf(u.identityId),
+        })),
         invitations: invites.map((i) => ({
           invitationId: i.id,
           name: i.name,

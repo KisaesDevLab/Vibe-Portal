@@ -608,9 +608,27 @@ describe('QA 2026-11-09', () => {
     for (const c of [CLIENT, OTHER]) {
       const users = await firm('get', `/clients/${c}/users`).expect(200);
       expect(users.body.users).toEqual([
-        expect.objectContaining({ name: 'Mary Smith', roleLabel: 'Spouse', status: 'active' }),
+        expect.objectContaining({
+          name: 'Mary Smith',
+          roleLabel: 'Spouse',
+          status: 'active',
+          // P62: every client she can see, by name, for the tags under her name.
+          clients: expect.arrayContaining([
+            { id: CLIENT, name: 'Smith, John' },
+            { id: OTHER, name: 'Smith Farms LLC' },
+          ]),
+        }),
       ]);
     }
+    expect(
+      (await firm('get', `/clients/${CLIENT}/users`).expect(200)).body.users[0].clients,
+    ).toHaveLength(2);
+    // A client she was turned off for is not listed.
+    await firm('patch', `/clients/${OTHER}/users/${res.body.identityId}`)
+      .send({ active: false })
+      .expect(200);
+    const after = await firm('get', `/clients/${CLIENT}/users`).expect(200);
+    expect(after.body.users[0].clients).toEqual([{ id: CLIENT, name: 'Smith, John' }]);
   });
 
   it('several clients: one switched off or unknown, and nobody is given access (P61)', async () => {

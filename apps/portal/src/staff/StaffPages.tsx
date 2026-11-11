@@ -417,7 +417,17 @@ function ClientDetail(): JSX.Element {
         <Table head={['Name', 'Email / phone', 'Role', 'Last sign-in', 'Actions']}>
           {(people.data?.users ?? []).map((u) => (
             <tr key={u.identityId}>
-              <td style={td}>{label(u)}</td>
+              <td style={td}>
+                {label(u)}
+                <ClientTags
+                  label={`Clients ${label(u)} can see`}
+                  tags={(u.clients ?? []).map((c) => ({
+                    id: c.id,
+                    content:
+                      c.id === id ? c.name : <Link to={`/staff/clients/${c.id}`}>{c.name}</Link>,
+                  }))}
+                />
+              </td>
               <td style={td}>{u.email ?? u.phone}</td>
               <td style={td}>{u.roleLabel}</td>
               <td style={td}>{when(u.lastSignInAt)}</td>
@@ -1175,6 +1185,49 @@ function SecureLinks({
   );
 }
 
+/** Small tags in a row: "Client 1, Client 2, Client 3" under a person (P62). */
+const tagStyle = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 2,
+  fontSize: 12,
+  lineHeight: '18px',
+  padding: '0 8px',
+  borderRadius: 999,
+  border: '1px solid var(--vibe-color-border)',
+  background: 'var(--vibe-color-surface)',
+  whiteSpace: 'nowrap',
+} as const;
+
+function ClientTags({
+  label,
+  tags,
+}: {
+  label: string;
+  tags: { id: string; content: ReactNode }[];
+}): JSX.Element | null {
+  if (tags.length === 0) return null;
+  return (
+    <ul
+      aria-label={label}
+      style={{
+        listStyle: 'none',
+        margin: '4px 0 0',
+        padding: 0,
+        display: 'flex',
+        gap: 4,
+        flexWrap: 'wrap',
+      }}
+    >
+      {tags.map((t) => (
+        <li key={t.id} style={tagStyle}>
+          {t.content}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 interface AccessRequestRow {
   id: string;
   name: string;
@@ -1221,6 +1274,33 @@ function Requests(): JSX.Element {
             }}
           >
             <strong>{r.name}</strong>
+            <ClientTags
+              label={`Clients for ${r.name}`}
+              tags={p.clients.map((cid) => ({
+                id: cid,
+                content: (
+                  <>
+                    {nameOf(cid)}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${nameOf(cid)} for ${r.name}`}
+                      onClick={() => set({ clients: p.clients.filter((x) => x !== cid) })}
+                      style={{
+                        border: 0,
+                        background: 'none',
+                        color: 'inherit',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        padding: '0 0 0 2px',
+                        lineHeight: 1,
+                      }}
+                    >
+                      ×
+                    </button>
+                  </>
+                ),
+              }))}
+            />
             <span>
               Confirmed: {r.confirmedContact} · asked for “{r.clientAs}” · {when(r.createdAt)}
             </span>
@@ -1273,43 +1353,6 @@ function Requests(): JSX.Element {
                 Deny
               </Button>
             </div>
-            {p.clients.length > 0 && (
-              <ul
-                aria-label={`Clients for ${r.name}`}
-                style={{
-                  listStyle: 'none',
-                  margin: 0,
-                  padding: 0,
-                  display: 'flex',
-                  gap: 6,
-                  flexWrap: 'wrap',
-                }}
-              >
-                {p.clients.map((id) => (
-                  <li
-                    key={id}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      padding: '2px 4px 2px 10px',
-                      borderRadius: 999,
-                      border: '1px solid var(--vibe-color-border)',
-                    }}
-                  >
-                    {nameOf(id)}
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      aria-label={`Remove ${nameOf(id)} for ${r.name}`}
-                      onClick={() => set({ clients: p.clients.filter((x) => x !== id) })}
-                    >
-                      ×
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
           </div>
         );
       })}

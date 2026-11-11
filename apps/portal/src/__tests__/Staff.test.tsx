@@ -368,6 +368,37 @@ describe('staff page', () => {
     );
   });
 
+  it("a client's people show every client each can see, as small tags (P62)", async () => {
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}/users`]: {
+        body: {
+          users: [
+            {
+              ...USER,
+              clients: [
+                { id: CLIENT.id, name: 'Smith, John' },
+                { id: 'c2', name: 'Smith Farms LLC' },
+              ],
+            },
+          ],
+          invitations: [],
+        },
+      },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    const tags = await screen.findByRole('list', { name: 'Clients John Smith can see' });
+    const items = within(tags).getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual(['Smith, John', 'Smith Farms LLC']);
+    // This client is plain text; the other one opens its page.
+    expect(within(items[0] as HTMLElement).queryByRole('link')).toBeNull();
+    expect(within(tags).getByRole('link', { name: 'Smith Farms LLC' }).getAttribute('href')).toBe(
+      '/staff/clients/c2',
+    );
+  });
+
   it('approves an access request for several clients, and one can be taken off (P61)', async () => {
     const farm = { ...CLIENT, id: 'c2', displayName: 'Smith Farms LLC', clientCode: 'FARM' };
     const jones = { ...CLIENT, id: 'c3', displayName: 'Jones, Ann', clientCode: 'JONES' };

@@ -161,6 +161,8 @@ export interface PortalUser {
   roleLabel: string;
   active: boolean;
   lastSignInAt: string | null;
+  /** P62: every client this person can see (absent from older servers). */
+  clients?: { id: string; name: string }[];
 }
 
 export interface Invitation {
