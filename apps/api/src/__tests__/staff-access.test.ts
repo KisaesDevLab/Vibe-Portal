@@ -355,6 +355,16 @@ describe('staff limited to some clients (P48)', () => {
       .post(`/api/staff/v1/access-requests/${id}/approve`)
       .send({ clientId: CLIENT })
       .expect(200);
+    // P67: nor the photo ID, nor the PDF of the request among their client's uploads.
+    await mary.agent.get(`/api/staff/v1/access-requests/${id}/id-photo`).expect(403);
+    const all = (await boss.get(`/api/staff/v1/uploads?clientId=${CLIENT}`).expect(200)).body
+      .uploads as { uploadId: string; name: string }[];
+    const pdf = all.find((u) => u.name === 'Access request - Jane Smith.pdf');
+    expect(pdf).toBeTruthy();
+    const theirs = (await mary.agent.get(`/api/staff/v1/uploads?clientId=${CLIENT}`).expect(200))
+      .body.uploads as { uploadId: string }[];
+    expect(theirs.map((u) => u.uploadId)).not.toContain(pdf?.uploadId);
+    await mary.agent.get(`/api/staff/v1/uploads/${pdf?.uploadId}/content`).expect(404);
   });
 
   it('with no client ticked see none; back to every client shows all again', async () => {

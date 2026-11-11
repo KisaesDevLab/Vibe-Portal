@@ -17,7 +17,7 @@ import { HttpError } from '../lib/http';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The staff member whose list limits the caller; null when they see every client. */
-function limitedTo(req: Request): string | null {
+export function limitedTo(req: Request): string | null {
   return req.staff?.limited ? req.staff.staffId : null;
 }
 

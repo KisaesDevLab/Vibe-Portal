@@ -137,7 +137,7 @@ describe('portal', () => {
   it('requests access, then confirms it with a code', async () => {
     const calls = serve({
       '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },
-      '/access-requests/r1/id-photo?name=license.jpg': { status: 201, body: { ok: true } },
+      '/access-requests/r1/id-photo': { status: 201, body: { ok: true } },
       '/access-requests/r1/confirm': { body: { ok: true } },
     });
     at('/request-access');
@@ -162,7 +162,7 @@ describe('portal', () => {
       email: 'mary@example.test',
       clientAs: 'Smith, John',
     });
-    expect(calls[1]).toMatchObject({ path: '/access-requests/r1/id-photo?name=license.jpg' });
+    expect(calls[1]).toMatchObject({ path: '/access-requests/r1/id-photo' });
     expect(calls[1]?.body).toBe(license);
   });
 
@@ -229,11 +229,11 @@ describe('portal', () => {
   });
 
   it('a photo ID that did not go through is sent again before the code (P67)', async () => {
-    const calls = serve({
+    const routes: Record<string, { status?: number; body: unknown }> = {
       '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },
-      '/access-requests/r1/id-photo?name=id.txt': { status: 415, body: { error: 'id_type' } },
-      '/access-requests/r1/id-photo?name=id.png': { status: 201, body: { ok: true } },
-    });
+      '/access-requests/r1/id-photo': { status: 415, body: { error: 'id_type' } },
+    };
+    const calls = serve(routes);
     at('/request-access');
     fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Mary' } });
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'm@example.test' } });
@@ -248,14 +248,17 @@ describe('portal', () => {
     expect((screen.getByRole('button', { name: 'Confirm' }) as HTMLButtonElement).disabled).toBe(
       true,
     );
+    // The bad file is forgotten: a new one must be chosen.
+    expect(
+      (screen.getByRole('button', { name: 'Send photo ID' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    routes['/access-requests/r1/id-photo'] = { status: 201, body: { ok: true } };
     fireEvent.change(screen.getByLabelText(/Photo of your ID/), {
       target: { files: [new File(['x'], 'id.png', { type: 'image/png' })] },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Send photo ID' }));
-    await waitFor(() =>
-      expect(calls.map((c) => c.path)).toContain('/access-requests/r1/id-photo?name=id.png'),
-    );
-    expect(screen.queryByRole('button', { name: 'Send photo ID' })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Send photo ID' })).toBeNull());
+    expect(calls.filter((c) => c.path === '/access-requests/r1/id-photo')).toHaveLength(2);
   });
 
   it('request access can send a new code', async () => {

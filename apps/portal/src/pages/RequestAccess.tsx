@@ -20,7 +20,7 @@ const ID_MAX_BYTES = 15 * 1024 * 1024;
 async function sendIdPhoto(requestId: string, file: File): Promise<void> {
   if (file.size > ID_MAX_BYTES) throw new ApiError(413, 'too_large');
   const res = await fetch(
-    `/api/portal/access-requests/${requestId}/id-photo?name=${encodeURIComponent(file.name)}`,
+    `/api/portal/access-requests/${requestId}/id-photo`,
     {
       method: 'POST',
       credentials: 'same-origin',
@@ -65,6 +65,8 @@ export function RequestAccess(): JSX.Element {
         if (photo) await sendIdPhoto(r.requestId, photo);
         idSent = Boolean(photo);
       } catch (err) {
+        // Chosen again on the next step.
+        setPhoto(null);
         setError(say(err));
       }
       setStep({ at: 'confirm', id: r.requestId, sentTo: r.sentTo, idSent });
@@ -84,6 +86,11 @@ export function RequestAccess(): JSX.Element {
       await api(`/access-requests/${step.id}/confirm`, { body: { code: code.trim() } });
       setStep({ at: 'done' });
     } catch (err) {
+      // The portal no longer has the photo ID: ask for it again.
+      if (err instanceof ApiError && err.code === 'id_required') {
+        setPhoto(null);
+        setStep({ ...step, idSent: false });
+      }
       setError(say(err));
     } finally {
       setBusy(false);
@@ -98,6 +105,7 @@ export function RequestAccess(): JSX.Element {
       await sendIdPhoto(step.id, photo);
       setStep({ ...step, idSent: true });
     } catch (err) {
+      setPhoto(null);
       setError(say(err));
     } finally {
       setBusy(false);

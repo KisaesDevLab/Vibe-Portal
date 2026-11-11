@@ -7,7 +7,7 @@
 //   POST /api/portal/access-requests              { name, email?, phone?, clientAs, note? }
 //        -> { requestId, sentTo }
 //   POST /api/portal/access-requests/:id/resend   -> { sentTo }  (a new code)
-//   POST /api/portal/access-requests/:id/id-photo?name=  the photo ID (P67), before confirming
+//   POST /api/portal/access-requests/:id/id-photo  the photo ID (P67), before confirming
 //   POST /api/portal/access-requests/:id/confirm  { code }   needs the photo ID (P67)
 
 import express, { type Router } from 'express';
@@ -156,10 +156,9 @@ export function accessRequestsRouter(ctx: Ctx, convertHeic?: HeicConverter): Rou
       }
       const type = (req.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase();
       if (type !== 'application/octet-stream') throw new HttpError(415, 'id_type');
-      const name = z.string().trim().min(1).max(255).safeParse(req.query['name']);
-      if (!name.success) throw new HttpError(415, 'id_type');
+      // Its kind is read from its content: no file name (it would reach proxy logs, P47).
       const [request] = await ctx.db
-        .select()
+        .select({ id: schema.accessRequest.id })
         .from(schema.accessRequest)
         .where(
           and(
@@ -169,7 +168,7 @@ export function accessRequestsRouter(ctx: Ctx, convertHeic?: HeicConverter): Rou
           ),
         );
       if (!request) throw new HttpError(404, 'not_found');
-      const stored = await storeIdPhoto(ctx, request, req, name.data, convertHeic);
+      const stored = await storeIdPhoto(ctx, request.id, req, convertHeic);
       res.status(201).json({ ok: true, contentType: stored.contentType });
     }),
   );

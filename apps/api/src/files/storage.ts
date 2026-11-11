@@ -150,12 +150,13 @@ export async function probe(store: ObjectStore): Promise<void> {
   if (await store.exists(key)) throw new Error('a deleted file was still there');
 }
 
-/** Whether any file, upload or marked copy still uses this stored file. */
+/** Whether any file, upload, marked copy or photo ID (P67) still uses this stored file. */
 async function inUse(ctx: Ctx, key: string): Promise<boolean> {
   const rows = await ctx.db.execute<{ n: number }>(sql`
     SELECT 1 AS n FROM ${schema.files} WHERE ${schema.files.blobKey} = ${key}
     UNION ALL SELECT 1 FROM ${schema.uploads} WHERE ${schema.uploads.blobKey} = ${key}
     UNION ALL SELECT 1 FROM ${schema.fileShareMark} WHERE ${schema.fileShareMark.blobKey} = ${key}
+    UNION ALL SELECT 1 FROM ${schema.accessRequest} WHERE ${schema.accessRequest.idBlobKey} = ${key}
     LIMIT 1`);
   return rowsOf<{ n: number }>(rows).length > 0;
 }

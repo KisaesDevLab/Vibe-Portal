@@ -133,7 +133,7 @@ export const ID_PNG = Buffer.from(
 /** Sends the photo ID an access request needs before its code is given (P67). */
 export async function sendId(w: Pick<World, 'app'>, requestId: string): Promise<void> {
   await request(w.app)
-    .post(`/api/portal/access-requests/${requestId}/id-photo?name=id.png`)
+    .post(`/api/portal/access-requests/${requestId}/id-photo`)
     .set('Content-Type', 'application/octet-stream')
     .send(ID_PNG);
 }

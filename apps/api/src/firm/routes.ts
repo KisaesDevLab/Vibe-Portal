@@ -27,6 +27,7 @@ import { normalizeEmail, normalizePhone } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
+import { hit, LIMITS } from '../lib/rate-limit';
 import { randomToken, sha256 } from '../lib/secrets';
 import { inScope, mustSee, requireAllClients } from '../staff/scope';
 import { storageSummary } from '../files/storage';
@@ -579,7 +580,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   );
 
   // P67: the photo ID of a request (also after it is decided, until it is deleted), shown in the
-  // page. Each look is in History.
+  // page. History has who looked (once an hour each: the page shows it on every load).
   r.get(
     '/access-requests/:id/id-photo',
     h(async (req, res) => {
@@ -591,6 +592,12 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         .where(eq(schema.accessRequest.id, id.data));
       const photo = request ? await readIdPhoto(ctx, request) : null;
       if (!request || !photo) throw new HttpError(404, 'not_found');
+      const actor = actorOf(req);
+      if (
+        await hit(ctx.db, `id-view:${actor.name}:${request.id}`, LIMITS.idViewRecord, ctx.now())
+      ) {
+        await record(ctx.db, 'id_viewed', actor, { detail: { accessRequestId: request.id } });
+      }
       res.setHeader('Content-Type', photo.contentType);
       res.setHeader('Content-Disposition', 'inline; filename="photo-id"');
       res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
@@ -675,7 +682,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         });
       }
       // P67: the request and its photo ID, as a PDF for Vibe Files' Portal inbox (first client).
-      await fileRequestRecord(ctx, {
+      // When it cannot be made, the hourly purge tries again while the photo ID is kept.
+      const recorded = await fileRequestRecord(ctx, {
         requestId: id,
         identityId: done.identityId,
         clientIds,
@@ -683,7 +691,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         roleLabel: input.roleLabel,
         firmName: firm,
       });
-      res.json({ ok: true, identityId: done.identityId, clientIds });
+      res.json({ ok: true, identityId: done.identityId, clientIds, recorded });
     }),
   );
 

@@ -70,6 +70,8 @@ export const EVENT_KINDS = [
   'contact_changed',
   'client_added',
   'sign_in_link_sent',
+  // P67: staff (or Vibe Files) looked at an access request's photo ID.
+  'id_viewed',
   // Where stored files live (P51): the B2 bucket set or removed, a move asked for and its end.
   'storage_b2_saved',
   'storage_b2_removed',

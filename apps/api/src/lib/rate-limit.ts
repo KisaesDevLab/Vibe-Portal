@@ -25,6 +25,8 @@ export const LIMITS = {
   verifyPerContact: { max: 10, windowSeconds: 15 * 60 },
   /** Access requests from one address. */
   requestPerIp: { max: 5, windowSeconds: 60 * 60 },
+  /** A look at a photo ID is put in History once an hour per person (P67). */
+  idViewRecord: { max: 1, windowSeconds: 60 * 60 },
   /** Photo IDs sent with access requests from one address (P67; a second replaces the first). */
   idPhotoPerIp: { max: 20, windowSeconds: 60 * 60 },
   /** Access requests and new confirmation codes for one email or phone. */

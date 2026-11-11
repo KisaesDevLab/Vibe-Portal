@@ -47,6 +47,8 @@ export function say(err: unknown): string {
     link_expired: 'This sign-in link has expired or was already used. Ask for a new one.',
     account_off: 'This account is turned off. Contact your accountant.',
     id_required: 'Add a photo of your ID first.',
+    image_too_large: 'That picture is too large. Take a new photo or send a smaller copy.',
+    request_closed: 'This request has already been sent. Start a new request if something changed.',
     id_type: 'The photo ID must be a picture (JPEG, PNG or HEIC) or a PDF.',
     invite_expired:
       'This invitation has expired or was already used. Ask the firm to send a new one.',

@@ -22,7 +22,8 @@ const NAMES: Record<Kind, string[]> = {
 /** How many bytes the check needs to see. */
 export const SNIFF_BYTES = 8192;
 
-function kindOf(head: Buffer): Kind | null {
+/** The kind by content alone (P67: a photo ID's name is not needed). */
+export function kindOf(head: Buffer): Kind | null {
   const starts = (hex: string): boolean => head.subarray(0, hex.length / 2).toString('hex') === hex;
   if (head.subarray(0, 1024).includes(Buffer.from('%PDF-'))) return 'pdf';
   if (starts('ffd8ff')) return 'jpeg';

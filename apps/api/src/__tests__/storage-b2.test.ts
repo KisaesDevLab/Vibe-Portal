@@ -26,7 +26,7 @@ import { resumeInterrupted, runMove, sweep } from '../files/storage';
 import { createFirmKey } from '../firm/keys';
 import { createSetupLink } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
-import { CLIENT, fileServices, world, type World } from './harness';
+import { CLIENT, fileServices, world, type World, sendId, ID_PNG } from './harness';
 
 let w: World;
 let bucket: MemoryObjects;
@@ -252,6 +252,29 @@ describe('moving stored files (P51)', () => {
     await boss.delete('/api/staff/v1/settings/storage/b2').expect(200);
     const kinds = (await w.t.db.select().from(schema.events)).map((e) => e.kind);
     expect(kinds.filter((k) => k === 'storage_moved')).toHaveLength(2);
+  });
+
+  it('a photo ID moves with the files, and still opens (P67)', async () => {
+    const boss = await admin();
+    const made = await request(w.app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'Mary', email: 'mary@example.test', clientAs: 'Smith' })
+      .expect(201);
+    const id = made.body.requestId as string;
+    await sendId(w, id);
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    const there = await move(boss, 'b2');
+    expect(there.move.state).toBe('done');
+    expect(there.storage).toBe('b2');
+    const photo = await boss
+      .get(`/api/staff/v1/access-requests/${id}/id-photo`)
+      .buffer(true)
+      .parse(bytes);
+    expect(photo.status).toBe(200);
+    expect(Buffer.compare(photo.body as Buffer, ID_PNG)).toBe(0);
+    const back = await move(boss, 'local');
+    expect(back.move.state).toBe('done');
+    await boss.get(`/api/staff/v1/access-requests/${id}/id-photo`).expect(200);
   });
 
   it('a move cut off part-way loses nothing, and moving again finishes it', async () => {

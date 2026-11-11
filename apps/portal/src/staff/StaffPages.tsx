@@ -1458,6 +1458,7 @@ function IdPhoto({ r }: { r: AccessRequestRow }): JSX.Element {
 function Requests(): JSX.Element {
   const reqs = useLoad<{ requests: AccessRequestRow[] }>('/v1/access-requests');
   const clients = useLoad<{ clients: ClientRow[] }>('/v1/clients');
+  const [recordNote, setRecordNote] = useState('');
   const { act, busy, error } = useAct(reqs.reload);
   // P61: the clients chosen for each request (one or more).
   const [pick, setPick] = useState<Record<string, { clients: string[]; role: string }>>({});
@@ -1473,6 +1474,7 @@ function Requests(): JSX.Element {
         is used.
       </p>
       <Problem text={error} />
+      {recordNote && <p role="status">{recordNote}</p>}
       <Status load={reqs} what="the requests" />
       <Status load={clients} what="the clients" />
       {reqs.data?.requests.length === 0 && <p>No requests waiting.</p>}
@@ -1553,11 +1555,19 @@ function Requests(): JSX.Element {
               <Button
                 disabled={busy || p.clients.length === 0}
                 aria-label={`Approve ${r.name}`}
-                onClick={() =>
+                onClick={() => {
+                  setRecordNote('');
                   void act(`/v1/access-requests/${r.id}/approve`, {
                     body: { clientIds: p.clients, roleLabel: p.role },
-                  })
-                }
+                  }).then((res) => {
+                    // P67: the PDF for Vibe Files could not be made yet (the Log says why).
+                    if (res && (res as { recorded?: boolean }).recorded === false) {
+                      setRecordNote(
+                        `${r.name} was approved, but the PDF of the request and photo ID could not be made yet. The portal tries again every hour; Log says why.`,
+                      );
+                    }
+                  });
+                }}
               >
                 Approve
               </Button>

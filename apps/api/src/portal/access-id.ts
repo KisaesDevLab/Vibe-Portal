@@ -6,10 +6,11 @@
 // - Shown to the staff who decide requests (those who see every client).
 // - On approval, a PDF of the request and its photo ID goes to Vibe Files' Portal inbox as an
 //   upload of the first client, named "Access request - <name>.pdf" (Vibe Files puts the
-//   client's name and code in front). The client never sees it among their uploads.
+//   client's name and code in front). The client never sees it among their uploads, nor do
+//   staff limited to some clients.
 // - Deleted 7 days after Vibe Files fetched the record (it fetches only once the checksum
 //   matches), the portal's copy of the PDF too; a denied request's 30 days after the decision;
-//   an unconfirmed request's with the request.
+//   an unconfirmed request's a day after it was made.
 
 import { Readable } from 'node:stream';
 
@@ -18,77 +19,136 @@ import { generateKey } from '@vibe/crypto';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { schema } from '@vibe-portal/db';
 
-import type { Ctx } from '../context';
-import { TooLarge } from '../files/blobs';
+import { firmName, type Ctx } from '../context';
 import { convertHeicQueued, HEIC_MAX_BYTES } from '../files/heic';
-import { peek } from '../files/send';
-import { allowedKind, SNIFF_BYTES } from '../files/sniff';
+import { kindOf, SNIFF_BYTES } from '../files/sniff';
+import { record } from '../lib/events';
 import { HttpError } from '../lib/http';
 
-/** A phone photo or a scan: plenty for an ID, small enough to hold while converting. */
+/** A phone photo or a scan: plenty for an ID, small enough to hold while checking it. */
 export const ID_MAX_BYTES = 15 * 1024 * 1024;
+/** A picture larger than this is refused: decoding it to put it in the PDF would take too much
+ *  memory (a small PNG can declare an enormous image). A phone photo is about 12-50 MP. */
+export const ID_MAX_PIXELS = 60_000_000;
+export const ID_MAX_SIDE = 12_000;
 /** Days a denied request's ID is kept (owner 2026-11-11). */
 export const ID_KEEP_DAYS = 30;
-/** An unconfirmed request is deleted after 7 days (housekeeping): its ID goes a day before. */
-const UNCONFIRMED_ID_DAYS = 6;
+/** The code of a request lasts 15 minutes; its ID is not kept past a day unconfirmed. */
+const UNCONFIRMED_ID_DAYS = 1;
 const DAY = 24 * 3_600_000;
 
 type Request = typeof schema.accessRequest.$inferSelect;
 const TYPES = { jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf' } as const;
 
+/** Width and height a PNG or JPEG declares, or null when it declares none. */
+export function imageSize(b: Buffer, kind: 'png' | 'jpeg'): { w: number; h: number } | null {
+  if (kind === 'png') {
+    if (b.length < 24 || b.subarray(12, 16).toString('latin1') !== 'IHDR') return null;
+    return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+  }
+  // JPEG: walk the markers to a start-of-frame (SOF0-SOF15, not DHT/JPG/DAC).
+  let i = 2;
+  while (i + 9 < b.length) {
+    if (b[i] !== 0xff) return null;
+    const m = b[i + 1] as number;
+    if (m === 0xff) {
+      i += 1;
+      continue;
+    }
+    if (m === 0xd8 || (m >= 0xd0 && m <= 0xd7) || m === 0x01) {
+      i += 2;
+      continue;
+    }
+    const len = b.readUInt16BE(i + 2);
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+      return { h: b.readUInt16BE(i + 5), w: b.readUInt16BE(i + 7) };
+    }
+    if (m === 0xda || m === 0xd9) return null;
+    i += 2 + len;
+  }
+  return null;
+}
+
+/** Refuses a picture that is not one, or too large to put in the PDF. */
+function checkPicture(b: Buffer, kind: 'png' | 'jpeg'): void {
+  const size = imageSize(b, kind);
+  if (!size || size.w === 0 || size.h === 0) throw new HttpError(415, 'photo_unreadable');
+  if (size.w > ID_MAX_SIDE || size.h > ID_MAX_SIDE || size.w * size.h > ID_MAX_PIXELS) {
+    throw new HttpError(413, 'image_too_large');
+  }
+}
+
 /**
  * Stores the photo ID for a request still waiting for its code, replacing one sent before.
- * JPEG, PNG or PDF; a phone's HEIC photo is converted to JPEG.
+ * JPEG, PNG or PDF, by content; a phone's HEIC photo is converted to JPEG. Refused (and nothing
+ * kept) when the request was confirmed or decided while it was being sent.
  */
 export async function storeIdPhoto(
   ctx: Ctx,
-  request: Request,
+  requestId: string,
   body: Readable,
-  name: string,
   convertHeic: (b: Buffer) => Promise<Buffer> = convertHeicQueued,
 ): Promise<{ contentType: string; size: number }> {
-  const { head, all } = await peek(body, SNIFF_BYTES);
-  const kind = allowedKind(head.subarray(0, SNIFF_BYTES), name);
+  // Held in memory (at most 15 MB): a picture is checked whole before it is kept.
+  const parts: Buffer[] = [];
+  let size = 0;
+  for await (const c of body) {
+    size += (c as Buffer).length;
+    if (size > Math.min(ID_MAX_BYTES, HEIC_MAX_BYTES)) throw new HttpError(413, 'too_large');
+    parts.push(c as Buffer);
+  }
+  let bytes: Buffer = Buffer.concat(parts);
+  const kind = kindOf(bytes.subarray(0, SNIFF_BYTES));
   if (kind !== 'jpeg' && kind !== 'png' && kind !== 'pdf' && kind !== 'heic') {
     throw new HttpError(415, 'id_type');
   }
-  let source: Readable = all;
-  let contentType: string = kind === 'heic' ? TYPES.jpeg : TYPES[kind];
+  let contentType: string;
   if (kind === 'heic') {
-    const parts: Buffer[] = [];
-    let size = 0;
-    for await (const c of all) {
-      size += (c as Buffer).length;
-      if (size > Math.min(ID_MAX_BYTES, HEIC_MAX_BYTES)) throw new HttpError(413, 'too_large');
-      parts.push(c as Buffer);
-    }
     try {
-      source = Readable.from([await convertHeic(Buffer.concat(parts))]);
+      bytes = await convertHeic(bytes);
     } catch (err) {
       ctx.log.warn({ err }, 'photo ID: heic conversion failed');
       throw new HttpError(415, 'photo_unreadable');
     }
+    checkPicture(bytes, 'jpeg');
     contentType = TYPES.jpeg;
+  } else {
+    if (kind !== 'pdf') checkPicture(bytes, kind);
+    contentType = TYPES[kind];
   }
   const dek = generateKey();
-  let stored;
-  try {
-    stored = await ctx.blobs.put(source, dek, ID_MAX_BYTES);
-  } catch (err) {
-    if (err instanceof TooLarge) throw new HttpError(413, 'too_large');
-    throw err;
+  const stored = await ctx.blobs.put(Readable.from([bytes]), dek, ID_MAX_BYTES);
+  // Only while the request still waits for its code; the earlier ID is read in the same step.
+  const old = await ctx.db.transaction(async (tx) => {
+    const [cur] = await tx
+      .select({ key: schema.accessRequest.idBlobKey })
+      .from(schema.accessRequest)
+      .where(
+        and(
+          eq(schema.accessRequest.id, requestId),
+          eq(schema.accessRequest.status, 'pending'),
+          isNull(schema.accessRequest.confirmedAt),
+        ),
+      )
+      .for('update');
+    if (!cur) return undefined;
+    await tx
+      .update(schema.accessRequest)
+      .set({
+        idBlobKey: stored.blobKey,
+        idDekWrapped: Buffer.from(ctx.keyring.wrap(dek)),
+        idContentType: contentType,
+        idSize: stored.size,
+        idRemovedAt: null,
+      })
+      .where(eq(schema.accessRequest.id, requestId));
+    return cur.key;
+  });
+  if (old === undefined) {
+    await ctx.blobs.remove(stored.blobKey);
+    throw new HttpError(409, 'request_closed');
   }
-  await ctx.db
-    .update(schema.accessRequest)
-    .set({
-      idBlobKey: stored.blobKey,
-      idDekWrapped: Buffer.from(ctx.keyring.wrap(dek)),
-      idContentType: contentType,
-      idSize: stored.size,
-      idRemovedAt: null,
-    })
-    .where(eq(schema.accessRequest.id, request.id));
-  if (request.idBlobKey) await ctx.blobs.remove(request.idBlobKey).catch(() => false);
+  if (old) await ctx.blobs.remove(old);
   return { contentType, size: stored.size };
 }
 
@@ -115,20 +175,22 @@ export async function readIdPhoto(
 export const FETCHED_KEEP_DAYS = 7;
 
 /**
- * Removes photo IDs past their time (run hourly):
+ * Removes photo IDs past their time (run hourly), first making any record an approval could
+ * not make:
  * - approved: 7 days after Vibe Files fetched the record PDF; the portal's copy of the PDF goes
  *   too. Kept until then, however long, so the ID is never lost before the firm has it.
- *   (Approved without a record, when it could not be made: 30 days, as a denial.)
  * - denied: 30 days after the decision.
- * - never confirmed: before housekeeping deletes the request.
+ * - never confirmed: a day after the request.
  */
 export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
+  await remakeMissingRecords(ctx);
   const now = ctx.now();
   const ago = (days: number): Date => new Date(now.getTime() - days * DAY);
   const records = await ctx.db
     .select({
       requestId: schema.uploads.accessRequestId,
       uploadId: schema.uploads.id,
+      clientId: schema.uploads.clientId,
       blobKey: schema.uploads.blobKey,
       fetchedAt: schema.uploads.fetchedAt,
     })
@@ -148,7 +210,15 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
         .set({ purgedAt: now, blobKey: null, dekWrapped: null })
         .where(and(eq(schema.uploads.id, r.uploadId), isNull(schema.uploads.purgedAt)))
         .returning({ id: schema.uploads.id });
-      if (done) await ctx.blobs.remove(r.blobKey);
+      if (done) {
+        await ctx.blobs.remove(r.blobKey);
+        await record(
+          ctx.db,
+          'upload_purged',
+          { kind: 'system', name: 'purge' },
+          { clientId: r.clientId, uploadId: r.uploadId },
+        );
+      }
     }
   }
   const held = await ctx.db
@@ -171,18 +241,64 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
   return due.length;
 }
 
-// ---- The approval record (a PDF for the client's Permanent folder)
+/** An approved request whose record could not be made (it still has its ID): made again. */
+async function remakeMissingRecords(ctx: Ctx): Promise<void> {
+  const rows = await ctx.db
+    .select({ r: schema.accessRequest, upload: schema.uploads.id })
+    .from(schema.accessRequest)
+    .leftJoin(schema.uploads, eq(schema.uploads.accessRequestId, schema.accessRequest.id))
+    .where(
+      and(
+        eq(schema.accessRequest.status, 'approved'),
+        isNotNull(schema.accessRequest.idBlobKey),
+        isNotNull(schema.accessRequest.clientId),
+      ),
+    );
+  for (const { r, upload } of rows) {
+    if (upload || !r.clientId || !r.confirmedContact) continue;
+    const field = r.confirmedContact.includes('@')
+      ? schema.portalIdentity.email
+      : schema.portalIdentity.phone;
+    const [who] = await ctx.db
+      .select({ id: schema.portalIdentity.id })
+      .from(schema.portalIdentity)
+      .where(eq(field, r.confirmedContact));
+    if (!who) continue;
+    await fileRequestRecord(ctx, {
+      requestId: r.id,
+      identityId: who.id,
+      clientIds: [r.clientId],
+      approvedBy: r.decidedBy ?? '',
+      roleLabel: '',
+      firmName: await firmName(ctx),
+    });
+  }
+}
+
+// ---- The approval record (a PDF for Vibe Files' Portal inbox)
 
 const PAGE: [number, number] = [612, 792];
 const MARGIN = 54;
 
+/** Lines of at most `width`; a word longer than a line (a link in a note) is cut. */
 function lines(text: string, font: PDFFont, size: number, width: number): string[] {
+  const fits = (s: string): boolean => font.widthOfTextAtSize(s, size) <= width;
   const out: string[] = [];
   for (const para of text.split(/\r?\n/)) {
     let line = '';
-    for (const word of para.split(/\s+/)) {
+    for (let word of para.split(/\s+/)) {
+      while (!fits(word)) {
+        let n = word.length - 1;
+        while (n > 1 && !fits(word.slice(0, n))) n -= 1;
+        if (line) {
+          out.push(line);
+          line = '';
+        }
+        out.push(word.slice(0, n));
+        word = word.slice(n);
+      }
       const next = line ? `${line} ${word}` : word;
-      if (line && font.widthOfTextAtSize(next, size) > width) {
+      if (line && !fits(next)) {
         out.push(line);
         line = word;
       } else line = next;
@@ -192,7 +308,8 @@ function lines(text: string, font: PDFFont, size: number, width: number): string
   return out;
 }
 
-/** Only what the standard PDF font can draw (it has no glyphs beyond Latin-1). */
+/** Only what the standard PDF font can draw (it has no glyphs beyond Latin-1). The PDF also
+ *  carries the original photo ID, and the request is on the portal by its id. */
 const latin1 = (s: string): string => s.replace(/[^\x20-\x7e\xa0-\xff]/g, '?');
 
 const fmt = (d: Date | null | undefined): string =>
@@ -207,7 +324,7 @@ export interface RecordFacts {
   roleLabel: string;
 }
 
-/** The request, its decision and its photo ID, as a PDF. */
+/** The request, its decision and its photo ID, as a PDF; the original ID file is attached. */
 export async function requestRecordPdf(
   facts: RecordFacts,
   id: { bytes: Buffer; contentType: string } | null,
@@ -245,6 +362,7 @@ export async function requestRecordPdf(
     ['Approved', `${fmt(facts.approvedAt)} by ${facts.approvedBy}`],
     ['Access given to', facts.clientNames.join(', ')],
     ...(facts.roleLabel ? ([['Role', facts.roleLabel]] as [string, string][]) : []),
+    ['Request id on the portal', r.id],
   ];
   for (const [k, v] of rows) {
     write(k, 9, bold);
@@ -255,33 +373,55 @@ export async function requestRecordPdf(
   write('Photo ID', 12, bold);
   if (!id) {
     write('No photo ID was sent with this request.');
-  } else if (id.contentType === 'application/pdf') {
-    write('The photo ID was sent as a PDF: its pages follow.');
-    try {
-      const src = await PDFDocument.load(id.bytes, { ignoreEncryption: true });
-      for (const p of await pdf.copyPages(src, src.getPageIndices())) pdf.addPage(p);
-    } catch {
-      write('(The PDF could not be read.)');
-    }
   } else {
-    const img =
-      id.contentType === 'image/png' ? await pdf.embedPng(id.bytes) : await pdf.embedJpg(id.bytes);
-    const room = y - MARGIN;
-    if (room < 200) {
-      page = pdf.addPage(PAGE);
-      y = PAGE[1] - MARGIN;
+    // The file as sent, whatever happens below.
+    const ext =
+      id.contentType === 'application/pdf' ? 'pdf' : id.contentType === 'image/png' ? 'png' : 'jpg';
+    await pdf.attach(id.bytes, `photo-id.${ext}`, {
+      mimeType: id.contentType,
+      description: 'The photo ID as sent',
+    });
+    if (id.contentType === 'application/pdf') {
+      try {
+        const src = await PDFDocument.load(id.bytes, { ignoreEncryption: true });
+        if (src.isEncrypted) {
+          write('The photo ID is a password-protected PDF: it is attached to this document.');
+        } else {
+          write('The photo ID was sent as a PDF: its pages follow (it is also attached).');
+          for (const p of await pdf.copyPages(src, src.getPageIndices())) pdf.addPage(p);
+        }
+      } catch {
+        write('The photo ID PDF could not be read: it is attached to this document.');
+      }
+    } else {
+      try {
+        const img =
+          id.contentType === 'image/png'
+            ? await pdf.embedPng(id.bytes)
+            : await pdf.embedJpg(id.bytes);
+        if (y - MARGIN < 200) {
+          page = pdf.addPage(PAGE);
+          y = PAGE[1] - MARGIN;
+        }
+        const scale = Math.min(width / img.width, (y - MARGIN) / img.height, 1);
+        page.drawImage(img, {
+          x: MARGIN,
+          y: y - img.height * scale,
+          width: img.width * scale,
+          height: img.height * scale,
+        });
+      } catch {
+        write('The photo could not be shown here: it is attached to this document.');
+      }
     }
-    const scale = Math.min(width / img.width, (y - MARGIN) / img.height, 1);
-    const w = img.width * scale;
-    const h = img.height * scale;
-    page.drawImage(img, { x: MARGIN, y: y - h, width: w, height: h });
   }
   return Buffer.from(await pdf.save());
 }
 
 /**
  * After an approval: the request's record, as a PDF, for Vibe Files' Portal inbox with the first
- * client's uploads. A failure is logged (the Log shows it); the approval stands.
+ * client's uploads. False when it could not be made: logged (the Log shows it), and made again
+ * by the hourly purge while the photo ID is kept. The approval stands either way.
  */
 export async function fileRequestRecord(
   ctx: Ctx,
@@ -293,13 +433,13 @@ export async function fileRequestRecord(
     roleLabel: string;
     firmName: string;
   },
-): Promise<void> {
+): Promise<boolean> {
   try {
     const [request] = await ctx.db
       .select()
       .from(schema.accessRequest)
       .where(eq(schema.accessRequest.id, o.requestId));
-    if (!request || !o.clientIds[0]) return;
+    if (!request || !o.clientIds[0]) return false;
     const names: string[] = [];
     for (const id of o.clientIds) {
       const [c] = await ctx.db
@@ -326,20 +466,36 @@ export async function fileRequestRecord(
         .replace(/[\\/:*?"<>|\p{Cc}]+/gu, ' ')
         .trim()
         .slice(0, 80) || 'person';
-    await ctx.db.insert(schema.uploads).values({
-      clientId: o.clientIds[0],
-      identityId: o.identityId,
-      name: `Access request - ${safe}.pdf`,
-      contentType: 'application/pdf',
-      size: stored.size,
-      sha256: stored.sha256,
-      blobKey: stored.blobKey,
-      dekWrapped: Buffer.from(ctx.keyring.wrap(dek)),
-      note: `Access request and photo ID, approved by ${o.approvedBy}`,
-      uploadedAt: ctx.now(),
-      accessRequestId: request.id,
-    });
+    const [row] = await ctx.db
+      .insert(schema.uploads)
+      .values({
+        clientId: o.clientIds[0],
+        identityId: o.identityId,
+        name: `Access request - ${safe}.pdf`,
+        contentType: 'application/pdf',
+        size: stored.size,
+        sha256: stored.sha256,
+        blobKey: stored.blobKey,
+        dekWrapped: Buffer.from(ctx.keyring.wrap(dek)),
+        note: `Access request and photo ID, approved by ${o.approvedBy}`,
+        uploadedAt: ctx.now(),
+        accessRequestId: request.id,
+      })
+      .returning({ id: schema.uploads.id });
+    await record(
+      ctx.db,
+      'upload',
+      { kind: 'system', name: 'portal' },
+      {
+        clientId: o.clientIds[0],
+        identityId: o.identityId,
+        uploadId: row?.id ?? null,
+        detail: { accessRequestId: request.id, record: true },
+      },
+    );
+    return true;
   } catch (err) {
     ctx.log.error({ err }, 'access request record could not be made');
+    return false;
   }
 }

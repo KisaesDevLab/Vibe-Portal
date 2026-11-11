@@ -18,7 +18,7 @@ import type { Ctx } from '../context';
 import { sendStored } from '../files/send';
 import { record, type Actor } from '../lib/events';
 import { h, HttpError, notForStaff } from '../lib/http';
-import { inScope } from '../staff/scope';
+import { inScope, limitedTo } from '../staff/scope';
 
 function actorOf(req: Request): Actor {
   return req.firmActor ?? { kind: 'firm_key', name: 'Vibe Files' };
@@ -58,6 +58,9 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
             isNull(schema.uploads.fetchedAt),
             isNull(schema.uploads.removedAt),
             inScope(req, schema.uploads.clientId),
+            // P67: the record of an access request (with its photo ID) is for staff who see
+            // every client, as the request was.
+            limitedTo(req) ? isNull(schema.uploads.accessRequestId) : undefined,
             // P54: one client's, for its page on the staff page.
             clientId ? eq(schema.uploads.clientId, clientId) : undefined,
           ),
@@ -95,7 +98,13 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
       const [u] = await ctx.db
         .select()
         .from(schema.uploads)
-        .where(and(eq(schema.uploads.id, id), inScope(req, schema.uploads.clientId)));
+        .where(
+          and(
+            eq(schema.uploads.id, id),
+            inScope(req, schema.uploads.clientId),
+            limitedTo(req) ? isNull(schema.uploads.accessRequestId) : undefined,
+          ),
+        );
       if (!u || !u.blobKey || !u.dekWrapped) throw new HttpError(404, 'not_found');
       const blobKey = u.blobKey;
       const dekWrapped = u.dekWrapped;

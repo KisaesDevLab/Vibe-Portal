@@ -8,7 +8,9 @@ import { PDFDocument } from 'pdf-lib';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { purgeIdPhotos } from '../portal/access-id';
+import { imageSize, purgeIdPhotos } from '../portal/access-id';
+import { schema } from '@vibe-portal/db';
+import { eq } from 'drizzle-orm';
 import { CLIENT, ID_PNG, OTHER, sendId, world, type World } from './harness';
 
 let w: World;
@@ -46,7 +48,7 @@ describe('photo ID on access requests (P67)', () => {
     expect([none.status, none.body.error]).toEqual([400, 'id_required']);
     // Not used up: the same code works once the ID is in.
     const text = await request(w.app)
-      .post(`/api/portal/access-requests/${id}/id-photo?name=id.txt`)
+      .post(`/api/portal/access-requests/${id}/id-photo`)
       .set('Content-Type', 'application/octet-stream')
       .send(Buffer.from('hello there'));
     expect([text.status, text.body.error]).toEqual([415, 'id_type']);
@@ -54,7 +56,7 @@ describe('photo ID on access requests (P67)', () => {
     await confirm(id);
     // Too late to change once confirmed.
     const late = await request(w.app)
-      .post(`/api/portal/access-requests/${id}/id-photo?name=id.png`)
+      .post(`/api/portal/access-requests/${id}/id-photo`)
       .set('Content-Type', 'application/octet-stream')
       .send(ID_PNG);
     expect(late.status).toBe(404);
@@ -162,7 +164,72 @@ describe('photo ID on access requests (P67)', () => {
       .send({ name: 'Sam', email: 'sam@example.test', clientAs: 'Sam' })
       .expect(201);
     await sendId(w, other.body.requestId as string);
-    w.later(6 * DAY + 60);
+    w.later(1 * DAY + 60);
     expect(await purgeIdPhotos(w.ctx)).toBe(1);
+  });
+
+  it('refuses a picture too large to put in the PDF, and one with no picture in it', async () => {
+    const id = await ask();
+    // A small PNG that declares 30000 x 30000 pixels.
+    const huge = Buffer.from(ID_PNG);
+    huge.writeUInt32BE(30000, 16);
+    huge.writeUInt32BE(30000, 20);
+    expect(imageSize(huge, 'png')).toEqual({ w: 30000, h: 30000 });
+    const big = await request(w.app)
+      .post(`/api/portal/access-requests/${id}/id-photo`)
+      .set('Content-Type', 'application/octet-stream')
+      .send(huge);
+    expect([big.status, big.body.error]).toEqual([413, 'image_too_large']);
+    // Starts like a JPEG, has no frame.
+    const fake = await request(w.app)
+      .post(`/api/portal/access-requests/${id}/id-photo`)
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xd9, 1, 2, 3, 4]));
+    expect([fake.status, fake.body.error]).toEqual([415, 'photo_unreadable']);
+    // A file with no name or extension is fine: it is read by its content.
+    await sendId(w, id);
+    const [row] = await w.t.db
+      .select({ key: schema.accessRequest.idBlobKey })
+      .from(schema.accessRequest)
+      .where(eq(schema.accessRequest.id, id));
+    expect(row?.key).toBeTruthy();
+  });
+
+  it('a view is in History (once an hour each)', async () => {
+    const id = await ask();
+    await sendId(w, id);
+    await confirm(id);
+    await w.firm('get', `/access-requests/${id}/id-photo`).expect(200);
+    await w.firm('get', `/access-requests/${id}/id-photo`).expect(200);
+    const ev = await w.firm('get', '/events?latest=1&limit=20').expect(200);
+    expect(ev.body.events.filter((e: { kind: string }) => e.kind === 'id_viewed')).toHaveLength(1);
+    const ok = await w.firm('post', `/access-requests/${id}/approve`).send({ clientId: CLIENT });
+    expect(ok.body.recorded).toBe(true);
+  });
+
+  it('a record that could not be made is made again by the hourly run', async () => {
+    const id = await ask();
+    await sendId(w, id);
+    await confirm(id);
+    // The stored ID cannot be read at approval (its key is wrong), so no record is made...
+    const [held] = await w.t.db
+      .select()
+      .from(schema.accessRequest)
+      .where(eq(schema.accessRequest.id, id));
+    await w.t.db
+      .update(schema.accessRequest)
+      .set({ idDekWrapped: Buffer.from('broken') })
+      .where(eq(schema.accessRequest.id, id));
+    const ok = await w.firm('post', `/access-requests/${id}/approve`).send({ clientId: CLIENT });
+    expect(ok.body.recorded).toBe(false);
+    expect((await w.firm('get', '/uploads').expect(200)).body.uploads).toHaveLength(0);
+    // ...until it can: the next run makes it.
+    await w.t.db
+      .update(schema.accessRequest)
+      .set({ idDekWrapped: held?.idDekWrapped ?? null })
+      .where(eq(schema.accessRequest.id, id));
+    await purgeIdPhotos(w.ctx);
+    const ups = (await w.firm('get', '/uploads').expect(200)).body.uploads;
+    expect(ups.map((u: { name: string }) => u.name)).toEqual(['Access request - Mary Smith.pdf']);
   });
 });
