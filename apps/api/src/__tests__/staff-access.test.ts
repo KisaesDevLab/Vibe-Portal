@@ -343,6 +343,8 @@ describe('staff limited to some clients (P48)', () => {
       .expect(200);
     const list = await mary.agent.get('/api/staff/v1/access-requests');
     expect([list.status, list.body]).toEqual([403, { error: 'all_clients_only' }]);
+    // P63: nor the list of everyone on the portal.
+    await mary.agent.get('/api/staff/v1/people?q=smith').expect(403);
     await mary.agent
       .post(`/api/staff/v1/access-requests/${id}/approve`)
       .send({ clientId: CLIENT })

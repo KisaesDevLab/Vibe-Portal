@@ -111,6 +111,7 @@ appends to `events`. Rate-limited per key.
 | GET | `/clients/:id/users` | The client's portal users with status (invited / active / disabled) |
 | POST | `/clients/:id/invites` | Invite by email and/or phone, with a role label |
 | PATCH | `/clients/:id/users/:identityId` | Disable / enable a user's access to this client |
+| GET | `/people?q=…` | People on the portal whose name, email or mobile has the words (2+ characters, 20 at most), with their clients; Vibe Files' "already uses the portal" search (P63) |
 | GET | `/access-requests?status=pending` | Self sign-up requests |
 | POST | `/access-requests/:id/approve` | Body: `client_id`; links and notifies |
 | POST | `/access-requests/:id/deny` | |

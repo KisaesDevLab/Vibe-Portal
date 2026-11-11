@@ -10,12 +10,13 @@
 //   POST   /api/firm/v1/clients/:id/invites                { email?, phone?, name, roleLabel? }
 //   DELETE /api/firm/v1/clients/:id/invites/:invitationId
 //   PATCH  /api/firm/v1/clients/:id/users/:identityId      { active }
+//   GET    /api/firm/v1/people?q=…                          people on the portal, by name or contact (P63)
 //   GET    /api/firm/v1/access-requests                     (confirmed, pending)
 //   POST   /api/firm/v1/access-requests/:id/approve         { clientId | clientIds[], roleLabel? }
 //   POST   /api/firm/v1/access-requests/:id/deny
 
 import express, { type Request, type RequestHandler, type Router } from 'express';
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, ilike, inArray, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -52,6 +53,14 @@ const InviteSchema = z.object({
   roleLabel: z.string().trim().max(60).default(''),
 });
 const AccessSchema = z.object({ active: z.boolean() });
+// P63: at least two letters or digits, so the whole list is never read by accident.
+const PeopleQuery = z.object({ q: z.string().trim().min(2).max(100) });
+export const PEOPLE_SHOWN = 20;
+
+/** `%text%` for LIKE, with LIKE's own characters taken literally. */
+function likeText(q: string): string {
+  return `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
 // P61: one or more clients. Vibe Files sends `clientId`; the staff page sends `clientIds`.
 const ApproveSchema = z
   .object({
@@ -116,6 +125,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
     }),
   );
   r.use('/access-requests', requireAllClients);
+  // P63: everyone on the portal, whatever their client: for staff who see every client.
+  r.use('/people', requireAllClients);
 
   const clientExists = async (id: string): Promise<boolean> =>
     (
@@ -463,6 +474,62 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       }
       await record(ctx.db, active ? 'enable' : 'disable', actorOf(req), { clientId, identityId });
       res.json({ ok: true });
+    }),
+  );
+
+  // P63: people already on the portal whose name, email or mobile number has the words typed,
+  // with the clients they can see, so Vibe Files can invite one to another client without
+  // retyping their contact. Turned-off accounts are left out. Reading changes nothing.
+  r.get(
+    '/people',
+    h(async (req, res) => {
+      const parsed = PeopleQuery.safeParse(req.query);
+      if (!parsed.success) throw new HttpError(400, 'query_too_short');
+      const words = parsed.data.q.split(/\s+/).filter(Boolean);
+      const id = schema.portalIdentity;
+      const each = words.map((w) => {
+        const digits = w.replace(/\D/g, '');
+        return or(
+          ilike(id.name, likeText(w)),
+          ilike(id.email, likeText(w)),
+          // A number typed with spaces, dashes or brackets still finds the stored +15551234567.
+          digits.length >= 3 ? like(id.phone, likeText(digits)) : undefined,
+        );
+      });
+      const people = await ctx.db
+        .select({ identityId: id.id, name: id.name, email: id.email, phone: id.phone })
+        .from(id)
+        .where(and(eq(id.status, 'active'), ...each))
+        .orderBy(asc(id.name), asc(id.email))
+        .limit(PEOPLE_SHOWN);
+      const theirs = people.length
+        ? await ctx.db
+            .select({
+              identityId: schema.clientAccess.identityId,
+              id: schema.clients.id,
+              name: schema.clients.displayName,
+            })
+            .from(schema.clientAccess)
+            .innerJoin(schema.clients, eq(schema.clients.id, schema.clientAccess.clientId))
+            .where(
+              and(
+                inArray(
+                  schema.clientAccess.identityId,
+                  people.map((p) => p.identityId),
+                ),
+                eq(schema.clientAccess.active, true),
+              ),
+            )
+            .orderBy(asc(schema.clients.displayName))
+        : [];
+      res.json({
+        people: people.map((p) => ({
+          ...p,
+          clients: theirs
+            .filter((c) => c.identityId === p.identityId)
+            .map(({ id: cid, name }) => ({ id: cid, name })),
+        })),
+      });
     }),
   );
 

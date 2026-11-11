@@ -239,6 +239,44 @@ describe('invite -> accept -> sign in -> sign out', () => {
     // Only one identity for the person.
     expect(await t.db.select().from(schema.portalIdentity)).toHaveLength(1);
   });
+
+  it('P63: people on the portal are found by name, email or number, with their clients', async () => {
+    await invite({ email: 'a@example.test' });
+    await request(app)
+      .post('/api/portal/invitations/accept')
+      .send({ token: linkToken('a@example.test') })
+      .expect(200);
+    await t.db.insert(schema.portalIdentity).values([
+      { name: 'Pat Lee', phone: '+15552010001' },
+      { name: 'Pat Gone', email: 'gone@example.test', status: 'disabled' },
+      { name: '100% Owner', email: 'pct@example.test' },
+    ]);
+    const find = async (q: string) =>
+      (await firm('get', `/people?q=${encodeURIComponent(q)}`).expect(200)).body.people as {
+        name: string;
+        email: string | null;
+        phone: string | null;
+        clients: { id: string; name: string }[];
+      }[];
+
+    // By name, any case, every word; with the clients they can see.
+    const john = await find('john SMITH');
+    expect(john).toHaveLength(1);
+    expect(john[0]).toMatchObject({ name: 'John Smith', email: 'a@example.test' });
+    expect(john[0]?.clients).toEqual([{ id: CLIENT, name: 'Smith, John' }]);
+    expect((await find('a@example'))[0]?.name).toBe('John Smith');
+    // A number typed as people write it; a turned-off account is not offered.
+    expect((await find('(555) 201-0001')).map((p) => p.name)).toEqual(['Pat Lee']);
+    expect((await find('pat')).map((p) => p.name)).toEqual(['Pat Lee']);
+    // LIKE's own characters are plain text ("100" alone is also in Pat's number).
+    expect((await find('100% own')).map((p) => p.name)).toEqual(['100% Owner']);
+    expect(await find('_%')).toEqual([]);
+    expect(await find('nobody')).toEqual([]);
+    // Never the whole list: one letter is refused.
+    const short = await firm('get', '/people?q=a');
+    expect(short.status).toBe(400);
+    expect((await firm('get', '/people')).status).toBe(400);
+  });
 });
 
 describe('sign-in rules', () => {
