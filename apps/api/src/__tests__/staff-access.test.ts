@@ -121,6 +121,8 @@ describe('admins (P48)', () => {
       ['get', '/settings'],
       ['put', '/settings', { firmName: 'Mine', accentColor: '#000000' }],
       ['put', '/settings/logo'],
+      ['put', '/settings/logo/dark'],
+      ['delete', '/settings/logo/dark'],
       ['get', '/keys'],
       ['post', '/keys', { label: 'Mine' }],
       ['delete', `/keys/${randomUUID()}`],

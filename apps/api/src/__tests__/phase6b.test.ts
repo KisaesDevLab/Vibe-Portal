@@ -382,9 +382,41 @@ describe('Settings (P36)', () => {
     expect(big.status).toBe(413);
     expect(big.body).toEqual({ error: 'too_large' });
     const b = await request(w.app).get('/api/portal/branding').expect(200);
-    expect(b.body).toEqual({ firmName: 'Example CPA LLC', accentColor: '#225588', hasLogo: true });
+    expect(b.body).toEqual({
+      firmName: 'Example CPA LLC',
+      accentColor: '#225588',
+      hasLogo: true,
+      hasDarkLogo: false,
+    });
     const logo = await request(w.app).get('/api/portal/branding/logo').expect(200);
     expect(logo.headers['content-type']).toBe('image/png');
+    await request(w.app).get('/api/portal/branding/logo/dark').expect(404);
+
+    // P60: a second logo for dark mode, the same rules, kept apart from the first.
+    const jpeg = Buffer.from('ffd8ffe000104a464946', 'hex');
+    await agent
+      .put('/api/staff/v1/settings/logo/dark')
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('<svg/>'))
+      .expect(415);
+    await agent
+      .put('/api/staff/v1/settings/logo/dark')
+      .set('Content-Type', 'application/octet-stream')
+      .send(jpeg)
+      .expect(200);
+    expect((await agent.get('/api/staff/v1/settings').expect(200)).body).toMatchObject({
+      hasLogo: true,
+      hasDarkLogo: true,
+    });
+    const darkLogo = await request(w.app).get('/api/portal/branding/logo/dark').expect(200);
+    expect(darkLogo.headers['content-type']).toBe('image/jpeg');
+    expect(Buffer.from(darkLogo.body as Buffer).equals(jpeg)).toBe(true);
+    const light = await request(w.app).get('/api/portal/branding/logo').expect(200);
+    expect(light.headers['content-type']).toBe('image/png');
+    await agent.delete('/api/staff/v1/settings/logo/dark').expect(200);
+    const after = await request(w.app).get('/api/portal/branding').expect(200);
+    expect(after.body).toMatchObject({ hasLogo: true, hasDarkLogo: false });
+    await request(w.app).get('/api/portal/branding/logo').expect(200);
   });
 
   it('makes and revokes firm keys; the new key works for Vibe Files', async () => {

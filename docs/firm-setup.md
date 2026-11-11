@@ -87,7 +87,9 @@ On the staff page, **Settings**:
 - **Firm**: the name and colour clients see, the largest file (up to 95 MB, under Cloudflare's
   limit; it applies both to what clients send and to what Vibe Files shares), and how long
   files Vibe Files has collected stay on the portal.
-- **Logo**: a PNG or JPEG up to 512 KB.
+- **Logo**: a PNG or JPEG up to 512 KB. The portal follows each device's light or dark setting,
+  so you can add a second **Logo for dark mode** (light lettering on a clear background) under
+  it. Devices in dark mode show that one; without it they show the usual logo.
 - **Staff**: add the other staff who should use the staff page; each gets a setup link by
   email. **New setup link** helps someone who lost their phone: it clears their password and
   authenticator, and they set both again from the link (also

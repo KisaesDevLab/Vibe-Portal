@@ -8,6 +8,8 @@
 //   PUT    /api/staff/v1/settings                { firmName, accentColor, uploadLimitMb, uploadKeepDays }
 //   PUT    /api/staff/v1/settings/logo           body: PNG or JPEG, at most 512 KB
 //   DELETE /api/staff/v1/settings/logo
+//   PUT    /api/staff/v1/settings/logo/dark      the logo for dark mode (P60), same rules
+//   DELETE /api/staff/v1/settings/logo/dark
 //   GET    /api/staff/v1/keys                    POST { label } -> { key } (shown once)
 //   DELETE /api/staff/v1/keys/:id
 //   GET    /api/staff/v1/staff                   POST { email, name, admin?, clientIds? }
@@ -16,8 +18,9 @@
 //          clientIds: the only clients they see, or null for every client. An admin sees all.
 //   POST   /api/staff/v1/staff/:id/reset         -> { setupLink } (new password and authenticator)
 //
-//   GET    /api/portal/branding                  (public) { firmName, accentColor, hasLogo }
+//   GET    /api/portal/branding                  (public) { firmName, accentColor, hasLogo, hasDarkLogo }
 //   GET    /api/portal/branding/logo             (public)
+//   GET    /api/portal/branding/logo/dark        (public, P60)
 
 import express, { type Request, type Router } from 'express';
 import { asc, eq, inArray } from 'drizzle-orm';
@@ -122,6 +125,7 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         uploadLimitMb: Math.round((f?.uploadLimitBytes ?? MAX_UPLOAD_BYTES) / MB),
         uploadKeepDays: f?.uploadKeepDays ?? 30,
         hasLogo: Boolean(f?.logo),
+        hasDarkLogo: Boolean(f?.logoDark),
         portalUrl: ctx.portalUrl,
         clientLinks: Boolean(f?.clientLinks),
         shareDownloadLimit: f?.shareDownloadLimit ?? 5,
@@ -147,29 +151,48 @@ export function staffSettingsRouter(ctx: Ctx): Router {
     }),
   );
 
-  r.put(
-    '/settings/logo',
-    express.raw({ type: ['image/png', 'image/jpeg', 'application/octet-stream'], limit: LOGO_MAX }),
-    h(async (req, res) => {
-      const b = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
-      const type = imageType(b);
-      if (!type) throw new HttpError(415, 'png_or_jpeg');
-      await ctx.db.update(schema.firm).set({ logo: b, logoType: type, updatedAt: ctx.now() });
-      await record(ctx.db, 'settings_updated', actor(req), {
-        detail: { logo: type, size: b.length },
-      });
-      res.json({ ok: true });
-    }),
-  );
-
-  r.delete(
-    '/settings/logo',
-    h(async (req, res) => {
-      await ctx.db.update(schema.firm).set({ logo: null, logoType: null, updatedAt: ctx.now() });
-      await record(ctx.db, 'settings_updated', actor(req), { detail: { logo: null } });
-      res.json({ ok: true });
-    }),
-  );
+  // The logo, and (P60) the one for dark mode: the same rules for both.
+  for (const dark of [false, true]) {
+    const path = dark ? '/settings/logo/dark' : '/settings/logo';
+    const what = dark ? 'logoDark' : 'logo';
+    r.put(
+      path,
+      express.raw({
+        type: ['image/png', 'image/jpeg', 'application/octet-stream'],
+        limit: LOGO_MAX,
+      }),
+      h(async (req, res) => {
+        const b = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+        const type = imageType(b);
+        if (!type) throw new HttpError(415, 'png_or_jpeg');
+        await ctx.db
+          .update(schema.firm)
+          .set(
+            dark
+              ? { logoDark: b, logoDarkType: type, updatedAt: ctx.now() }
+              : { logo: b, logoType: type, updatedAt: ctx.now() },
+          );
+        await record(ctx.db, 'settings_updated', actor(req), {
+          detail: { [what]: type, size: b.length },
+        });
+        res.json({ ok: true });
+      }),
+    );
+    r.delete(
+      path,
+      h(async (req, res) => {
+        await ctx.db
+          .update(schema.firm)
+          .set(
+            dark
+              ? { logoDark: null, logoDarkType: null, updatedAt: ctx.now() }
+              : { logo: null, logoType: null, updatedAt: ctx.now() },
+          );
+        await record(ctx.db, 'settings_updated', actor(req), { detail: { [what]: null } });
+        res.json({ ok: true });
+      }),
+    );
+  }
 
   r.get(
     '/keys',
@@ -437,20 +460,25 @@ export function brandingRouter(ctx: Ctx): Router {
         firmName: f?.name || 'Your accounting firm',
         accentColor: f?.accentColor ?? '#0f6cbd',
         hasLogo: Boolean(f?.logo),
+        hasDarkLogo: Boolean(f?.logoDark),
       });
     }),
   );
-  r.get(
-    '/logo',
-    h(async (_req, res) => {
-      const [f] = await ctx.db.select().from(schema.firm);
-      if (!f?.logo || !f.logoType) throw new HttpError(404, 'not_found');
-      res.setHeader('Content-Type', f.logoType);
-      res.setHeader('Cache-Control', 'public, max-age=300');
-      res.setHeader('Content-Security-Policy', "default-src 'none'");
-      // Raw bytes (the driver may hand back a Uint8Array, which send() would treat as text).
-      res.end(Buffer.from(f.logo));
-    }),
-  );
+  for (const dark of [false, true]) {
+    r.get(
+      dark ? '/logo/dark' : '/logo',
+      h(async (_req, res) => {
+        const [f] = await ctx.db.select().from(schema.firm);
+        const bytes = dark ? f?.logoDark : f?.logo;
+        const type = dark ? f?.logoDarkType : f?.logoType;
+        if (!bytes || !type) throw new HttpError(404, 'not_found');
+        res.setHeader('Content-Type', type);
+        res.setHeader('Cache-Control', 'public, max-age=300');
+        res.setHeader('Content-Security-Policy', "default-src 'none'");
+        // Raw bytes (the driver may hand back a Uint8Array, which send() would treat as text).
+        res.end(Buffer.from(bytes));
+      }),
+    );
+  }
   return r;
 }

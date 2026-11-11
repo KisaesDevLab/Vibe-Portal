@@ -10,6 +10,8 @@ export interface Branding {
   firmName: string;
   accentColor: string;
   hasLogo: boolean;
+  /** P60: a logo for dark mode (absent from older servers). */
+  hasDarkLogo?: boolean;
   /** Changes when the logo may have changed, so the browser fetches it again. */
   logoVersion: number;
 }
@@ -83,16 +85,49 @@ export function useBranding(): Branding | null {
   return b;
 }
 
-/** The firm's logo, or nothing when it has none. */
+const DARK = '(prefers-color-scheme: dark)';
+
+function darkQuery(): MediaQueryList | null {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(DARK)
+    : null;
+}
+
+/** True while the device is set to dark mode (the portal follows the device). */
+export function useDarkMode(): boolean {
+  const [dark, setDark] = useState(() => darkQuery()?.matches ?? false);
+  useEffect(() => {
+    const m = darkQuery();
+    if (!m) return;
+    const on = (e: MediaQueryListEvent): void => setDark(e.matches);
+    setDark(m.matches);
+    m.addEventListener?.('change', on);
+    return () => m.removeEventListener?.('change', on);
+  }, []);
+  return dark;
+}
+
+/**
+ * The firm's logo, or nothing when it has none. P60: in dark mode, the dark-mode logo when the
+ * firm set one, otherwise the usual logo. A firm with only a dark-mode logo shows none in light
+ * mode (it is made for a dark background).
+ */
 export function FirmLogo({ height = 48 }: { height?: number }): JSX.Element | null {
   const b = useBranding();
-  const [broken, setBroken] = useState(false);
-  if (!b?.hasLogo || broken) return null;
+  const dark = useDarkMode();
+  const [broken, setBroken] = useState<string | null>(null);
+  const path =
+    dark && b?.hasDarkLogo
+      ? '/api/portal/branding/logo/dark'
+      : b?.hasLogo
+        ? '/api/portal/branding/logo'
+        : null;
+  if (!b || !path || broken === path) return null;
   return (
     <img
-      src={`/api/portal/branding/logo?v=${b.logoVersion}`}
+      src={`${path}?v=${b.logoVersion}`}
       alt={`${b.firmName} logo`}
-      onError={() => setBroken(true)}
+      onError={() => setBroken(path)}
       style={{ maxHeight: height, maxWidth: 240, objectFit: 'contain', display: 'block' }}
     />
   );
@@ -122,7 +157,7 @@ export function FirmAuthLayout({
       title={title}
       {...(subtitle ? { subtitle } : {})}
       {...(footer ? { footer } : {})}
-      logo={b?.hasLogo ? <FirmLogo height={56} /> : undefined}
+      logo={b?.hasLogo || b?.hasDarkLogo ? <FirmLogo height={56} /> : undefined}
     >
       {children}
     </AuthLayout>

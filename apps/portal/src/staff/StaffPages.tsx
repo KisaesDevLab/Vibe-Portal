@@ -1385,12 +1385,89 @@ function History(): JSX.Element {
   );
 }
 
+/** One logo on Settings > Firm: shown, replaced, removed (P53; P60 the dark-mode one). */
+function LogoSetting({
+  title,
+  note,
+  path,
+  src,
+  dark = false,
+  has,
+  version,
+  busy,
+  act,
+  changed,
+}: {
+  title: string;
+  note: string;
+  path: string;
+  src: string;
+  dark?: boolean;
+  has: boolean;
+  version: number;
+  busy: boolean;
+  act: (path: string, init: { method?: string; body?: unknown; raw?: Blob }) => Promise<unknown>;
+  changed: () => void;
+}): JSX.Element {
+  return (
+    <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+      <strong>{title}</strong>
+      {has && (
+        <img
+          src={`${src}?v=${version}`}
+          alt={dark ? 'Firm logo for dark mode' : 'Firm logo'}
+          // Shown on the background it is made for, whatever this device's own setting.
+          style={{
+            maxHeight: 60,
+            maxWidth: 240,
+            justifySelf: 'start',
+            padding: 8,
+            borderRadius: 6,
+            background: dark ? '#11151b' : '#ffffff',
+          }}
+        />
+      )}
+      <label>
+        <span>{note} </span>
+        <input
+          type="file"
+          accept="image/png,image/jpeg"
+          aria-label={`Choose the ${title.toLowerCase()}`}
+          disabled={busy}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            // Cleared, so the same file can be chosen again.
+            e.target.value = '';
+            if (f) {
+              void act(path, { method: 'PUT', raw: f }).then((r) => {
+                if (r) changed();
+              });
+            }
+          }}
+        />
+      </label>
+      {has && (
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={() => void act(path, { method: 'DELETE' }).then(changed)}
+        >
+          {dark ? 'Remove dark-mode logo' : 'Remove logo'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 interface SettingsData {
   firmName: string;
   accentColor: string;
   uploadLimitMb: number;
   uploadKeepDays: number;
   hasLogo: boolean;
+  /** P60: a logo for dark mode. */
+  hasDarkLogo?: boolean;
   portalUrl: string;
   /** Clients may send secure links to files shared with them (P55). */
   clientLinks: boolean;
@@ -1531,52 +1608,35 @@ function Settings(): JSX.Element {
               Save
             </Button>
           </form>
-          <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
-            <strong>Logo</strong>
-            {s.data?.hasLogo && (
-              <img
-                src={`/api/portal/branding/logo?v=${logoV}`}
-                alt="Firm logo"
-                style={{ maxHeight: 60, maxWidth: 240 }}
-              />
-            )}
-            <label>
-              <span>PNG or JPEG, at most 512 KB </span>
-              <input
-                type="file"
-                accept="image/png,image/jpeg"
-                disabled={busy}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  // Cleared, so the same file can be chosen again.
-                  e.target.value = '';
-                  if (f) {
-                    void act('/v1/settings/logo', { method: 'PUT', raw: f }).then((r) => {
-                      if (r) {
-                        setLogoV((v) => v + 1);
-                        reloadBranding();
-                      }
-                    });
-                  }
-                }}
-              />
-            </label>
-            {s.data?.hasLogo && (
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={busy}
-                onClick={() =>
-                  void act('/v1/settings/logo', { method: 'DELETE' }).then(() => {
-                    setLogoV((v) => v + 1);
-                    reloadBranding();
-                  })
-                }
-              >
-                Remove logo
-              </Button>
-            )}
-          </div>
+          <LogoSetting
+            title="Logo"
+            note="PNG or JPEG, at most 512 KB. Shown in light mode, and in dark mode when there is no dark-mode logo."
+            path="/v1/settings/logo"
+            src="/api/portal/branding/logo"
+            has={Boolean(s.data?.hasLogo)}
+            version={logoV}
+            busy={busy}
+            act={act}
+            changed={() => {
+              setLogoV((v) => v + 1);
+              reloadBranding();
+            }}
+          />
+          <LogoSetting
+            title="Logo for dark mode (optional)"
+            note="PNG or JPEG, at most 512 KB. Shown when the device is set to dark mode: a version with light lettering on a clear background."
+            path="/v1/settings/logo/dark"
+            src="/api/portal/branding/logo/dark"
+            dark
+            has={Boolean(s.data?.hasDarkLogo)}
+            version={logoV}
+            busy={busy}
+            act={act}
+            changed={() => {
+              setLogoV((v) => v + 1);
+              reloadBranding();
+            }}
+          />
         </Card>
       )}
       <Card title="Portal keys (for Vibe Files › Admin › Portal)">

@@ -70,6 +70,9 @@ export const firm = pgTable('firm', {
   name: text('name').notNull().default(''),
   logo: bytea('logo'),
   logoType: text('logo_type'),
+  /** P60: shown instead of `logo` when the device is set to dark mode. */
+  logoDark: bytea('logo_dark'),
+  logoDarkType: text('logo_dark_type'),
   accentColor: text('accent_color').notNull().default('#0f6cbd'),
   portalUrl: text('portal_url').notNull().default(''),
   uploadLimitBytes: bigint('upload_limit_bytes', { mode: 'number' }).notNull(),
