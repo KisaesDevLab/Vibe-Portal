@@ -119,7 +119,8 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
           const actor = actorOf(req);
           if (actor.kind === 'staff') {
             await record(ctx.db, 'download', actor, {
-              clientId: u.clientId,
+              // P67: an access-request record stays out of the client's History.
+              clientId: u.accessRequestId ? null : u.clientId,
               identityId: u.identityId,
               uploadId: u.id,
             });
@@ -164,7 +165,8 @@ export function firmUploadsRouter(ctx: Ctx, staff = false): Router {
         return;
       }
       await record(ctx.db, 'fetch', actor, {
-        clientId: u.clientId,
+        // P67: an access-request record stays out of the client's History.
+        clientId: u.accessRequestId ? null : u.clientId,
         identityId: u.identityId,
         uploadId: u.id,
       });

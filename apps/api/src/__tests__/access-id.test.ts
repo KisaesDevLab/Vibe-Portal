@@ -137,6 +137,9 @@ describe('photo ID on access requests (P67)', () => {
     await purgeIdPhotos(w.ctx);
     await w.firm('get', `/access-requests/${id}/id-photo`).expect(200);
     await w.firm('post', `/uploads/${rec.uploadId}/fetched`).expect(200);
+    // Not in the client's History (staff limited to the client see it).
+    const hist = await w.firm('get', `/clients/${CLIENT}/history?limit=100`).expect(200);
+    expect(JSON.stringify(hist.body)).not.toContain('Access request');
     w.later(6 * DAY);
     await purgeIdPhotos(w.ctx);
     await w.firm('get', `/access-requests/${id}/id-photo`).expect(200);
@@ -145,6 +148,8 @@ describe('photo ID on access requests (P67)', () => {
     await purgeIdPhotos(w.ctx);
     await w.firm('get', `/access-requests/${id}/id-photo`).expect(404);
     await w.firm('get', `/uploads/${rec.uploadId}/content`).expect(404);
+    const after = await w.firm('get', `/clients/${CLIENT}/history?limit=100`).expect(200);
+    expect(JSON.stringify(after.body)).not.toContain('Access request');
   });
 
   it('denied: the ID goes 30 days later; never confirmed: with the request', async () => {
@@ -225,6 +230,14 @@ describe('photo ID on access requests (P67)', () => {
       .send({ clientIds: [CLIENT, OTHER], roleLabel: 'Spouse' });
     expect(ok.body.recorded).toBe(false);
     expect((await w.firm('get', '/uploads').expect(200)).body.uploads).toHaveLength(0);
+    // However long it fails, the ID is kept: the firm has no record yet.
+    w.later(40 * DAY);
+    await purgeIdPhotos(w.ctx);
+    const [still] = await w.t.db
+      .select({ key: schema.accessRequest.idBlobKey })
+      .from(schema.accessRequest)
+      .where(eq(schema.accessRequest.id, id));
+    expect(still?.key).toBeTruthy();
     // ...until it can: the next run makes it.
     await w.t.db
       .update(schema.accessRequest)

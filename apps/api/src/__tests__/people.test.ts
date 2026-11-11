@@ -219,6 +219,8 @@ describe('People view (P66)', () => {
     expect([res.status, res.body.error]).toEqual([409, 'contact_taken']);
     const d = await boss.get(`${P}/${mary.id}`).expect(200);
     expect(d.body.person.email).toBe(MARY);
+    // The refused link is not used up: staff still see the change waiting.
+    expect(d.body.pendingContact).toEqual(expect.objectContaining({ contact: NEW }));
   });
 
   it('works by text: a new number, a sign-in link to a number, removing a number', async () => {

@@ -19,7 +19,7 @@ import express, {
   type Response,
   type Router,
 } from 'express';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, gt, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -247,21 +247,34 @@ export function clientAuthRouter(ctx: Ctx): Router {
       if (!(await hit(ctx.db, `verify:ip:${clientIp(req)}`, LIMITS.verifyPerIp, now))) {
         throw new HttpError(429, 'too_many_requests');
       }
-      const ch = await redeemToken(ctx.db, 'contact_confirm', token, now);
-      if (!ch?.identityId) throw new HttpError(400, 'link_expired');
-      const field = ch.contact.includes('@') ? 'email' : 'phone';
+      // Checked before the link is used up: a refusal leaves it for staff to see waiting.
+      const [live] = await ctx.db
+        .select()
+        .from(schema.signInChallenge)
+        .where(
+          and(
+            eq(schema.signInChallenge.kind, 'contact_confirm'),
+            eq(schema.signInChallenge.secretHash, sha256(token)),
+            isNull(schema.signInChallenge.usedAt),
+            gt(schema.signInChallenge.expiresAt, now),
+          ),
+        );
+      if (!live?.identityId) throw new HttpError(400, 'link_expired');
+      const field = live.contact.includes('@') ? 'email' : 'phone';
       const [who] = await ctx.db
         .select()
         .from(schema.portalIdentity)
-        .where(eq(schema.portalIdentity.id, ch.identityId));
+        .where(eq(schema.portalIdentity.id, live.identityId));
       if (!who || who.status !== 'active') throw new HttpError(400, 'link_expired');
       const old = who[field];
       // Someone else has it since the link was sent: never merge two people.
       const [taken] = await ctx.db
         .select({ id: schema.portalIdentity.id })
         .from(schema.portalIdentity)
-        .where(eq(schema.portalIdentity[field], ch.contact));
+        .where(eq(schema.portalIdentity[field], live.contact));
       if (taken && taken.id !== who.id) throw new HttpError(409, 'contact_taken');
+      const ch = await redeemToken(ctx.db, 'contact_confirm', token, now);
+      if (!ch?.identityId || ch.identityId !== who.id) throw new HttpError(400, 'link_expired');
       try {
         await ctx.db
           .update(schema.portalIdentity)

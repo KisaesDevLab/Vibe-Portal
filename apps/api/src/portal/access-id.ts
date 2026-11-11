@@ -14,7 +14,7 @@
 
 import { Readable } from 'node:stream';
 
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { generateKey } from '@vibe/crypto';
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { schema } from '@vibe-portal/db';
@@ -178,7 +178,8 @@ export const FETCHED_KEEP_DAYS = 7;
  * Removes photo IDs past their time (run hourly), first making any record an approval could
  * not make:
  * - approved: 7 days after Vibe Files fetched the record PDF; the portal's copy of the PDF goes
- *   too. Kept until then, however long, so the ID is never lost before the firm has it.
+ *   too. Kept until then, however long (a record that cannot be made is tried again hourly, and
+ *   the Log says why), so the ID is never lost before the firm has it.
  * - denied: 30 days after the decision.
  * - never confirmed: a day after the request.
  */
@@ -216,7 +217,8 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
           ctx.db,
           'upload_purged',
           { kind: 'system', name: 'purge' },
-          { clientId: r.clientId, uploadId: r.uploadId },
+          // Not in the client's History, as the record's other events.
+          { uploadId: r.uploadId },
         );
       }
     }
@@ -228,7 +230,8 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
   const due = held.filter((r) => {
     if (!r.confirmedAt) return r.createdAt < ago(UNCONFIRMED_ID_DAYS);
     if (r.status === 'pending' || !r.decidedAt) return false;
-    if (r.status === 'approved' && hasRecord.has(r.id)) return fetchedLongAgo.has(r.id);
+    // Approved: kept until the firm has the record, however long (made again hourly until then).
+    if (r.status === 'approved') return hasRecord.has(r.id) && fetchedLongAgo.has(r.id);
     return r.decidedAt < ago(ID_KEEP_DAYS);
   });
   for (const r of due) {
@@ -255,16 +258,19 @@ async function remakeMissingRecords(ctx: Ctx): Promise<void> {
         isNotNull(schema.accessRequest.identityId),
       ),
     );
-  for (const { r, upload } of rows) {
+  const missing = rows.filter(({ upload }) => !upload);
+  if (missing.length === 0) return;
+  const firm = await firmName(ctx);
+  for (const { r } of missing) {
     const clientIds = r.clientIds ?? (r.clientId ? [r.clientId] : []);
-    if (upload || !r.identityId || clientIds.length === 0) continue;
+    if (!r.identityId || clientIds.length === 0) continue;
     await fileRequestRecord(ctx, {
       requestId: r.id,
       identityId: r.identityId,
       clientIds,
       approvedBy: r.decidedBy ?? '',
       roleLabel: r.roleLabel ?? '',
-      firmName: await firmName(ctx),
+      firmName: firm,
     });
   }
 }
@@ -304,7 +310,8 @@ function lines(text: string, font: PDFFont, size: number, width: number): string
 
 /** Only what the standard PDF font can draw (it has no glyphs beyond Latin-1). The PDF also
  *  carries the original photo ID, and the request is on the portal by its id. */
-const latin1 = (s: string): string => s.replace(/[^\x20-\x7e\xa0-\xff]/g, '?');
+const latin1 = (s: string): string =>
+  s.replace(/\t/g, ' ').replace(/[^\n\x20-\x7e\xa0-\xff]/g, '?');
 
 /** "2026-11-11 1430": the approval's date and time on the appliance's clock, for the file name
  *  (no colon: Windows file names cannot have one). Two people of the same name get two names. */
@@ -313,8 +320,17 @@ export function stamp(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-const fmt = (d: Date | null | undefined): string =>
-  d ? `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC` : '-';
+/** A time in the PDF: the appliance's clock with its zone, as the file name's (e.g. "2026-11-11
+ *  14:30 CST"). */
+const fmt = (d: Date | null | undefined): string => {
+  if (!d) return '-';
+  const zone =
+    new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' })
+      .formatToParts(d)
+      .find((p) => p.type === 'timeZoneName')?.value ?? '';
+  const s = stamp(d);
+  return `${s.slice(0, 13)}:${s.slice(13)}${zone ? ` ${zone}` : ''}`;
+};
 
 export interface RecordFacts {
   firmName: string;
@@ -441,14 +457,11 @@ export async function fileRequestRecord(
       .from(schema.accessRequest)
       .where(eq(schema.accessRequest.id, o.requestId));
     if (!request || !o.clientIds[0]) return false;
-    const names: string[] = [];
-    for (const id of o.clientIds) {
-      const [c] = await ctx.db
-        .select({ name: schema.clients.displayName })
-        .from(schema.clients)
-        .where(eq(schema.clients.id, id));
-      names.push(c?.name ?? id);
-    }
+    const found = await ctx.db
+      .select({ id: schema.clients.id, name: schema.clients.displayName })
+      .from(schema.clients)
+      .where(inArray(schema.clients.id, o.clientIds));
+    const names = o.clientIds.map((id) => found.find((c) => c.id === id)?.name ?? id);
     const pdf = await requestRecordPdf(
       {
         firmName: o.firmName,
