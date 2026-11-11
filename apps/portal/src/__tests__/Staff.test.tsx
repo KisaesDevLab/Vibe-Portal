@@ -1117,7 +1117,7 @@ describe('staff page', () => {
       '/v1/clients': { body: { clients: [CLIENT] } },
     });
     at('/staff/requests');
-    const img = (await screen.findByAltText('Photo ID sent by Mary Smith')) as HTMLImageElement;
+    const img = (await screen.findByAltText('ID sent by Mary Smith')) as HTMLImageElement;
     expect(img.getAttribute('src')).toBe('/api/staff/v1/access-requests/r1/id-photo');
     expect(screen.getByRole('link', { name: 'Open the photo ID (PDF)' }).getAttribute('href')).toBe(
       '/api/staff/v1/access-requests/r2/id-photo',

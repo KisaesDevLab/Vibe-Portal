@@ -143,3 +143,25 @@ describe('a pale firm colour as a link on a light page (UI review)', () => {
     expect(1.05 / (lum(pale) + 0.05)).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+describe('tablets keep the native text size, so they get the wide layout (P73)', () => {
+  it('zooms text from 1024 px wide only', async () => {
+    const { fontScaleBootstrapScript } = await import('@vibe/ui');
+    const run = (width: number): string => {
+      Object.defineProperty(document.documentElement, 'clientWidth', {
+        configurable: true,
+        value: width,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      new Function(fontScaleBootstrapScript)();
+      return document.documentElement.style.getPropertyValue('--vibe-font-scale');
+    };
+    try {
+      expect(run(768)).toBe('1');
+      expect(run(1280)).toBe('1.15');
+    } finally {
+      document.documentElement.style.removeProperty('--vibe-font-scale');
+      document.body.style.zoom = '';
+    }
+  });
+});

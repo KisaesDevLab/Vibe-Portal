@@ -4,11 +4,17 @@
 // to Vibe Files' Portal inbox with the first client; the ID is deleted 7 days after Vibe Files
 // fetched the PDF (30 days after a denial).
 
-import { PDFDocument } from 'pdf-lib';
+import { PDFDict, PDFDocument, PDFName } from 'pdf-lib';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { imageSize, purgeIdPhotos, stamp } from '../portal/access-id';
+import {
+  imageSize,
+  jpegOrientation,
+  purgeIdPhotos,
+  requestRecordPdf,
+  stamp,
+} from '../portal/access-id';
 import { schema } from '@vibe-portal/db';
 import { eq } from 'drizzle-orm';
 import { CLIENT, ID_PNG, OTHER, sendId, world, type World } from './harness';
@@ -256,5 +262,107 @@ describe('photo ID on access requests (P67)', () => {
     expect(r?.clientIds).toEqual([CLIENT, OTHER]);
     expect(r?.roleLabel).toBe('Spouse');
     expect(r?.identityId).toBe(ok.body.identityId);
+  });
+
+  it('an approved ID not fetched in 90 days goes, and the portal copy of the PDF with it', async () => {
+    const id = await ask();
+    await sendId(w, id);
+    await confirm(id);
+    await w.firm('post', `/access-requests/${id}/approve`).send({ clientId: CLIENT }).expect(200);
+    const rec = (await w.firm('get', '/uploads').expect(200)).body.uploads[0];
+    w.later(89 * DAY);
+    await purgeIdPhotos(w.ctx);
+    await w.firm('get', `/access-requests/${id}/id-photo`).expect(200);
+    w.later(1 * DAY + 60);
+    await purgeIdPhotos(w.ctx);
+    await w.firm('get', `/access-requests/${id}/id-photo`).expect(404);
+    await w.firm('get', `/uploads/${rec.uploadId}/content`).expect(404);
+  });
+});
+
+describe('the request PDF (P73)', () => {
+  it('reads which way a phone photo is turned', () => {
+    // A JPEG start, then an Exif segment whose first entry is Orientation = 6.
+    const exif = (order: 'MM' | 'II', value: number): Buffer => {
+      const be = order === 'MM';
+      const u16 = (n: number): number[] => (be ? [n >> 8, n & 255] : [n & 255, n >> 8]);
+      const u32 = (n: number): number[] => (be ? [0, 0, n >> 8, n & 255] : [n & 255, n >> 8, 0, 0]);
+      const tiff = [
+        ...Buffer.from(order, 'latin1'),
+        ...u16(42),
+        ...u32(8),
+        ...u16(1),
+        ...u16(0x0112),
+        ...u16(3),
+        ...u32(1),
+        ...u16(value),
+        0,
+        0,
+        ...u32(0),
+      ];
+      const body = [...Buffer.from('Exif\0\0', 'latin1'), ...tiff];
+      return Buffer.from([
+        0xff,
+        0xd8,
+        0xff,
+        0xe1,
+        (body.length + 2) >> 8,
+        (body.length + 2) & 255,
+        ...body,
+        0xff,
+        0xd9,
+      ]);
+    };
+    expect(jpegOrientation(exif('MM', 6))).toBe(6);
+    expect(jpegOrientation(exif('II', 8))).toBe(8);
+    expect(jpegOrientation(exif('MM', 3))).toBe(3);
+    expect(jpegOrientation(exif('MM', 2))).toBe(1); // mirrored: as it is
+    expect(jpegOrientation(Buffer.from([0xff, 0xd8, 0xff, 0xd9]))).toBe(1);
+  });
+
+  it('writes names in other alphabets with an embedded font', async () => {
+    const pdf = await requestRecordPdf(
+      {
+        firmName: 'Example CPA',
+        request: {
+          id: '33333333-3333-4333-8333-333333333333',
+          name: 'Иван Петров',
+          email: 'ivan@example.test',
+          phone: null,
+          clientAs: 'Петров ООО',
+          note: 'Γεια σας\nשלום',
+          status: 'approved',
+          clientId: CLIENT,
+          decidedBy: 'kurt',
+          decidedAt: new Date('2026-11-11T14:30:00Z'),
+          createdAt: new Date('2026-11-11T14:00:00Z'),
+          confirmedAt: new Date('2026-11-11T14:05:00Z'),
+          confirmedContact: 'ivan@example.test',
+          idBlobKey: null,
+          idDekWrapped: null,
+          idContentType: null,
+          idSize: null,
+          idRemovedAt: null,
+          identityId: null,
+          clientIds: [CLIENT],
+          roleLabel: '',
+        },
+        clientNames: ['Smith, John'],
+        approvedBy: 'kurt',
+        approvedAt: new Date('2026-11-11T14:30:00Z'),
+        roleLabel: '',
+      },
+      { bytes: ID_PNG, contentType: 'image/png' },
+    );
+    const doc = await PDFDocument.load(pdf);
+    expect(doc.getTitle()).toBe('Portal access request - Иван Петров');
+    // The fonts embedded are DejaVu Sans (not the standard Helvetica, which has no Cyrillic).
+    const fonts = doc.context
+      .enumerateIndirectObjects()
+      .map(([, o]) => (o instanceof PDFDict ? o.get(PDFName.of('BaseFont')) : undefined))
+      .filter((n): n is PDFName => n instanceof PDFName)
+      .map((n) => n.decodeText());
+    expect(fonts.some((f) => f.includes('DejaVuSans'))).toBe(true);
+    expect(fonts.some((f) => f.includes('Helvetica'))).toBe(false);
   });
 });

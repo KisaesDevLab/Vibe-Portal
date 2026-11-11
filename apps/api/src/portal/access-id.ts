@@ -12,11 +12,15 @@
 //   matches), the portal's copy of the PDF too; a denied request's 30 days after the decision;
 //   an unconfirmed request's a day after it was made.
 
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 
 import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { generateKey } from '@vibe/crypto';
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
+import { degrees, PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { schema } from '@vibe-portal/db';
 
 import { firmName, type Ctx } from '../context';
@@ -39,6 +43,39 @@ const DAY = 24 * 3_600_000;
 
 type Request = typeof schema.accessRequest.$inferSelect;
 const TYPES = { jpeg: 'image/jpeg', png: 'image/png', pdf: 'application/pdf' } as const;
+
+/**
+ * The EXIF orientation of a JPEG (1 upright, 3 upside down, 6 turned a quarter clockwise to
+ * show, 8 a quarter counter-clockwise), or 1 when it says nothing. Mirrored ones count as 1.
+ */
+export function jpegOrientation(b: Buffer): number {
+  let i = 2;
+  while (i + 4 < b.length && b[i] === 0xff) {
+    const m = b[i + 1] as number;
+    const len = b.readUInt16BE(i + 2);
+    if (m === 0xe1 && b.subarray(i + 4, i + 10).toString('latin1') === 'Exif\0\0') {
+      const t = i + 10;
+      const le = b.subarray(t, t + 2).toString('latin1') === 'II';
+      const u16 = (o: number): number => (le ? b.readUInt16LE(o) : b.readUInt16BE(o));
+      const u32 = (o: number): number => (le ? b.readUInt32LE(o) : b.readUInt32BE(o));
+      const ifd = t + u32(t + 4);
+      if (ifd + 2 > b.length) return 1;
+      const n = u16(ifd);
+      for (let k = 0; k < n; k++) {
+        const e = ifd + 2 + k * 12;
+        if (e + 12 > b.length) return 1;
+        if (u16(e) === 0x0112) {
+          const v = u16(e + 8);
+          return v === 3 || v === 6 || v === 8 ? v : 1;
+        }
+      }
+      return 1;
+    }
+    if (m === 0xda) return 1;
+    i += 2 + len;
+  }
+  return 1;
+}
 
 /** Width and height a PNG or JPEG declares, or null when it declares none. */
 export function imageSize(b: Buffer, kind: 'png' | 'jpeg'): { w: number; h: number } | null {
@@ -173,13 +210,16 @@ export async function readIdPhoto(
 /** Days the photo ID and the portal's copy of the record are kept once Vibe Files has fetched
  *  the record (owner 2026-11-11). */
 export const FETCHED_KEEP_DAYS = 7;
+/** Days after approval the photo ID is kept at most, fetched or not (owner 2026-11-11: a firm
+ *  that does not fetch for a while does not keep IDs for ever). */
+export const APPROVED_MAX_DAYS = 90;
 
 /**
  * Removes photo IDs past their time (run hourly), first making any record an approval could
  * not make:
  * - approved: 7 days after Vibe Files fetched the record PDF; the portal's copy of the PDF goes
- *   too. Kept until then, however long (a record that cannot be made is tried again hourly, and
- *   the Log says why), so the ID is never lost before the firm has it.
+ *   too. Kept until then (a record that cannot be made is tried again hourly, and the Log says
+ *   why), but never more than 90 days after approval (the Log says so).
  * - denied: 30 days after the decision.
  * - never confirmed: a day after the request.
  */
@@ -230,11 +270,31 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
   const due = held.filter((r) => {
     if (!r.confirmedAt) return r.createdAt < ago(UNCONFIRMED_ID_DAYS);
     if (r.status === 'pending' || !r.decidedAt) return false;
-    // Approved: kept until the firm has the record, however long (made again hourly until then).
-    if (r.status === 'approved') return hasRecord.has(r.id) && fetchedLongAgo.has(r.id);
+    // Approved: kept until the firm has the record (made again hourly until then), and never
+    // more than 90 days.
+    if (r.status === 'approved') {
+      return (
+        (hasRecord.has(r.id) && fetchedLongAgo.has(r.id)) || r.decidedAt < ago(APPROVED_MAX_DAYS)
+      );
+    }
     return r.decidedAt < ago(ID_KEEP_DAYS);
   });
   for (const r of due) {
+    if (r.status === 'approved' && !fetchedLongAgo.has(r.id)) {
+      // Past the cap without Vibe Files fetching it: the portal's copy of the record goes too.
+      ctx.log.warn(
+        { accessRequestId: r.id, days: APPROVED_MAX_DAYS },
+        'photo ID deleted after 90 days: Vibe Files never fetched the request PDF',
+      );
+      for (const rec of records.filter((x) => x.requestId === r.id && x.blobKey)) {
+        const [done] = await ctx.db
+          .update(schema.uploads)
+          .set({ purgedAt: now, blobKey: null, dekWrapped: null })
+          .where(and(eq(schema.uploads.id, rec.uploadId), isNull(schema.uploads.purgedAt)))
+          .returning({ id: schema.uploads.id });
+        if (done && rec.blobKey) await ctx.blobs.remove(rec.blobKey);
+      }
+    }
     if (r.idBlobKey) await ctx.blobs.remove(r.idBlobKey);
     await ctx.db
       .update(schema.accessRequest)
@@ -308,10 +368,33 @@ function lines(text: string, font: PDFFont, size: number, width: number): string
   return out;
 }
 
-/** Only what the standard PDF font can draw (it has no glyphs beyond Latin-1). The PDF also
- *  carries the original photo ID, and the request is on the portal by its id. */
-const latin1 = (s: string): string =>
-  s.replace(/\t/g, ' ').replace(/[^\n\x20-\x7e\xa0-\xff]/g, '?');
+/** DejaVu Sans, embedded (subset) so names and notes in most alphabets show as written: Latin,
+ *  Greek, Cyrillic, Hebrew, Arabic, Armenian, Georgian and more. Chinese, Japanese and Korean are
+ *  not in it (a font for them is about 16 MB): those characters show as "?"; the original photo
+ *  ID is attached to the PDF either way. */
+const FONT_DIR = join(
+  dirname(createRequire(import.meta.url).resolve('dejavu-fonts-ttf/package.json')),
+  'ttf',
+);
+let fonts: { regular: Buffer; bold: Buffer } | null = null;
+function fontFiles(): { regular: Buffer; bold: Buffer } {
+  fonts ??= {
+    regular: readFileSync(join(FONT_DIR, 'DejaVuSans.ttf')),
+    bold: readFileSync(join(FONT_DIR, 'DejaVuSans-Bold.ttf')),
+  };
+  return fonts;
+}
+
+/** What the font can draw: tabs as spaces, any other character it lacks as "?". */
+function drawable(s: string, font: PDFFont): string {
+  const has = new Set(font.getCharacterSet());
+  let out = '';
+  for (const ch of s.replace(/\t/g, ' ')) {
+    const code = ch.codePointAt(0) ?? 0;
+    out += ch === '\n' || has.has(code) ? ch : '?';
+  }
+  return out;
+}
 
 /** "2026-11-11 1430": the approval's date and time on the appliance's clock, for the file name
  *  (no colon: Windows file names cannot have one). Two people of the same name get two names. */
@@ -347,15 +430,17 @@ export async function requestRecordPdf(
   id: { bytes: Buffer; contentType: string } | null,
 ): Promise<Buffer> {
   const pdf = await PDFDocument.create();
-  pdf.setTitle(latin1(`Portal access request - ${facts.request.name}`));
+  pdf.registerFontkit(fontkit);
+  pdf.setTitle(`Portal access request - ${facts.request.name}`);
   pdf.setProducer('Vibe Portal');
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const files = fontFiles();
+  const font = await pdf.embedFont(files.regular, { subset: true });
+  const bold = await pdf.embedFont(files.bold, { subset: true });
   let page: PDFPage = pdf.addPage(PAGE);
   let y = PAGE[1] - MARGIN;
   const width = PAGE[0] - 2 * MARGIN;
   const write = (text: string, size = 11, f = font): void => {
-    for (const l of lines(latin1(text), f, size, width)) {
+    for (const l of lines(drawable(text, f), f, size, width)) {
       if (y < MARGIN + size) {
         page = pdf.addPage(PAGE);
         y = PAGE[1] - MARGIN;
@@ -420,13 +505,24 @@ export async function requestRecordPdf(
           page = pdf.addPage(PAGE);
           y = PAGE[1] - MARGIN;
         }
-        const scale = Math.min(width / img.width, (y - MARGIN) / img.height, 1);
-        page.drawImage(img, {
-          x: MARGIN,
-          y: y - img.height * scale,
-          width: img.width * scale,
-          height: img.height * scale,
-        });
+        // A phone photo is often stored sideways with a note to turn it (EXIF orientation).
+        const turn = id.contentType === 'image/jpeg' ? jpegOrientation(id.bytes) : 1;
+        const sideways = turn === 6 || turn === 8;
+        const shownW = sideways ? img.height : img.width;
+        const shownH = sideways ? img.width : img.height;
+        const scale = Math.min(width / shownW, (y - MARGIN) / shownH, 1);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        // pdf-lib turns an image about its lower-left corner, counter-clockwise.
+        const at =
+          turn === 6
+            ? { x: MARGIN, y, rotate: degrees(-90) }
+            : turn === 8
+              ? { x: MARGIN + h, y: y - w, rotate: degrees(90) }
+              : turn === 3
+                ? { x: MARGIN + w, y, rotate: degrees(180) }
+                : { x: MARGIN, y: y - h, rotate: degrees(0) };
+        page.drawImage(img, { ...at, width: w, height: h });
       } catch {
         write('The photo could not be shown here: it is attached to this document.');
       }

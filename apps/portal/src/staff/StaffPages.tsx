@@ -1606,7 +1606,7 @@ function IdPhoto({ r }: { r: AccessRequestRow }): JSX.Element {
     <a href={src} target="_blank" rel="noreferrer" title="Open the photo ID full size">
       <img
         src={src}
-        alt={`Photo ID sent by ${r.name}`}
+        alt={`ID sent by ${r.name}`}
         style={{
           width: '100%',
           maxWidth: 320,

@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import {
-  BREAKPOINTS,
+  ZOOM_FROM_WIDTH,
   DEFAULT_FONT_SCALE,
   FONT_SCALE_BASELINE,
   FONT_SCALE_STEPS,
@@ -43,7 +43,7 @@ function applyScale(scale: FontScale): void {
   // rotated tablet / resized window picks it back up.
   // clientWidth, not innerWidth — the mobile layout viewport expands with
   // overflowing content and would report a desktop-like width.
-  const effective = document.documentElement.clientWidth <= BREAKPOINTS.narrow ? 1 : scale;
+  const effective = document.documentElement.clientWidth < ZOOM_FROM_WIDTH ? 1 : scale;
   // `body { zoom: N }` is supported across Chrome / Safari / Firefox
   // (FF 126+). Cleaner than a transform scale because it preserves
   // layout boxes and event coordinates.
@@ -88,9 +88,9 @@ export function useFontScale(): {
     applyScale(scale);
     // Re-clamp when the window crosses the narrow boundary in either
     // direction (rotation, resize, window snap).
-    let wasNarrow = document.documentElement.clientWidth <= BREAKPOINTS.narrow;
+    let wasNarrow = document.documentElement.clientWidth < ZOOM_FROM_WIDTH;
     const onResize = (): void => {
-      const nowNarrow = document.documentElement.clientWidth <= BREAKPOINTS.narrow;
+      const nowNarrow = document.documentElement.clientWidth < ZOOM_FROM_WIDTH;
       if (nowNarrow !== wasNarrow) {
         wasNarrow = nowNarrow;
         // Re-read storage rather than closing over `scale` (deps are []).

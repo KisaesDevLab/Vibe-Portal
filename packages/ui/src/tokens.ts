@@ -12,6 +12,10 @@
  *  drawer nav + hamburger bar, card tables, sheet modals. One source of
  *  truth — do not restate 720 anywhere. */
 export const BREAKPOINTS = { narrow: 720 } as const;
+/** The text zoom (FONT_SCALE_*) applies from this width up: a computer. Phones and tablets
+ *  (Vibe Portal, owner 2026-11-11) keep the native size, so a 768 px tablet lays out at 768 px
+ *  (wide) instead of 668 px (narrow, as a phone). */
+export const ZOOM_FROM_WIDTH = 1024;
 
 export const tokens = {
   breakpoint: BREAKPOINTS,
@@ -71,12 +75,12 @@ export const fontScaleBootstrapScript = `
     var baseline = ${FONT_SCALE_BASELINE};
     var n = raw ? parseFloat(raw) : baseline;
     if (!isFinite(n) || allowed.indexOf(n) === -1) n = baseline;
-    // Phones get the native size: the zoom preference applies only at or
-    // above the narrow breakpoint (see BREAKPOINTS.narrow).
+    // Phones and tablets get the native size: the zoom preference applies
+    // only from ZOOM_FROM_WIDTH (a computer).
     // documentElement.clientWidth, NOT innerWidth: on mobile the layout
     // viewport (innerWidth) expands to fit overflowing content, which
     // would un-clamp the zoom and feed back into wider content.
-    if (document.documentElement.clientWidth <= ${BREAKPOINTS.narrow}) n = 1;
+    if (document.documentElement.clientWidth < ${ZOOM_FROM_WIDTH}) n = 1;
     document.documentElement.style.setProperty('--vibe-font-scale', String(n));
     if (document.body) document.body.style.zoom = String(n);
   } catch (e) {

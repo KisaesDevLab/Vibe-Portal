@@ -118,7 +118,7 @@ On the staff page, **Settings**:
     into the Portal inbox like an upload, named with the first client's name and code and the
     person's name, and the date and time of the approval (`Smith, John_1001_Access request - Mary Smith - 2026-11-11 1430.pdf`): file it from Intake. The
     person never sees it. The portal deletes the photo ID, and its own copy of the PDF, 7 days
-    after Vibe Files fetched the PDF; a denied request's photo ID 30 days after the denial.
+    after Vibe Files fetched the PDF, and in any case 90 days after approval (if Vibe Files never fetched it, the Log says so); a denied request's photo ID 30 days after the denial.
 - **Portal keys**: **Make a key** for Vibe Files (next step). It is shown once.
 
 ## 5. Connect Vibe Files

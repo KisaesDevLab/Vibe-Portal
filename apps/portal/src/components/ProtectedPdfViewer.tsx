@@ -264,6 +264,8 @@ export function ProtectedPdfViewer({
         // inside are pictures, each labelled (the text itself is not readable here).
         role="region"
         aria-label={`${filename}${pages ? `, ${pages} ${pages === 1 ? 'page' : 'pages'}` : ''}`}
+        // A scrolling region must take focus to be scrolled from the keyboard (WCAG 2.1.1).
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         onContextMenu={canDownload ? undefined : (e) => e.preventDefault()}
         style={{
