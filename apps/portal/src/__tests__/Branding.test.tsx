@@ -159,6 +159,11 @@ describe('tablets keep the native text size, so they get the wide layout (P73)',
     try {
       expect(run(768)).toBe('1');
       expect(run(1280)).toBe('1.15');
+      // The largest step on a 1050 px window would leave 700 px: no zoom, the layout stays wide.
+      localStorage.setItem('vibe-font-scale', '1.5');
+      expect(run(1050)).toBe('1');
+      expect(run(1280)).toBe('1.5');
+      localStorage.removeItem('vibe-font-scale');
     } finally {
       document.documentElement.style.removeProperty('--vibe-font-scale');
       document.body.style.zoom = '';

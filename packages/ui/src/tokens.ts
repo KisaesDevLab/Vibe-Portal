@@ -80,7 +80,10 @@ export const fontScaleBootstrapScript = `
     // documentElement.clientWidth, NOT innerWidth: on mobile the layout
     // viewport (innerWidth) expands to fit overflowing content, which
     // would un-clamp the zoom and feed back into wider content.
-    if (document.documentElement.clientWidth < ${ZOOM_FROM_WIDTH}) n = 1;
+    var w = document.documentElement.clientWidth;
+    // Nor where the zoom would leave less room than the phone layout's limit (the largest
+    // step on a 1024-1080 px window): the layout only gets wider as the window does.
+    if (w < ${ZOOM_FROM_WIDTH} || w / n <= ${BREAKPOINTS.narrow}) n = 1;
     document.documentElement.style.setProperty('--vibe-font-scale', String(n));
     if (document.body) document.body.style.zoom = String(n);
   } catch (e) {

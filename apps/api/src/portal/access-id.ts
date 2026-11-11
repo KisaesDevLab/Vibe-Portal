@@ -243,6 +243,7 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
       .map((r) => r.requestId),
   );
   const hasRecord = new Set(records.map((r) => r.requestId));
+  const fetchedEver = new Set(records.filter((r) => r.fetchedAt).map((r) => r.requestId));
   // The portal's copy of a fetched record.
   for (const r of records) {
     if (r.blobKey && r.fetchedAt && r.fetchedAt < ago(FETCHED_KEEP_DAYS)) {
@@ -270,21 +271,23 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
   const due = held.filter((r) => {
     if (!r.confirmedAt) return r.createdAt < ago(UNCONFIRMED_ID_DAYS);
     if (r.status === 'pending' || !r.decidedAt) return false;
-    // Approved: kept until the firm has the record (made again hourly until then), and never
-    // more than 90 days.
+    // Approved: 7 days after Vibe Files fetched the record; never fetched (or never made), 90
+    // days after approval. A record fetched lately keeps its 7 days.
     if (r.status === 'approved') {
-      return (
-        (hasRecord.has(r.id) && fetchedLongAgo.has(r.id)) || r.decidedAt < ago(APPROVED_MAX_DAYS)
-      );
+      if (fetchedEver.has(r.id)) return fetchedLongAgo.has(r.id);
+      return r.decidedAt < ago(APPROVED_MAX_DAYS);
     }
     return r.decidedAt < ago(ID_KEEP_DAYS);
   });
   for (const r of due) {
-    if (r.status === 'approved' && !fetchedLongAgo.has(r.id)) {
-      // Past the cap without Vibe Files fetching it: the portal's copy of the record goes too.
+    if (r.status === 'approved' && !fetchedEver.has(r.id)) {
+      // Past the cap and never fetched: the portal's copy of the record goes too, and the Log
+      // says why.
       ctx.log.warn(
         { accessRequestId: r.id, days: APPROVED_MAX_DAYS },
-        'photo ID deleted after 90 days: Vibe Files never fetched the request PDF',
+        hasRecord.has(r.id)
+          ? 'photo ID deleted after 90 days: Vibe Files never fetched the request PDF'
+          : 'photo ID deleted after 90 days: the request PDF could never be made',
       );
       for (const rec of records.filter((x) => x.requestId === r.id && x.blobKey)) {
         const [done] = await ctx.db
@@ -292,7 +295,15 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
           .set({ purgedAt: now, blobKey: null, dekWrapped: null })
           .where(and(eq(schema.uploads.id, rec.uploadId), isNull(schema.uploads.purgedAt)))
           .returning({ id: schema.uploads.id });
-        if (done && rec.blobKey) await ctx.blobs.remove(rec.blobKey);
+        if (done && rec.blobKey) {
+          await ctx.blobs.remove(rec.blobKey);
+          await record(
+            ctx.db,
+            'upload_purged',
+            { kind: 'system', name: 'purge' },
+            { uploadId: rec.uploadId },
+          );
+        }
       }
     }
     if (r.idBlobKey) await ctx.blobs.remove(r.idBlobKey);

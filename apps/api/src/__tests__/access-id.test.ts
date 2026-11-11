@@ -278,6 +278,22 @@ describe('photo ID on access requests (P67)', () => {
     await w.firm('get', `/access-requests/${id}/id-photo`).expect(404);
     await w.firm('get', `/uploads/${rec.uploadId}/content`).expect(404);
   });
+
+  it('a record fetched just before the 90 days keeps its 7 days', async () => {
+    const id = await ask();
+    await sendId(w, id);
+    await confirm(id);
+    await w.firm('post', `/access-requests/${id}/approve`).send({ clientId: CLIENT }).expect(200);
+    const rec = (await w.firm('get', '/uploads').expect(200)).body.uploads[0];
+    w.later(88 * DAY);
+    await w.firm('post', `/uploads/${rec.uploadId}/fetched`).expect(200);
+    w.later(3 * DAY); // day 91: past 90, but fetched 3 days ago
+    await purgeIdPhotos(w.ctx);
+    await w.firm('get', `/access-requests/${id}/id-photo`).expect(200);
+    w.later(5 * DAY);
+    await purgeIdPhotos(w.ctx);
+    await w.firm('get', `/access-requests/${id}/id-photo`).expect(404);
+  });
 });
 
 describe('the request PDF (P73)', () => {
