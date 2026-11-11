@@ -13,10 +13,11 @@
 //   - Vibe Auth's own second-factor policy is trusted (the portal does not ask for its code).
 //
 // Everything lives under /api/staff/sso/auth/...: the portal is served from the root, and its
-// client pages already use /auth/verify. Two things the appliance expects at the root are also
+// client pages already use /auth/verify. Three things the appliance expects at the root are also
 // answered there (ssoRouter): GET /auth/status (the console's check before it registers the
 // portal) and GET /auth/oidc/logged-out (the only sign-out return address the broker registers
-// with Vibe Auth, baseUrl + /auth/oidc/logged-out); sign-out names that root address.
+// with Vibe Auth, baseUrl + /auth/oidc/logged-out); sign-out names that root address; and
+// GET /login/local, the emergency sign-in the appliance points operators to.
 
 import {
   createPgStores,
@@ -353,6 +354,9 @@ export function ssoRouter(auth: VibeAuth): Router {
     };
   r.get('/auth/status', run('/auth/status'));
   r.get('/auth/oidc/logged-out', run('/auth/oidc/logged-out'));
+  // The appliance tells operators to use "the product's /login/local page" when Vibe Auth is
+  // down: here that is the staff sign-in's emergency form, not the client sign-in.
+  r.get('/login/local', (_req, res) => res.redirect(302, '/staff/login?local=1'));
   // The identity provider posts back-channel logout as a form.
   r.use(SSO_BASE, express.urlencoded({ extended: false, limit: '64kb' }), run());
   return r;

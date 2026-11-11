@@ -58,6 +58,9 @@ describe('Vibe Auth staff sign-in (P44)', () => {
     expect(typeof s.body.oidc).toBe('object');
     const out = await request(app).get('/auth/oidc/logged-out').expect(200);
     expect(out.text).toContain('/staff/login');
+    // The emergency sign-in the appliance names: the staff page's, not the client sign-in.
+    const local = await request(app).get('/login/local').expect(302);
+    expect(local.headers['location']).toBe('/staff/login?local=1');
     // The broker registers baseUrl + /auth/oidc/logged-out; sign-out must name exactly that.
     const end =
       'https://auth.example/application/o/p/end-session/?id_token_hint=x&post_logout_redirect_uri=' +
