@@ -6,6 +6,8 @@
 import { and, isNull, lt, eq } from 'drizzle-orm';
 import { schema, type Database } from '@vibe-portal/db';
 
+import { purgeProblems } from './problems';
+
 const DAY = 24 * 3_600_000;
 
 export async function purgeStale(db: Database, now: Date): Promise<void> {
@@ -28,4 +30,6 @@ export async function purgeStale(db: Database, now: Date): Promise<void> {
         lt(schema.accessRequest.createdAt, new Date(now.getTime() - 7 * DAY)),
       ),
     );
+  // The Log's warnings and errors after 30 days (P64).
+  await purgeProblems(db, now);
 }

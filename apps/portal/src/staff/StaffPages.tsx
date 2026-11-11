@@ -176,7 +176,7 @@ export function StaffHome(): JSX.Element {
     ...(allClients ? ['Requests'] : []),
     'Uploads',
     'History',
-    ...(admin ? ['Settings'] : []),
+    ...(admin ? ['Settings', 'Log'] : []),
   ];
   const links = nav.map((n) => (
     <NavLink
@@ -271,6 +271,7 @@ export function StaffHome(): JSX.Element {
         <Route path="uploads" element={<Uploads />} />
         <Route path="history" element={<History />} />
         {admin && <Route path="settings" element={<Settings />} />}
+        {admin && <Route path="log" element={<Log />} />}
         <Route path="*" element={<Navigate to="/staff" replace />} />
       </Routes>
     </div>
@@ -1465,6 +1466,89 @@ function History(): JSX.Element {
             <td style={td}>{when(e.at)}</td>
             <td style={td}>{e.kind.replace(/_/g, ' ')}</td>
             <td style={td}>{e.actorKind === 'client' ? 'a client' : e.actor}</td>
+          </tr>
+        ))}
+      </Table>
+      {load.data && more && (
+        <div style={{ marginTop: 8 }}>
+          <Button variant="secondary" disabled={busy} onClick={() => void showOlder()}>
+            Show older
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+interface ProblemRow {
+  id: number;
+  at: string;
+  level: 'warning' | 'error';
+  msg: string;
+  detail: Record<string, string | number | boolean>;
+}
+
+/** The server's warnings and errors, newest first (P64, admins). */
+function Log(): JSX.Element {
+  const load = useLoad<{ problems: ProblemRow[] }>(`/v1/settings/log?limit=${HISTORY_PAGE}`);
+  const [older, setOlder] = useState<ProblemRow[]>([]);
+  const [more, setMore] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const first = load.data?.problems ?? [];
+  useEffect(() => {
+    setOlder([]);
+    setMore(first.length === HISTORY_PAGE);
+  }, [load.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rows = [...first, ...older];
+  const showOlder = async (): Promise<void> => {
+    const last = rows[rows.length - 1];
+    if (!last) return;
+    setBusy(true);
+    setProblem('');
+    try {
+      const r = await staffApi<{ problems: ProblemRow[] }>(
+        `/v1/settings/log?limit=${HISTORY_PAGE}&before=${last.id}`,
+      );
+      setOlder((o) => [...o, ...r.problems]);
+      setMore(r.problems.length === HISTORY_PAGE);
+    } catch (err) {
+      setProblem(staffSay(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card title="Log">
+      <p style={{ marginTop: 0 }}>
+        Warnings and errors from the portal, newest first, kept 30 days: when something did not
+        work, the reason is here. Who did what is on History.
+      </p>
+      <div style={{ marginBottom: 8 }}>
+        <Button variant="secondary" size="sm" onClick={load.reload}>
+          Refresh
+        </Button>
+      </div>
+      <Status load={load} what="the log" />
+      <Problem text={problem} />
+      {load.data && rows.length === 0 && <p>No warnings or errors.</p>}
+      <Table head={['When', 'Level', 'What']}>
+        {rows.map((p) => (
+          <tr key={p.id}>
+            <td style={{ ...td, whiteSpace: 'nowrap' }}>{when(p.at)}</td>
+            <td style={td}>{p.level === 'error' ? 'Error' : 'Warning'}</td>
+            <td style={td}>
+              {p.msg}
+              {Object.keys(p.detail).length > 0 && (
+                <div
+                  style={{ fontSize: 12, color: tokens.color.textMuted, overflowWrap: 'anywhere' }}
+                >
+                  {Object.entries(p.detail)
+                    .map(([k, v]) => `${k}: ${String(v)}`)
+                    .join(' · ')}
+                </div>
+              )}
+            </td>
           </tr>
         ))}
       </Table>

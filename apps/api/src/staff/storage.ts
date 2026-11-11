@@ -56,8 +56,10 @@ function why(err: unknown): string {
   return m.slice(0, 300);
 }
 
-/** A bucket or move that cannot be used: the portal's own reason, or B2's answer. */
-function refuse(res: Response, err: unknown): void {
+/** A bucket or move that cannot be used: the portal's own reason, or B2's answer. Logged, so
+ *  the staff page's Log (P64) says why even when the page's message was missed. */
+function refuse(ctx: Ctx, res: Response, err: unknown, what: string): void {
+  ctx.log.warn({ check: what, reason: why(err) }, 'B2 bucket could not be used');
   if (err instanceof NoRoom) res.status(409).json({ error: 'no_room', detail: why(err) });
   else if (err instanceof BucketRefused) {
     res.status(400).json({ error: 'b2_refused', detail: why(err) });
@@ -96,7 +98,7 @@ export function storageRouter(ctx: Ctx): Router {
       try {
         await checkBucket(openB2(ctx, next), f.installId);
       } catch (err) {
-        refuse(res, err);
+        refuse(ctx, res, err, 'saving the bucket');
         return;
       }
       await ctx.db.update(schema.firm).set({
@@ -133,7 +135,7 @@ export function storageRouter(ctx: Ctx): Router {
         try {
           await forgetBucket(openB2(ctx, s));
         } catch (err) {
-          refuse(res, err);
+          refuse(ctx, res, err, 'removing the bucket');
           return;
         }
       }
@@ -158,7 +160,7 @@ export function storageRouter(ctx: Ctx): Router {
       try {
         await checkBucket(openB2(ctx, s), f.installId);
       } catch (err) {
-        refuse(res, err);
+        refuse(ctx, res, err, 'testing the bucket');
         return;
       }
       res.json({ ok: true });
@@ -185,7 +187,7 @@ export function storageRouter(ctx: Ctx): Router {
       try {
         await checkMove(ctx, f, to);
       } catch (err) {
-        refuse(res, err);
+        refuse(ctx, res, err, 'starting a move');
         return;
       }
       const who = actor(req);

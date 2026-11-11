@@ -864,6 +864,30 @@ describe('staff page', () => {
     expect(screen.queryByRole('button', { name: 'Show older' })).toBeNull();
   });
 
+  it('Log shows the server warnings and errors with their details (P64)', async () => {
+    serve({
+      '/auth/me': ME,
+      '/v1/settings/log?limit=100': {
+        body: {
+          problems: [
+            {
+              id: 3,
+              at: '2026-11-11T10:00:00Z',
+              level: 'warning',
+              msg: 'B2 bucket could not be used',
+              detail: { check: 'saving the bucket', reason: 'Key not valid' },
+            },
+          ],
+        },
+      },
+    });
+    at('/staff/log');
+    expect(await screen.findByText('B2 bucket could not be used')).toBeTruthy();
+    expect(screen.getByText('check: saving the bucket · reason: Key not valid')).toBeTruthy();
+    expect(screen.getByText('Warning')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Log' })).toBeTruthy();
+  });
+
   const portalFile = (fileId: string, name: string): object => ({
     fileId,
     name,

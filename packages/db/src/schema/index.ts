@@ -505,3 +505,12 @@ export const authRevocations = pgTable('auth_revocations', {
   revokedAt: ts('revoked_at').notNull().defaultNow(),
   revokedUntil: ts('revoked_until').notNull(),
 });
+
+/** The server's warnings and errors, for the staff page's Log (P64). */
+export const problemLog = pgTable('problem_log', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  at: ts('at').notNull().defaultNow(),
+  level: text('level', { enum: ['warning', 'error'] }).notNull(),
+  msg: text('msg').notNull(),
+  detail: jsonb('detail').$type<Record<string, string | number | boolean>>().notNull().default({}),
+});

@@ -21,6 +21,7 @@ import { snapshotIfDue } from './files/snapshot';
 import { applyStorage, resumeInterrupted, runMove, sweep } from './files/storage';
 import { normalizeEmail } from './lib/contact';
 import { purgeStale } from './lib/housekeeping';
+import { ProblemLog } from './lib/problems';
 import { staffSessions } from './staff/auth';
 import { firstAdminOnStart } from './staff/first-admin';
 import { createStaffSso } from './staff/sso';
@@ -73,7 +74,16 @@ function buildNotifier(config: Config, log: pino.Logger): Notifier {
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const log = pino({ level: config.LOG_LEVEL });
+  // P64: warnings and errors also go to the database, for the staff page's Log.
+  const problems = new ProblemLog();
+  const level = (pino.levels.values[config.LOG_LEVEL] ?? 30) <= 40 ? config.LOG_LEVEL : 'warn';
+  const log = pino(
+    { level },
+    pino.multistream([
+      { level: config.LOG_LEVEL as pino.Level, stream: process.stdout },
+      { level: 'warn', stream: problems.stream },
+    ]),
+  );
 
   const sql = postgres(config.DATABASE_URL, { max: 1, onnotice: () => undefined });
   try {
@@ -100,6 +110,7 @@ async function main(): Promise<void> {
   }
 
   const { db, ping } = createDb({ connectionString: config.DATABASE_URL });
+  problems.attach(db);
   await mkdir(config.DATA_DIR, { recursive: true, mode: 0o700 });
   const keyring = await openKeyring(db, config.DATA_DIR);
   const blobs = new BlobStore(join(config.DATA_DIR, 'blobs'));

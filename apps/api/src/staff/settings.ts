@@ -23,7 +23,7 @@
 //   GET    /api/portal/branding/logo/dark        (public, P60)
 
 import express, { type Request, type Router } from 'express';
-import { asc, eq, inArray } from 'drizzle-orm';
+import { asc, desc, eq, inArray, lt } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema, type Database } from '@vibe-portal/db';
 
@@ -114,6 +114,25 @@ export function staffSettingsRouter(ctx: Ctx): Router {
   r.use(['/settings', '/keys', '/staff'], requireAdmin);
   // Where stored files live, and moving them (P51).
   r.use('/settings/storage', storageRouter(ctx));
+
+  // P64: the server's warnings and errors, newest first, a page at a time.
+  const LogQuery = z.object({
+    limit: z.coerce.number().int().min(1).max(500).default(100),
+    before: z.coerce.number().int().min(1).optional(),
+  });
+  r.get(
+    '/settings/log',
+    h(async (req, res) => {
+      const q = LogQuery.parse(req.query);
+      const rows = await ctx.db
+        .select()
+        .from(schema.problemLog)
+        .where(q.before ? lt(schema.problemLog.id, q.before) : undefined)
+        .orderBy(desc(schema.problemLog.id))
+        .limit(q.limit);
+      res.json({ problems: rows });
+    }),
+  );
 
   r.get(
     '/settings',
