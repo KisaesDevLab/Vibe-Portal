@@ -249,6 +249,16 @@ function sessionAdapter(db: Database, sessions: StaffSessions): SessionAdapter<R
         ...(row.oidcIdToken ? { idToken: row.oidcIdToken } : {}),
       };
     },
+    // Vibe Auth 1.0.21: a re-sign-in (Settings' Test connection) makes Vibe Auth replace its own
+    // session; this staff session follows the new one instead of being signed out.
+    async rebindIdentity(req, _res, identity) {
+      const s = await sessions.current(req);
+      if (!s) throw new Error('no staff session to move');
+      await db
+        .update(schema.sessions)
+        .set({ oidcSid: identity.sid ?? null, oidcIdToken: identity.idToken ?? null })
+        .where(eq(schema.sessions.idHash, s.idHash));
+    },
     // Back-channel logout: Vibe Auth ended the person's session there, so it ends here too.
     async destroyByIdentity(id) {
       const conds: SQL[] = [];

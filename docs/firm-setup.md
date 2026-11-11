@@ -241,11 +241,10 @@ password is kept by the appliance console. If Vibe Auth is ever down, open
 refuses to start in oidc_only without that account, so the firm is never locked out.
 
 **Test connection** asks Vibe Auth for a fresh sign-in, so you are asked for your password and
-authenticator code again. If you signed in to the staff page through Vibe Auth, the test also
-signs you out of the staff page: sign in again, and oidc_only can be chosen for the next hour.
-An admin signed in with a portal password stays signed in. Test connection needs Vibe Auth
-1.0.20 or later (the appliance's Vibe Auth updates to it); on 1.0.19 it ends on a "Not Found"
-page.
+authenticator code again; you stay signed in to the staff page, and oidc_only can be chosen
+for the next hour. It needs Vibe Auth 1.0.21 or later (the appliance's Vibe Auth updates to
+it): on 1.0.19 it ends on a "Not Found" page, and on 1.0.20 it signs out an admin who signed in
+through Vibe Auth.
 
 If Vibe Auth cannot be reached when the portal starts, the portal still starts; the button says
 Vibe Auth cannot be reached, and password sign-in (when allowed) works as usual.

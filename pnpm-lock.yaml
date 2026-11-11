@@ -48,8 +48,8 @@ importers:
         specifier: ^3.600.0
         version: 3.1165.0(@aws-sdk/client-s3@3.1165.0)
       '@kisaesdevlab/vibe-auth':
-        specifier: 1.0.19
-        version: 1.0.19(drizzle-orm@0.45.4(@electric-sql/pglite@0.2.17)(postgres@3.4.9))(express@4.22.3)(react@18.3.1)
+        specifier: 1.0.21
+        version: 1.0.21(drizzle-orm@0.45.4(@electric-sql/pglite@0.2.17)(postgres@3.4.9))(express@4.22.3)(react@18.3.1)
       '@noble/ciphers':
         specifier: ^1.0.0
         version: 1.3.0
@@ -133,8 +133,8 @@ importers:
   apps/portal:
     dependencies:
       '@kisaesdevlab/vibe-auth':
-        specifier: 1.0.19
-        version: 1.0.19(drizzle-orm@0.45.4(@electric-sql/pglite@0.2.17)(postgres@3.4.9))(express@4.22.3)(react@18.3.1)
+        specifier: 1.0.21
+        version: 1.0.21(drizzle-orm@0.45.4(@electric-sql/pglite@0.2.17)(postgres@3.4.9))(express@4.22.3)(react@18.3.1)
       '@vibe-portal/types':
         specifier: workspace:*
         version: link:../../packages/types
@@ -808,8 +808,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@kisaesdevlab/vibe-auth@1.0.19':
-    resolution: {integrity: sha512-xWY1TmqzpbNWULvpUiehEF/F8m4f+bT/K3Vayk0c33MpDmk80ko5xGrpgPzyQXlYC+4vodWgi1/Q8ZywNcfpWQ==, tarball: https://npm.pkg.github.com/download/@kisaesdevlab/vibe-auth/1.0.19/631ab38025100ebfbf812e08ecff744a470e6698}
+  '@kisaesdevlab/vibe-auth@1.0.21':
+    resolution: {integrity: sha512-TkJZt9xo47WJNd5kLxOeTF584SE7yeIx0rKfXF4s/eAmbtQPl+IZcodASFyYYFzlk5XsRNGBP+PxMz3RAtK9BQ==, tarball: https://npm.pkg.github.com/download/@kisaesdevlab/vibe-auth/1.0.21/21f934b1abc9faae2b053d81fa26cfbd52ef7a1a}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -3798,7 +3798,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.6.0
 
-  '@kisaesdevlab/vibe-auth@1.0.19(drizzle-orm@0.45.4(@electric-sql/pglite@0.2.17)(postgres@3.4.9))(express@4.22.3)(react@18.3.1)':
+  '@kisaesdevlab/vibe-auth@1.0.21(drizzle-orm@0.45.4(@electric-sql/pglite@0.2.17)(postgres@3.4.9))(express@4.22.3)(react@18.3.1)':
     dependencies:
       drizzle-orm: 0.45.4(@electric-sql/pglite@0.2.17)(postgres@3.4.9)
       express: 4.22.3
