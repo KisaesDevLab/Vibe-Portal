@@ -275,6 +275,44 @@ describe('who sees what', () => {
     await a.agent.get(`/api/portal/files/${fileId}/content`).expect(401);
   });
 
+  it('someone of one client reaches nothing of another client, whatever they ask for', async () => {
+    // Owner 2026-11-11: confirm a person cannot reach a client they were not given.
+    const a = await w.member('a@example.test'); // CLIENT only
+    const b = await w.member('b@example.test', OTHER); // OTHER only
+    const theirs = (await add(Buffer.from('%PDF other'), 'other.pdf', {}, OTHER).expect(201)).body
+      .fileId as string;
+    await show(theirs, { [b.id]: true });
+    // The firm cannot show OTHER's file to A, who has no access to OTHER.
+    const wrong = await w
+      .firm('put', `/files/${theirs}/visibility`)
+      .send({ users: { [a.id]: true } });
+    expect([wrong.status, wrong.body]).toEqual([400, { error: 'not_a_user_of_this_client' }]);
+    // A: not listed, not opened by its id (view or download), not switched to, no uploads into
+    // it, no link to it for someone outside.
+    expect((await a.agent.get('/api/portal/files').expect(200)).body.files).toEqual([]);
+    await a.agent.get(`/api/portal/files/${theirs}/content?mode=view`).expect(404);
+    await a.agent.get(`/api/portal/files/${theirs}/content`).expect(404);
+    await a.agent.post('/api/portal/auth/switch-client').send({ clientId: OTHER }).expect(404);
+    const me = await a.agent.get('/api/portal/auth/me').expect(200);
+    expect(me.body.clients.map((c: { id: string }) => c.id)).toEqual([CLIENT]);
+    await a.agent
+      .post(`/api/portal/uploads?clientId=${OTHER}&batchId=${crypto.randomUUID()}&name=x.pdf`)
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('%PDF-1.7\n%%EOF\n'))
+      .expect(404);
+    await w.t.db.update(schema.firm).set({ clientLinks: true });
+    await a.agent
+      .post('/api/portal/outside-shares')
+      .send({ clientId: OTHER, fileIds: [theirs], email: 'x@example.test' })
+      .expect(404);
+    await a.agent
+      .post('/api/portal/outside-shares')
+      .send({ clientId: CLIENT, fileIds: [theirs], email: 'x@example.test' })
+      .expect(400);
+    // B, who was given OTHER, still opens it.
+    await b.agent.get(`/api/portal/files/${theirs}/content`).expect(200);
+  });
+
   it('files of one client are not listed under another of the same person', async () => {
     const a = await w.member('a@example.test');
     await w.firm('post', `/clients/${OTHER}/invites`).send({ email: 'a@example.test' }).expect(201);
