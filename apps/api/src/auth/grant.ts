@@ -15,6 +15,8 @@
 import { and, eq } from 'drizzle-orm';
 import { schema, type Database } from '@vibe-portal/db';
 
+import { HttpError } from '../lib/http';
+
 /** The database or a transaction on it. */
 export type Executor = Database | Parameters<Parameters<Database['transaction']>[0]>[0];
 
@@ -56,6 +58,9 @@ export async function grantAccess(
     if (!found) throw new Error('identity vanished after insert');
   }
   const identityId = found.id;
+  // P66 QA: a turned-off account is not given access by an invitation or an approval. Thrown
+  // inside the caller's transaction, so the invitation is not used up and the request waits.
+  if (found.status !== 'active') throw new HttpError(409, 'account_off');
 
   const patch: Partial<typeof schema.portalIdentity.$inferInsert> = {};
   if (!found.name && args.name) patch.name = args.name;

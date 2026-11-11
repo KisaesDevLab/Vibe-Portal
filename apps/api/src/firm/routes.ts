@@ -401,6 +401,12 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           ),
         );
       if (has.length) throw new HttpError(409, 'already_has_access');
+      // P66 QA: an invitation to a turned-off account could not be accepted.
+      const [off] = await ctx.db
+        .select({ id: schema.portalIdentity.id })
+        .from(schema.portalIdentity)
+        .where(and(contactMatch, eq(schema.portalIdentity.status, 'disabled')));
+      if (off) throw new HttpError(409, 'account_off');
 
       const actor = actorOf(req);
       const now = ctx.now();

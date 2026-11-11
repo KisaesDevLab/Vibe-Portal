@@ -13,7 +13,7 @@
 import { randomUUID } from 'node:crypto';
 
 import express, { type Request, type Router } from 'express';
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -30,6 +30,7 @@ import { hit, LIMITS, refund } from '../lib/rate-limit';
 import { randomToken, sha256 } from '../lib/secrets';
 import type { StaffSession } from '../staff/auth';
 import { inScope, mustSee } from '../staff/scope';
+import { whyUnusable } from '../portal/shared';
 
 export const SHARE_MAX_FILES = 20;
 export const SHARE_MAX_DAYS = 90;
@@ -413,6 +414,9 @@ export function firmSharesRouter(ctx: Ctx): Router {
   r.post(
     '/:id/resend',
     h(async (req, res) => {
+      // The staff page only, even where Vibe Files reaches the rest of this router.
+      const staff = req.staff;
+      if (!staff) throw new HttpError(404, 'not_found');
       const id = Uuid.safeParse(req.params['id']);
       if (!id.success) throw new HttpError(404, 'not_found');
       const [share] = await ctx.db
@@ -422,14 +426,44 @@ export function firmSharesRouter(ctx: Ctx): Router {
       if (!share) throw new HttpError(404, 'not_found');
       const status = shareStatus(share, ctx.now());
       if (status === 'revoked' || status === 'expired') throw new HttpError(409, 'share_ended');
+      // What the recipient's page would refuse (client off, a client's link no longer allowed)
+      // is not sent again: it would be a dead link.
+      if ((await whyUnusable(ctx, { ...share, revokedAt: null })) !== null) {
+        throw new HttpError(409, 'share_ended');
+      }
       const [n] = await ctx.db
         .select({ n: sql<number>`count(*)` })
         .from(schema.fileShareItem)
-        .where(eq(schema.fileShareItem.shareId, share.id));
+        .innerJoin(schema.files, eq(schema.files.id, schema.fileShareItem.fileId))
+        .where(and(eq(schema.fileShareItem.shareId, share.id), isNull(schema.files.removedAt)));
+      if (Number(n?.n ?? 0) === 0) throw new HttpError(409, 'share_ended');
+      // Counts as a link sent, against the same daily limit.
+      if (
+        !(await hit(
+          ctx.db,
+          `outside-share:${staff.staffId}`,
+          LIMITS.outsideSharePerStaff,
+          ctx.now(),
+        ))
+      ) {
+        throw new HttpError(429, 'too_many_shares');
+      }
       const secret = randomToken();
       // A locked link's count of wrong codes starts again, or the next wrong code relocks it.
       const set = { secretHash: sha256(secret), revokedAt: null, revokedBy: null, wrongTries: 0 };
-      await ctx.db.update(schema.fileShare).set(set).where(eq(schema.fileShare.id, share.id));
+      // Only the link as it was read: a revoke meanwhile wins.
+      const took = await ctx.db
+        .update(schema.fileShare)
+        .set(set)
+        .where(
+          and(
+            eq(schema.fileShare.id, share.id),
+            eq(schema.fileShare.secretHash, share.secretHash),
+            or(isNull(schema.fileShare.revokedAt), eq(schema.fileShare.revokedBy, 'lockout')),
+          ),
+        )
+        .returning({ id: schema.fileShare.id });
+      if (took.length === 0) throw new HttpError(409, 'share_ended');
       try {
         await sendShareEmail(ctx, {
           email: share.recipientEmail,
@@ -452,7 +486,9 @@ export function firmSharesRouter(ctx: Ctx): Router {
             revokedBy: share.revokedBy,
             wrongTries: share.wrongTries,
           })
-          .where(eq(schema.fileShare.id, share.id));
+          .where(
+            and(eq(schema.fileShare.id, share.id), eq(schema.fileShare.secretHash, set.secretHash)),
+          );
         throw new HttpError(502, 'email_failed');
       }
       await ctx.db.delete(schema.fileShareGrant).where(eq(schema.fileShareGrant.shareId, share.id));

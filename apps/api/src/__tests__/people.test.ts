@@ -274,14 +274,73 @@ describe('People view (P66)', () => {
     );
   });
 
-  it('an invitation sent after the account was turned off does not let them in', async () => {
+  it('a turned-off account is not invited, nor approved, nor let in by an older invitation', async () => {
     const boss = await admin();
     const mary = await w.member(MARY, CLIENT);
+    // An invitation sent before (it is withdrawn at turn-off) and one refused after.
     await boss.post(`${P}/${mary.id}/turn-off`).expect(200);
-    await w.firm('post', `/clients/${OTHER}/invites`).send({ email: MARY }).expect(201);
-    const a = request.agent(w.app);
-    await a.post('/api/portal/invitations/accept').send({ token: w.linkToken(MARY) });
-    await a.get('/api/portal/auth/me').expect(401);
+    const inv = await w.firm('post', `/clients/${OTHER}/invites`).send({ email: MARY });
+    expect([inv.status, inv.body.error]).toEqual([409, 'account_off']);
+
+    // An access request from her address: approving it is refused and it keeps waiting.
+    const made = await request(w.app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'Mary', email: MARY, clientAs: 'Smith Farms' })
+      .expect(201);
+    await request(w.app)
+      .post(`/api/portal/access-requests/${made.body.requestId}/confirm`)
+      .send({ code: w.code(MARY) })
+      .expect(200);
+    const approve = await w
+      .firm('post', `/access-requests/${made.body.requestId}/approve`)
+      .send({ clientId: OTHER });
+    expect([approve.status, approve.body.error]).toEqual([409, 'account_off']);
+    const waiting = await w.firm('get', '/access-requests').expect(200);
+    expect(waiting.body.requests.map((r: { id: string }) => r.id)).toContain(made.body.requestId);
+
+    // A number cannot be taken off a turned-off account.
+    const phone = await boss.delete(`${P}/${mary.id}/phone`);
+    expect(phone.status).toBe(404); // she has none; with one it would be account_off
+  });
+
+  it('removing a client keeps a change of email waiting; a second change replaces it', async () => {
+    const boss = await admin();
+    const mary = await w.member(MARY, CLIENT);
+    await boss.post(`${P}/${mary.id}/clients`).send({ clientId: OTHER }).expect(201);
+    await boss.post(`${P}/${mary.id}/contact`).send({ email: 'm1@example.test' }).expect(200);
+    await boss.delete(`${P}/${mary.id}/clients/${OTHER}`).expect(200);
+    let d = await boss.get(`${P}/${mary.id}`).expect(200);
+    expect(d.body.pendingContact).toEqual(expect.objectContaining({ contact: 'm1@example.test' }));
+    // Only US and Canadian numbers.
+    const far = await boss.post(`${P}/${mary.id}/contact`).send({ phone: '+44 20 7946 0958' });
+    expect([far.status, far.body.error]).toEqual([400, 'phone_us_only']);
+    // History shows the address masked.
+    const h = await w.firm('get', `/clients/${CLIENT}/history`).expect(200);
+    const sent = h.body.events.find((e: { kind: string }) => e.kind === 'contact_change_sent');
+    expect(sent.recipient).not.toBe('m1@example.test');
+    expect(JSON.stringify(h.body)).not.toContain('m1@example.test');
+    d = await boss.get(`${P}/${mary.id}`).expect(200);
+  });
+
+  it('a first email for a phone-only person is told to their phone', async () => {
+    const boss = await admin();
+    await w
+      .firm('post', `/clients/${CLIENT}/invites`)
+      .send({ phone: '+15551230009', name: 'Tim' })
+      .expect(201);
+    await request(w.app)
+      .post('/api/portal/invitations/accept')
+      .send({ token: w.linkToken('+15551230009') })
+      .expect(200);
+    const tim = (await boss.get(`${P}/list?q=Tim`).expect(200)).body.people[0].identityId as string;
+    await boss.post(`${P}/${tim}/contact`).send({ email: 'tim@example.test' }).expect(200);
+    await request(w.app)
+      .post('/api/portal/auth/confirm-contact')
+      .send({ token: w.linkToken('tim@example.test') })
+      .expect(200);
+    const text = w.notes.last('+15551230009');
+    expect(text.body).toContain('an email address was added');
+    expect(text.body).not.toContain('tim@example.test');
   });
 
   it('is for staff who see every client, and not for Vibe Files', async () => {

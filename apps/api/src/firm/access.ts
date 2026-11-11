@@ -18,6 +18,8 @@ export async function withdrawInvites(
 ): Promise<{ id: string }[]> {
   const contacts = (to ?? []).filter((c): c is string => !!c);
   if (to && contacts.length === 0) return [];
+  // Never every invitation on the portal.
+  if (!clientId && !to) throw new Error('withdrawInvites: a client or contacts');
   return ctx.db
     .update(schema.portalInvitation)
     .set({ revokedAt: ctx.now() })
@@ -27,10 +29,20 @@ export async function withdrawInvites(
         isNull(schema.portalInvitation.acceptedAt),
         isNull(schema.portalInvitation.revokedAt),
         to
-          ? or(
-              inArray(schema.portalInvitation.email, contacts),
-              inArray(schema.portalInvitation.phone, contacts),
-            )
+          ? clientId
+            ? or(
+                inArray(schema.portalInvitation.email, contacts),
+                inArray(schema.portalInvitation.phone, contacts),
+              )
+            : // Across clients (P66): only invitations whose link went to these contacts (the
+              // email, else the phone), not a number typed beside someone else's email.
+              or(
+                inArray(schema.portalInvitation.email, contacts),
+                and(
+                  isNull(schema.portalInvitation.email),
+                  inArray(schema.portalInvitation.phone, contacts),
+                ),
+              )
           : undefined,
       ),
     )
@@ -71,7 +83,7 @@ export async function setAccess(
   if (!rows.length) return false;
   if (!active) {
     await endSessionsOf(ctx.db, identityId);
-    await voidChallenges(ctx, identityId);
+    await voidChallenges(ctx, identityId, { keepContactChange: true });
     await withdrawInvites(ctx, clientId, await contactsOf(ctx, identityId));
   }
   return true;

@@ -112,6 +112,7 @@ export function staffSay(err: unknown): string {
     same_contact: 'That is already the one they sign in with.',
     contact_taken: 'Someone else on the portal already signs in with that.',
     only_contact: 'It is the only way they sign in: add an email first.',
+    phone_us_only: 'Text messages go to US and Canadian mobile numbers only.',
   };
   // The portal's own reason (Object Lock, another portal's bucket, no room), in full.
   if ((code === 'b2_refused' || code === 'no_room') && err instanceof StaffApiError && err.detail) {

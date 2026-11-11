@@ -1898,11 +1898,15 @@ function Person(): JSX.Element {
   const [contact, setContact] = useState('');
   const [adding, setAdding] = useState({ clientId: '', roleLabel: '' });
   const d = load.data;
+  // Only when what is saved changes: another action reloads the page and must not wipe edits.
+  const savedName = d?.person.name;
+  const savedNotify = d?.person.notify;
   useEffect(() => {
-    if (!d) return;
-    setName(d.person.name);
-    setNotify(d.person.notify);
-  }, [d]);
+    if (savedName !== undefined) setName(savedName);
+  }, [savedName]);
+  useEffect(() => {
+    if (savedNotify !== undefined) setNotify(savedNotify);
+  }, [savedNotify]);
   if (!d) {
     return (
       <div style={{ display: 'grid', gap: 16 }}>
@@ -2042,6 +2046,11 @@ function Person(): JSX.Element {
                 });
               }}
             >
+              {d.pendingContact && (
+                <span style={{ fontSize: 13 }}>
+                  This replaces the change waiting for {d.pendingContact.contact}.
+                </span>
+              )}
               <Input
                 label={changing === 'email' ? 'New email' : 'New mobile number'}
                 name="newContact"

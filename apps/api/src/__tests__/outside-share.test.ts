@@ -171,6 +171,18 @@ describe('a secure link to someone outside (P49)', () => {
       'outside_share_resent',
     );
 
+    // Not while the client is switched off: the recipient's page would refuse the link.
+    await w
+      .firm('put', `/clients/${CLIENT}`)
+      .send({ clientCode: '1001', displayName: 'Smith, John', active: false })
+      .expect(200);
+    const off = await boss.post(`/api/staff/v1/shares/${first.id}/resend`);
+    expect([off.status, off.body.error]).toEqual([409, 'share_ended']);
+    await w
+      .firm('put', `/clients/${CLIENT}`)
+      .send({ clientCode: '1001', displayName: 'Smith, John', active: true })
+      .expect(200);
+
     // A revoked link is not sent again.
     await boss.delete(`/api/staff/v1/shares/${first.id}`).expect(200);
     const ended = await boss.post(`/api/staff/v1/shares/${first.id}/resend`);

@@ -78,7 +78,15 @@ export function requireClient(ctx: Ctx): RequestHandler {
   return h(async (req: Request, res: Response, next: NextFunction) => {
     const id = readSessionCookie(req);
     const session = id ? await resolveSession(ctx.db, id, ctx.now()) : null;
-    if (!session) {
+    // P66 QA: an account turned off while a sign-in was under way keeps no session.
+    const [who] = session
+      ? await ctx.db
+          .select({ status: schema.portalIdentity.status })
+          .from(schema.portalIdentity)
+          .where(eq(schema.portalIdentity.id, session.identityId))
+      : [];
+    if (!session || who?.status !== 'active') {
+      if (session) await endSession(ctx.db, session.idHash);
       clearSessionCookie(res, ctx.cookie);
       throw new HttpError(401, 'signed_out');
     }
@@ -277,7 +285,27 @@ export function clientAuthRouter(ctx: Ctx): Router {
         { kind: 'client', name: who.id },
         { identityId: who.id, detail: { field } },
       );
-      // The old address or number hears of it (without the new one).
+      // The old address or number hears of it (without the new one). A first email (or number)
+      // is told to the other contact: a mistyped one would otherwise go unnoticed (P66 QA).
+      const other = field === 'email' ? who.phone : who.email;
+      if (!old && other) {
+        const firm = await firmName(ctx);
+        deliver(
+          ctx,
+          other.includes('@')
+            ? messageTo(
+                other,
+                `A mobile number was added to your ${firm} client portal sign-in`,
+                `A mobile number was added for signing in to ${firm}'s client portal, at ${firm}'s ` +
+                  `request, and confirmed from that number.\n\nIf you did not expect this, contact ${firm}.`,
+              )
+            : messageTo(
+                other,
+                '',
+                `${firm}: an email address was added for signing in to its client portal. If unexpected, contact ${firm}.`,
+              ),
+        );
+      }
       if (old) {
         const firm = await firmName(ctx);
         deliver(
@@ -375,7 +403,13 @@ export function clientAuthRouter(ctx: Ctx): Router {
 
 /** Ends unused sign-in challenges for a contact (e.g. when access is removed), and codes to
  *  confirm a new mobile number (P50). */
-export async function voidChallenges(ctx: Ctx, identityId: string): Promise<void> {
+export async function voidChallenges(
+  ctx: Ctx,
+  identityId: string,
+  /** Leave a new email or number staff asked for (P66) waiting: removing a client is not
+   *  about their contact. */
+  opts: { keepContactChange?: boolean } = {},
+): Promise<void> {
   await ctx.db
     .update(schema.signInChallenge)
     .set({ usedAt: ctx.now() })
@@ -388,7 +422,7 @@ export async function voidChallenges(ctx: Ctx, identityId: string): Promise<void
           eq(schema.signInChallenge.kind, 'sms_code'),
           eq(schema.signInChallenge.kind, 'phone_confirm'),
           // P66: a new email or number staff asked for.
-          eq(schema.signInChallenge.kind, 'contact_confirm'),
+          opts.keepContactChange ? undefined : eq(schema.signInChallenge.kind, 'contact_confirm'),
         ),
       ),
     );

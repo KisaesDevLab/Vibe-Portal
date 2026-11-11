@@ -45,6 +45,7 @@ export function say(err: unknown): string {
     contact_required: 'Enter an email address or a mobile number.',
     code_wrong: 'That code is not right, or it has expired. Ask for a new one.',
     link_expired: 'This sign-in link has expired or was already used. Ask for a new one.',
+    account_off: 'This account is turned off. Contact your accountant.',
     invite_expired:
       'This invitation has expired or was already used. Ask the firm to send a new one.',
     no_access: 'Your access to the portal has ended. Contact the firm.',

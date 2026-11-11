@@ -29,7 +29,7 @@ import { voidChallenges } from '../auth/client-auth';
 import { activeClientsOf } from '../auth/grant';
 import { endSessionsOf } from '../auth/sessions';
 import { firmName, type Ctx } from '../context';
-import { normalizeEmail, normalizePhone } from '../lib/contact';
+import { isUsCanadaPhone, maskContact, normalizeEmail, normalizePhone } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
@@ -357,6 +357,8 @@ export function staffPeopleRouter(ctx: Ctx): Router {
       const value = 'email' in input ? normalizeEmail(input.email) : normalizePhone(input.phone);
       if (!value) throw new HttpError(400, field === 'email' ? 'invalid_email' : 'invalid_phone');
       if (field === 'phone' && ctx.textsOff) throw new HttpError(409, 'texts_off');
+      // As a person adding their own number (P50): texts go to the US and Canada only.
+      if (field === 'phone' && !isUsCanadaPhone(value)) throw new HttpError(400, 'phone_us_only');
       if (who[field] === value) throw new HttpError(400, 'same_contact');
       const col = schema.portalIdentity[field];
       const [taken] = await ctx.db
@@ -414,7 +416,9 @@ export function staffPeopleRouter(ctx: Ctx): Router {
       }
       await record(ctx.db, 'contact_change_sent', staffActor(req), {
         identityId: who.id,
-        detail: { field, to: value },
+        // Masked: History reaches staff limited to their clients and Vibe Files' feed, and the
+        // contact is not confirmed (it may be someone else's).
+        detail: { field, to: maskContact(value) },
       });
       res.json({ ok: true });
     }),
@@ -445,6 +449,8 @@ export function staffPeopleRouter(ctx: Ctx): Router {
       const who = await identityOf(req);
       if (!who.phone) throw new HttpError(404, 'not_found');
       if (!who.email) throw new HttpError(409, 'only_contact');
+      // A turned-off account keeps its number, or an invitation to it would make a new account.
+      if (who.status !== 'active') throw new HttpError(409, 'account_off');
       await ctx.db
         .update(schema.portalIdentity)
         .set({
@@ -517,7 +523,7 @@ export function staffPeopleRouter(ctx: Ctx): Router {
       }
       await record(ctx.db, 'sign_in_link_sent', staffActor(req), {
         identityId: who.id,
-        detail: { to },
+        detail: { to: maskContact(to) },
       });
       res.json({ ok: true, to });
     }),
