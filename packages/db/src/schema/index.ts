@@ -127,6 +127,8 @@ export const staffUsers = pgTable('staff_users', {
   allClients: boolean('all_clients').notNull().default(true),
   /** Clients sending files may ask that this person be told (P56). */
   notifyUploads: boolean('notify_uploads').notNull().default(false),
+  /** P59: emailed when someone confirms a request for access (staff who see every client). */
+  notifyAccessRequests: boolean('notify_access_requests').notNull().default(false),
 });
 
 /** Each batch a client asked to tell a staff member about, once (P56). */

@@ -101,6 +101,11 @@ On the staff page, **Settings**:
     uploads and history, and not the access requests. An admin always sees every client. The
     change applies at once. This limits the staff page only: Vibe Files on the office PCs
     shows every client, as before.
+  - **Access requests**: tick this for whoever should be emailed when someone asks for access
+    (from the sign-in page's **Request access**). The email comes once the person has confirmed
+    their email or phone, with their name and who they say they are with; their contact and
+    note are on the staff page's **Access requests**, where you choose their client and approve
+    or deny. Only staff who see every client can be ticked, since only they see the requests.
 - **Portal keys**: **Make a key** for Vibe Files (next step). It is shown once.
 
 ## 5. Connect Vibe Files

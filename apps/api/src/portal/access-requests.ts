@@ -10,7 +10,7 @@
 //   POST /api/portal/access-requests/:id/confirm  { code }
 
 import express, { type Router } from 'express';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -22,6 +22,7 @@ import { body, clientIp, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { hit, LIMITS } from '../lib/rate-limit';
 import { sha256, sixDigitCode } from '../lib/secrets';
+import { BREAKGLASS_EMAIL } from '../staff/sso';
 
 export const CONFIRM_MINUTES = 15;
 
@@ -159,10 +160,13 @@ export function accessRequestsRouter(ctx: Ctx): Router {
         now,
       );
       if (!ch) throw new HttpError(400, 'code_wrong');
-      await ctx.db
+      const [confirmed] = await ctx.db
         .update(schema.accessRequest)
         .set({ confirmedAt: now, confirmedContact: ch.contact })
-        .where(and(eq(schema.accessRequest.id, id), isNull(schema.accessRequest.confirmedAt)));
+        .where(and(eq(schema.accessRequest.id, id), isNull(schema.accessRequest.confirmedAt)))
+        .returning({ name: schema.accessRequest.name, clientAs: schema.accessRequest.clientAs });
+      // P59: the request is now on the staff page; tell the staff an admin ticked (once).
+      if (confirmed) await tellStaff(ctx, confirmed);
       await record(
         ctx.db,
         'request_confirmed',
@@ -179,4 +183,40 @@ export function accessRequestsRouter(ctx: Ctx): Router {
   );
 
   return r;
+}
+
+/**
+ * P59: emails the staff an admin ticked ("Email new access requests") that a confirmed request is
+ * waiting. Only staff who see every client (they alone see and approve requests), active, and
+ * never the Vibe Auth emergency account. The person's name and what they typed only: their
+ * contact and note stay on the staff page.
+ */
+export async function tellStaff(ctx: Ctx, r: { name: string; clientAs: string }): Promise<number> {
+  const staff = await ctx.db
+    .select({ email: schema.staffUsers.email })
+    .from(schema.staffUsers)
+    .where(
+      and(
+        eq(schema.staffUsers.notifyAccessRequests, true),
+        eq(schema.staffUsers.active, true),
+        or(eq(schema.staffUsers.admin, true), eq(schema.staffUsers.allClients, true)),
+        ne(schema.staffUsers.email, BREAKGLASS_EMAIL),
+      ),
+    );
+  if (!staff.length) return 0;
+  const firm = await firmName(ctx);
+  const link = `${ctx.portalUrl}/staff/requests`;
+  for (const s of staff) {
+    deliver(
+      ctx,
+      messageTo(
+        s.email,
+        `Access request from ${r.name}`,
+        `${r.name} asked for access to ${firm}'s client portal and confirmed their contact. ` +
+          `They say they are with: ${r.clientAs}\n\nChoose their client and approve or deny the ` +
+          `request on the staff page: ${link}`,
+      ),
+    );
+  }
+  return staff.length;
 }

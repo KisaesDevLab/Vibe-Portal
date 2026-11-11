@@ -453,6 +453,39 @@ describe('staff page', () => {
     );
   });
 
+  it('settings: an admin ticks who is emailed about access requests (P59)', async () => {
+    const bob = { ...ANN, id: 's2', email: 'bob@firm.test', name: 'Bob', admin: false };
+    const cy = { ...bob, id: 's3', email: 'cy@firm.test', name: 'Cy', clientIds: [CLIENT.id] };
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/settings': SETTINGS,
+      '/v1/keys': { body: { keys: [] } },
+      '/v1/clients': { body: { clients: [CLIENT] } },
+      '/v1/staff': {
+        body: {
+          staff: [
+            ANN,
+            { ...bob, notifyAccessRequests: false },
+            { ...cy, notifyAccessRequests: true },
+          ],
+        },
+      },
+      'PATCH /v1/staff/s2': { body: { ok: true } },
+    });
+    at('/staff/settings');
+    const box = (await screen.findByLabelText('Email Bob new access requests')) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    fireEvent.click(box);
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/v1/staff/s2')?.body).toEqual({
+        notifyAccessRequests: true,
+      }),
+    );
+    // Someone limited to some clients cannot approve requests, so it is off and cannot be ticked.
+    const limited = screen.getByLabelText('Email Cy new access requests') as HTMLInputElement;
+    expect([limited.checked, limited.disabled]).toEqual([false, true]);
+  });
+
   it('settings: a refused change says why by the button, and reads who you are again', async () => {
     const bob = { ...ANN, id: 's2', email: 'bob@firm.test', name: 'Bob', admin: false };
     const calls = serve({

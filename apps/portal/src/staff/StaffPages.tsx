@@ -1655,8 +1655,22 @@ function Settings(): JSX.Element {
           emailed, with the file names and their note. Clients see the names of those ticked who can
           see their client, never their email addresses.
         </p>
+        <p>
+          <strong>Access requests</strong>: this person is emailed when someone confirms a request
+          for access, with the name and who they say they are with. Only for staff who see every
+          client (they approve requests).
+        </p>
         <Table
-          head={['Name', 'Email', 'State', 'Sees', 'Clients may notify', 'Last sign-in', 'Actions']}
+          head={[
+            'Name',
+            'Email',
+            'State',
+            'Sees',
+            'Clients may notify',
+            'Access requests',
+            'Last sign-in',
+            'Actions',
+          ]}
         >
           {(staff.data?.staff ?? []).map((u) => {
             const self = u.email === me.data?.email;
@@ -1687,6 +1701,22 @@ function Settings(): JSX.Element {
                       void act(`/v1/staff/${u.id}`, {
                         method: 'PATCH',
                         body: { notifyUploads: e.target.checked },
+                      })
+                    }
+                  />
+                </td>
+                <td style={td}>
+                  {/* P59: emailed when someone confirms a request for access. */}
+                  <input
+                    type="checkbox"
+                    aria-label={`Email ${u.name} new access requests`}
+                    checked={u.notifyAccessRequests && !u.clientIds}
+                    disabled={busy || !u.active || me.data === null || u.clientIds !== null}
+                    title={u.clientIds ? 'Only for staff who see every client' : undefined}
+                    onChange={(e) =>
+                      void act(`/v1/staff/${u.id}`, {
+                        method: 'PATCH',
+                        body: { notifyAccessRequests: e.target.checked },
                       })
                     }
                   />

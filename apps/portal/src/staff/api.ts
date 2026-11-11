@@ -139,6 +139,8 @@ export interface StaffRow {
   clientIds: string[] | null;
   /** Clients sending files may ask that this person be told (P56). */
   notifyUploads: boolean;
+  /** Emailed about new access requests (P59). */
+  notifyAccessRequests: boolean;
 }
 
 export interface ClientRow {

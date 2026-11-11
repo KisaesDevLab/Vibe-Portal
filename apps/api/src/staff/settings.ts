@@ -67,6 +67,8 @@ const StaffChange = z
     clientIds: ClientIds.optional(),
     /** Clients sending files may ask that this person be told (P56). */
     notifyUploads: z.boolean().optional(),
+    /** Emailed about new access requests (P59). */
+    notifyAccessRequests: z.boolean().optional(),
   })
   .refine((c) => Object.values(c).some((v) => v !== undefined), 'nothing to change');
 
@@ -232,6 +234,7 @@ export function staffSettingsRouter(ctx: Ctx): Router {
           // The only clients they see; null for every client.
           clientIds: u.admin || u.allClients ? null : (limits.get(u.id) ?? []),
           notifyUploads: u.notifyUploads,
+          notifyAccessRequests: u.notifyAccessRequests,
         })),
       });
     }),
@@ -332,6 +335,7 @@ export function staffSettingsRouter(ctx: Ctx): Router {
             admin,
             allClients: !limited,
             notifyUploads: change.notifyUploads ?? u.notifyUploads,
+            notifyAccessRequests: change.notifyAccessRequests ?? u.notifyAccessRequests,
           })
           .where(eq(schema.staffUsers.id, id));
         if (change.clientIds !== undefined) await setClients(tx, id, change.clientIds);
@@ -351,6 +355,14 @@ export function staffSettingsRouter(ctx: Ctx): Router {
       if (change.notifyUploads !== undefined && change.notifyUploads !== after.was.notifyUploads) {
         await record(ctx.db, 'staff_access', a, {
           detail: { staffId: id, notifyUploads: change.notifyUploads },
+        });
+      }
+      if (
+        change.notifyAccessRequests !== undefined &&
+        change.notifyAccessRequests !== after.was.notifyAccessRequests
+      ) {
+        await record(ctx.db, 'staff_access', a, {
+          detail: { staffId: id, notifyAccessRequests: change.notifyAccessRequests },
         });
       }
       if (change.admin !== undefined || change.clientIds !== undefined) {
