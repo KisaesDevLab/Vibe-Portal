@@ -864,6 +864,46 @@ describe('staff page', () => {
     expect(screen.queryByRole('button', { name: 'Show older' })).toBeNull();
   });
 
+  it("a client's page shows its history in plain words (P65)", async () => {
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+      [`/v1/clients/${CLIENT.id}/history?limit=50`]: {
+        body: {
+          events: [
+            {
+              id: 9,
+              at: '2026-11-11T10:00:00Z',
+              kind: 'download',
+              who: 'Mary Smith',
+              person: null,
+              file: '2025 Form 1040.pdf',
+              recipient: null,
+            },
+            {
+              id: 8,
+              at: '2026-11-11T09:00:00Z',
+              kind: 'outside_share',
+              who: 'ann@firm.test',
+              person: null,
+              file: null,
+              recipient: 'banker@example.test',
+            },
+          ],
+        },
+      },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    expect(await screen.findByText('Downloaded a file')).toBeTruthy();
+    expect(screen.getByText('2025 Form 1040.pdf')).toBeTruthy();
+    expect(screen.getByText('Sent a secure link')).toBeTruthy();
+    expect(screen.getByText('to banker@example.test')).toBeTruthy();
+    // Fewer than a page: nothing older.
+    expect(screen.queryByRole('button', { name: 'Show older' })).toBeNull();
+  });
+
   it('Log shows the server warnings and errors with their details (P64)', async () => {
     serve({
       '/auth/me': ME,
@@ -1009,6 +1049,7 @@ describe('staff page', () => {
       [`/v1/clients/${id}/users`]: { body: { users: [], invitations: [] } },
       [`/v1/files?clientId=${id}`]: { body: { files: [portalFile('f1', 'letter.docx')] } },
       [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      [`/v1/clients/${id}/history?limit=50`]: { body: { events: [] } },
       'POST /v1/shares': { status: 400, body: { error: 'view_only_needs_preview' } },
     });
     at(`/staff/clients/${id}`);

@@ -379,7 +379,11 @@ function ClientDetail(): JSX.Element {
   );
   const files = useLoad<{ files: SharedFile[] }>(`/v1/files?clientId=${id}`);
   const links = useLoad<{ shares: OutsideShare[] }>(`/v1/shares?clientId=${id}`);
+  const history = useLoad<{ events: ClientEvent[] }>(
+    `/v1/clients/${id}/history?limit=${CLIENT_HISTORY_PAGE}`,
+  );
   const reload = (): void => {
+    history.reload();
     people.reload();
     files.reload();
     links.reload();
@@ -574,7 +578,126 @@ function ClientDetail(): JSX.Element {
           }
         }}
       />
+      <ClientHistory clientId={id} load={history} />
     </div>
+  );
+}
+
+interface ClientEvent {
+  id: number;
+  at: string;
+  kind: string;
+  who: string;
+  person: string | null;
+  file: string | null;
+  recipient: string | null;
+}
+
+const CLIENT_HISTORY_PAGE = 50;
+
+/** What each kind of event says on a client's History (P65). */
+const DID: Record<string, string> = {
+  share: 'Shared a file',
+  unshare: 'Stopped sharing a file',
+  remove: 'Removed a file',
+  replace: 'Replaced a file',
+  file_added: 'Added a file',
+  view: 'Viewed a file',
+  download: 'Downloaded a file',
+  upload: 'Uploaded a file',
+  upload_notice: 'Upload notice sent',
+  fetch: 'Fetched an upload',
+  upload_removed: 'Removed an upload',
+  upload_purged: 'Upload cleared after the keep period',
+  invite: 'Invited someone',
+  invite_revoked: 'Withdrew an invitation',
+  invite_accepted: 'Accepted an invitation',
+  request: 'Asked for access',
+  request_confirmed: 'Confirmed an access request',
+  approve: 'Approved access',
+  deny: 'Denied access',
+  disable: 'Turned off someone',
+  enable: 'Turned on someone',
+  sign_in: 'Signed in',
+  sign_out: 'Signed out',
+  phone_added: 'Added a mobile number',
+  phone_removed: 'Removed a mobile number',
+  client_updated: 'Client details updated',
+  outside_share: 'Sent a secure link',
+  outside_share_revoked: 'Revoked a secure link',
+  outside_code_sent: 'Secure link code sent',
+  outside_verified: 'Secure link opened',
+  outside_view: 'Viewed by secure link',
+  outside_download: 'Downloaded by secure link',
+  outside_locked: 'Secure link locked after wrong codes',
+};
+
+/** Everything that happened on one client, newest first (P65). */
+function ClientHistory({
+  clientId,
+  load,
+}: {
+  clientId: string;
+  load: Load<{ events: ClientEvent[] }>;
+}): JSX.Element {
+  const [older, setOlder] = useState<ClientEvent[]>([]);
+  const [more, setMore] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const first = load.data?.events ?? [];
+  useEffect(() => {
+    setOlder([]);
+    setMore(first.length === CLIENT_HISTORY_PAGE);
+  }, [load.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rows = [...first, ...older];
+  const showOlder = async (): Promise<void> => {
+    const last = rows[rows.length - 1];
+    if (!last) return;
+    setBusy(true);
+    setProblem('');
+    try {
+      const r = await staffApi<{ events: ClientEvent[] }>(
+        `/v1/clients/${clientId}/history?limit=${CLIENT_HISTORY_PAGE}&before=${last.id}`,
+      );
+      setOlder((o) => [...o, ...r.events]);
+      setMore(r.events.length === CLIENT_HISTORY_PAGE);
+    } catch (err) {
+      setProblem(staffSay(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card title="History">
+      <Status load={load} what="this client's history" />
+      <Problem text={problem} />
+      {load.data && rows.length === 0 && <p>Nothing has happened on this client yet.</p>}
+      <Table head={['When', 'What', 'Who', 'About']}>
+        {rows.map((e) => (
+          <tr key={e.id}>
+            <td style={{ ...td, whiteSpace: 'nowrap' }}>{when(e.at)}</td>
+            <td style={td}>{DID[e.kind] ?? e.kind.replace(/_/g, ' ')}</td>
+            <td style={td}>{e.who}</td>
+            <td style={{ ...td, overflowWrap: 'anywhere' }}>
+              {[
+                e.file,
+                e.person && e.person !== e.who ? e.person : null,
+                e.recipient && `to ${e.recipient}`,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+            </td>
+          </tr>
+        ))}
+      </Table>
+      {load.data && more && (
+        <div style={{ marginTop: 8 }}>
+          <Button variant="secondary" disabled={busy} onClick={() => void showOlder()}>
+            Show older
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }
 

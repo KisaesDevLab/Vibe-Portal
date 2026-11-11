@@ -16,7 +16,21 @@
 //   POST   /api/firm/v1/access-requests/:id/deny
 
 import express, { type Request, type RequestHandler, type Router } from 'express';
-import { and, asc, eq, ilike, inArray, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lt,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -255,6 +269,97 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         },
       });
       res.json({ ok: true });
+    }),
+  );
+
+  // P65: what happened on one client, newest first, for the client's page: its files, uploads,
+  // people and secure links, and the sign-ins of the people who can see it.
+  const HistoryQuery = z.object({
+    limit: z.coerce.number().int().min(1).max(500).default(50),
+    before: z.coerce.number().int().min(1).optional(),
+  });
+  const PERSONAL = ['sign_in', 'sign_out', 'phone_added', 'phone_removed'] as const;
+  r.get(
+    '/clients/:id/history',
+    h(async (req, res) => {
+      const id = param(req, 'id');
+      if (!(await clientExists(id))) throw new HttpError(404, 'client_not_found');
+      const q = HistoryQuery.parse(req.query);
+      const person = alias(schema.portalIdentity, 'person');
+      const actorPerson = alias(schema.portalIdentity, 'actor_person');
+      const rows = await ctx.db
+        .select({
+          id: schema.events.id,
+          at: schema.events.at,
+          kind: schema.events.kind,
+          actorKind: schema.events.actorKind,
+          actor: schema.events.actor,
+          actorName: actorPerson.name,
+          actorEmail: actorPerson.email,
+          actorPhone: actorPerson.phone,
+          personName: person.name,
+          personEmail: person.email,
+          personPhone: person.phone,
+          file: schema.files.name,
+          upload: schema.uploads.name,
+          detail: schema.events.detail,
+        })
+        .from(schema.events)
+        .leftJoin(schema.files, eq(schema.files.id, schema.events.fileId))
+        .leftJoin(schema.uploads, eq(schema.uploads.id, schema.events.uploadId))
+        .leftJoin(person, eq(person.id, schema.events.identityId))
+        .leftJoin(
+          actorPerson,
+          and(
+            eq(schema.events.actorKind, 'client'),
+            eq(sql`${actorPerson.id}::text`, schema.events.actor),
+          ),
+        )
+        .where(
+          and(
+            q.before ? lt(schema.events.id, q.before) : undefined,
+            or(
+              eq(schema.events.clientId, id),
+              // Sign-ins are not about one client: those of the people who can see this one.
+              and(
+                isNull(schema.events.clientId),
+                inArray(schema.events.kind, [...PERSONAL]),
+                inArray(
+                  schema.events.identityId,
+                  ctx.db
+                    .select({ id: schema.clientAccess.identityId })
+                    .from(schema.clientAccess)
+                    .where(eq(schema.clientAccess.clientId, id)),
+                ),
+              ),
+            ),
+          ),
+        )
+        .orderBy(desc(schema.events.id))
+        .limit(q.limit);
+      const named = (n: string | null, e: string | null, p: string | null): string | null =>
+        n || e || p || null;
+      res.json({
+        events: rows.map((e) => ({
+          id: e.id,
+          at: e.at,
+          kind: e.kind,
+          who:
+            e.actorKind === 'client'
+              ? (named(e.actorName, e.actorEmail, e.actorPhone) ?? 'a client')
+              : e.actorKind === 'system'
+                ? 'the portal'
+                : e.actorKind === 'firm_key'
+                  ? `Vibe Files (${e.actor})`
+                  : e.actor,
+          person: named(e.personName, e.personEmail, e.personPhone),
+          file: e.file ?? e.upload ?? null,
+          // A secure link's outside recipient (P49).
+          recipient: ((d) => (typeof d['to'] === 'string' ? d['to'] : null))(
+            (e.detail ?? {}) as Record<string, unknown>,
+          ),
+        })),
+      });
     }),
   );
 
