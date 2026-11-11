@@ -24,6 +24,7 @@ import {
   tokens,
   Trash,
   useIsNarrow,
+  ThemeToggle,
 } from '@vibe/ui';
 
 import { FirmLogo, reloadBranding } from '../branding';
@@ -227,6 +228,8 @@ export function StaffHome(): JSX.Element {
           )}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             {!narrow && <span>{me.data.name}</span>}
+            {/* Light or dark, remembered in this browser (the device's setting until chosen). */}
+            <ThemeToggle />
             {narrow ? (
               <Button
                 size="sm"

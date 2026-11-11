@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Button, Card } from '@vibe/ui';
+import { Button, Card, ThemeToggle } from '@vibe/ui';
 
 import { FirmLogo } from '../branding';
 import { api, ApiError, say, type Me } from '../api';
@@ -112,9 +112,13 @@ export function Home(): JSX.Element {
           <FirmLogo height={40} />
           <h1 style={{ fontSize: 20, margin: 0 }}>{me.firmName}</h1>
         </div>
-        <Button variant="secondary" size="sm" onClick={() => void signOut()}>
-          Sign out
-        </Button>
+        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* Light or dark, remembered in this browser (the device's setting until chosen). */}
+          <ThemeToggle />
+          <Button variant="secondary" size="sm" onClick={() => void signOut()}>
+            Sign out
+          </Button>
+        </span>
       </header>
       {notice && <p role="alert">{notice}</p>}
       <Card title={active?.name ?? ''}>

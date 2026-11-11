@@ -1124,6 +1124,20 @@ describe('staff page', () => {
     );
   });
 
+  it('the staff page switches between light and dark', async () => {
+    serve({ '/auth/me': ME, '/v1/clients': { body: { clients: [] } } });
+    document.documentElement.dataset.theme = 'dark';
+    try {
+      at('/staff');
+      fireEvent.click(await screen.findByRole('button', { name: 'Switch to light mode' }));
+      expect(document.documentElement.dataset.theme).toBe('light');
+      expect(localStorage.getItem('vibe-theme')).toBe('light');
+    } finally {
+      localStorage.removeItem('vibe-theme');
+      delete document.documentElement.dataset.theme;
+    }
+  });
+
   it('Log shows the server warnings and errors with their details (P64)', async () => {
     serve({
       '/auth/me': ME,

@@ -209,6 +209,23 @@ describe('portal', () => {
     });
   });
 
+  it('switches between light and dark, and remembers it', async () => {
+    serve({ '/auth/me': { body: ME } });
+    document.documentElement.dataset.theme = 'light';
+    try {
+      at('/');
+      fireEvent.click(await screen.findByRole('button', { name: 'Switch to dark mode' }));
+      expect(document.documentElement.dataset.theme).toBe('dark');
+      expect(localStorage.getItem('vibe-theme')).toBe('dark');
+      fireEvent.click(screen.getByRole('button', { name: 'Switch to light mode' }));
+      expect(document.documentElement.dataset.theme).toBe('light');
+      expect(localStorage.getItem('vibe-theme')).toBe('light');
+    } finally {
+      localStorage.removeItem('vibe-theme');
+      delete document.documentElement.dataset.theme;
+    }
+  });
+
   it('offers Try again when the portal cannot be reached', async () => {
     serve({ '/auth/me': { status: 503, body: { error: 'down' } } });
     at('/');
