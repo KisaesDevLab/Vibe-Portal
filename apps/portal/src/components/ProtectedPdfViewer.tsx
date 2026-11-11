@@ -14,9 +14,10 @@
 // once (~hundreds of MB), which blanked pages or reloaded the tab on iOS
 // Safari — the exact device tax-return clients read on.
 
+import { ActionDownload } from './Action';
 import { useEffect, useRef, useState } from 'react';
 
-import { Button, tokens, useIsNarrow } from '@vibe/ui';
+import { tokens, useIsNarrow } from '@vibe/ui';
 
 // Lazy pdf.js loader (worker wired once). Same pattern as the staff
 // FieldEditor so the worker asset is bundled by Vite.
@@ -60,6 +61,7 @@ export function ProtectedPdfViewer({
    *  inline-view URL (gated file shares). Defaults to `url`. */
   downloadUrl?: string;
 }): JSX.Element {
+  const [pages, setPages] = useState(0);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errMsg, setErrMsg] = useState<string | null>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -199,6 +201,8 @@ export function ProtectedPdfViewer({
         for (let n = 1; n <= pdf.numPages; n++) {
           const w = document.createElement('div');
           w.dataset['page'] = String(n);
+          w.setAttribute('role', 'img');
+          w.setAttribute('aria-label', `Page ${n} of ${pdf.numPages}`);
           w.style.width = '100%';
           w.style.margin = '0 auto 12px';
           w.style.background = 'rgba(255,255,255,0.85)';
@@ -207,6 +211,7 @@ export function ProtectedPdfViewer({
           wrappers.push(w);
           observer.observe(w);
         }
+        setPages(pdf.numPages);
         setStatus('ready');
       } catch (e) {
         if (!cancelled) {
@@ -223,20 +228,22 @@ export function ProtectedPdfViewer({
     };
   }, [url]);
 
-  // Block Ctrl/Cmd+P while this viewer is mounted.
+  // Block Ctrl/Cmd+P while a view-only document is shown (one that may be downloaded can be
+  // printed from the download).
   useEffect(() => {
+    if (canDownload) return undefined;
     function onKey(e: KeyboardEvent): void {
       if ((e.ctrlKey || e.metaKey) && (e.key === 'p' || e.key === 'P')) e.preventDefault();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [canDownload]);
 
   if (status === 'error') {
     return (
-      <p style={{ fontSize: 13, color: tokens.color.danger }}>
-        The document couldn&apos;t be loaded{errMsg ? ` (${errMsg})` : ''}. Please try again
-        shortly.
+      <p role="alert" style={{ fontSize: 13 }}>
+        The document couldn&rsquo;t be shown. Try again in a moment, or reload the page.
+        {errMsg ? <span hidden>{errMsg}</span> : null}
       </p>
     );
   }
@@ -246,12 +253,19 @@ export function ProtectedPdfViewer({
       {/* Hide the rendered document from any print output. */}
       <style>{`@media print { .vibe-pdf-protected { display: none !important; } }`}</style>
       {status === 'loading' && (
-        <p style={{ fontSize: 13, color: tokens.color.textMuted }}>Loading document…</p>
+        <p role="status" style={{ fontSize: 13, color: tokens.color.textMuted }}>
+          Loading document…
+        </p>
       )}
       <div
         ref={hostRef}
         className="vibe-pdf-protected"
-        onContextMenu={(e) => e.preventDefault()}
+        // A named region that takes focus, so it can be scrolled from the keyboard; the pages
+        // inside are pictures, each labelled (the text itself is not readable here).
+        role="region"
+        aria-label={`${filename}${pages ? `, ${pages} ${pages === 1 ? 'page' : 'pages'}` : ''}`}
+        tabIndex={0}
+        onContextMenu={canDownload ? undefined : (e) => e.preventDefault()}
         style={{
           // Desktop: an inner scroll pane keeps the sections list in view.
           // Phones: let the PAGE scroll — a nested scroller fights pinch
@@ -265,15 +279,16 @@ export function ProtectedPdfViewer({
       />
       {canDownload ? (
         <div style={{ marginTop: tokens.space.sm }}>
-          <a href={downloadUrl ?? url} download={filename}>
-            <Button variant="secondary" size="sm">
-              Download PDF
-            </Button>
-          </a>
+          <ActionDownload
+            href={downloadUrl ?? url}
+            filename={filename}
+            label="Download PDF"
+            ariaLabel={`Download ${filename}`}
+          />
         </div>
       ) : (
-        <p style={{ fontSize: 11, color: tokens.color.textMuted, marginTop: tokens.space.sm }}>
-          This document is view-only — saving and printing are disabled.
+        <p style={{ fontSize: 13, color: tokens.color.textMuted, marginTop: tokens.space.sm }}>
+          This document is view-only: saving and printing are turned off.
         </p>
       )}
     </div>

@@ -1124,6 +1124,55 @@ describe('staff page', () => {
     );
   });
 
+  it('has a skip link and a main landmark, marks the page shown, and titles it (UI review)', async () => {
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}`]: { body: CLIENT },
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+      [`/v1/clients/${CLIENT.id}/history?limit=50`]: { body: { events: [] } },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    expect(await screen.findByRole('link', { name: 'Skip to content' })).toBeTruthy();
+    expect(screen.getByRole('main').id).toBe('main-content');
+    const nav = screen.getAllByRole('navigation', { name: 'Staff' })[0] as HTMLElement;
+    const current = within(nav)
+      .getAllByRole('link')
+      .filter((l) => l.getAttribute('aria-current') === 'page');
+    expect(current.map((l) => l.textContent)).toEqual(['Clients']);
+    await waitFor(() => expect(document.title).toBe('Client · Example CPA'));
+  });
+
+  it('asks before denying an access request (UI review)', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/access-requests': {
+        body: {
+          requests: [
+            {
+              id: 'r1',
+              name: 'Mary Smith',
+              email: 'mary@example.test',
+              phone: null,
+              confirmedContact: 'mary@example.test',
+              clientAs: 'Smith, John',
+              note: '',
+              createdAt: '2026-11-11T10:00:00Z',
+              idPhoto: null,
+            },
+          ],
+        },
+      },
+      '/v1/clients': { body: { clients: [CLIENT] } },
+    });
+    at('/staff/requests');
+    fireEvent.click(await screen.findByRole('button', { name: 'Deny Mary Smith' }));
+    expect(confirm).toHaveBeenCalled();
+    expect(calls.some((c) => c.path === '/v1/access-requests/r1/deny')).toBe(false);
+  });
+
   it('the staff page switches between light and dark', async () => {
     serve({ '/auth/me': ME, '/v1/clients': { body: { clients: [] } } });
     document.documentElement.dataset.theme = 'dark';

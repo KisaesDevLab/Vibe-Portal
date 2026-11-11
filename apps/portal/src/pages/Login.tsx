@@ -109,6 +109,8 @@ export function Login(): JSX.Element {
           label="Email or mobile number"
           name="contact"
           autoComplete="username"
+          autoCapitalize="none"
+          spellCheck={false}
           value={contact}
           onChange={(e) => setContact(e.target.value)}
           required

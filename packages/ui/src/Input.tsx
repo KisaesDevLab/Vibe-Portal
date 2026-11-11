@@ -12,7 +12,10 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 
 export function Input({ label, hint, invalid, id, style, ...rest }: InputProps): JSX.Element {
   const inputId = id ?? `input-${rest.name ?? Math.random().toString(36).slice(2)}`;
-  const borderColor = invalid ? tokens.color.danger : tokens.color.border;
+  // A page may set a stronger field border (Vibe Portal: --vibe-control-border, 3:1).
+  const borderColor = invalid
+    ? tokens.color.danger
+    : 'var(--vibe-control-border, var(--vibe-color-border))';
   return (
     <label htmlFor={inputId} style={{ display: 'block', fontFamily: tokens.font.body }}>
       {label && (

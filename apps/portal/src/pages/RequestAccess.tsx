@@ -207,12 +207,29 @@ export function RequestAccess(): JSX.Element {
       }
     >
       <form onSubmit={send} style={{ display: 'grid', gap: 12 }}>
-        <Input label="Your name" name="name" value={form.name} onChange={set('name')} required />
-        <Input label="Email" name="email" type="email" value={form.email} onChange={set('email')} />
+        <Input
+          label="Your name"
+          name="name"
+          autoComplete="name"
+          value={form.name}
+          onChange={set('name')}
+          required
+        />
+        <Input
+          label="Email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          autoCapitalize="none"
+          spellCheck={false}
+          value={form.email}
+          onChange={set('email')}
+        />
         <Input
           label="Mobile number"
           name="phone"
           type="tel"
+          autoComplete="tel"
           value={form.phone}
           onChange={set('phone')}
           hint="Give an email, a mobile number, or both. We send a code to confirm it."

@@ -149,9 +149,10 @@ export function Actions({ children }: { children: ReactNode }): JSX.Element {
       style={
         narrow
           ? {
+              // Equal buttons in a row, wrapping onto a second row when they do not fit (three
+              // actions at 320px wide).
               display: 'grid',
-              gridAutoFlow: 'column',
-              gridAutoColumns: '1fr',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(84px, 1fr))',
               gap: 8,
               width: '100%',
             }
@@ -192,7 +193,9 @@ export function ItemRow({
           <strong style={{ overflowWrap: 'anywhere' }}>{title}</strong>
           {badge}
         </div>
-        {meta && <small style={{ color: tokens.color.textMuted }}>{meta}</small>}
+        {meta && (
+          <small style={{ color: tokens.color.textMuted, overflowWrap: 'anywhere' }}>{meta}</small>
+        )}
       </div>
       {actions}
     </li>

@@ -2,6 +2,7 @@
 //
 // Signed-in home: which client, its files, sign out, and signing in by text (P50).
 
+import { Reveal } from '../components/Reveal';
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Button, Card, ThemeToggle } from '@vibe/ui';
@@ -105,10 +106,22 @@ export function Home(): JSX.Element {
     }
   }
 
+  document.title = `Your files · ${me.firmName}`;
   return (
-    <main style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <main
+      id="main-content"
+      style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}
+    >
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
           <FirmLogo height={40} />
           <h1 style={{ fontSize: 20, margin: 0 }}>{me.firmName}</h1>
         </div>
@@ -122,7 +135,9 @@ export function Home(): JSX.Element {
       </header>
       {notice && <p role="alert">{notice}</p>}
       <Card title={active?.name ?? ''}>
-        <p>Signed in as {me.identity.name || me.identity.email || me.identity.phone}.</p>
+        <p style={{ overflowWrap: 'anywhere' }}>
+          Signed in as {me.identity.name || me.identity.email || me.identity.phone}.
+        </p>
         {me.clients.length > 1 && (
           <label style={{ display: 'grid', gap: 4, maxWidth: 320 }}>
             <span>Showing files for</span>
@@ -135,20 +150,26 @@ export function Home(): JSX.Element {
             </select>
           </label>
         )}
-        {sentNote && <p role="status">{sentNote}</p>}
+        {sentNote && (
+          <p role="status" style={{ overflowWrap: 'anywhere' }}>
+            {sentNote}
+          </p>
+        )}
         {sending && (
-          <SendLinkForm
-            key={sending.id}
-            clientId={me.activeClientId}
-            file={{ id: sending.id, name: sending.name, preview: sending.preview !== null }}
-            maxDays={links.maxDays}
-            onSent={(note) => {
-              setSending(null);
-              setSentNote(note);
-              links.reload();
-            }}
-            onCancel={() => setSending(null)}
-          />
+          <Reveal>
+            <SendLinkForm
+              key={sending.id}
+              clientId={me.activeClientId}
+              file={{ id: sending.id, name: sending.name, preview: sending.preview !== null }}
+              maxDays={links.maxDays}
+              onSent={(note) => {
+                setSending(null);
+                setSentNote(note);
+                links.reload();
+              }}
+              onCancel={() => setSending(null)}
+            />
+          </Reveal>
         )}
         <Files
           clientId={me.activeClientId}

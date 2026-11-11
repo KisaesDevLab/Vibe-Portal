@@ -13,7 +13,15 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
-import { Link, Navigate, NavLink, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
 import {
   Button,
   Card,
@@ -29,6 +37,7 @@ import {
 
 import { FirmLogo, reloadBranding } from '../branding';
 import { Select } from '../components/Field';
+import { Reveal } from '../components/Reveal';
 import { AuthSettingsPage } from '@kisaesdevlab/vibe-auth/react';
 import { usePages } from '../paging';
 import { ApiError } from '../api';
@@ -94,6 +103,18 @@ function useLoad<T>(path: string): Load<T> {
   return { data, error, reload };
 }
 
+/** The page title for each part of the staff page (the first part of the path after /staff). */
+const TITLES: Record<string, string> = {
+  '': 'Clients',
+  clients: 'Client',
+  requests: 'Access requests',
+  people: 'People',
+  uploads: 'Uploads',
+  history: 'History',
+  settings: 'Settings',
+  log: 'Log',
+};
+
 /** Runs a change, then reloads; shows what went wrong. */
 function useAct(reload: () => void): {
   act: (path: string, init: { method?: string; body?: unknown; raw?: Blob }) => Promise<unknown>;
@@ -145,9 +166,25 @@ function Status({ load, what }: { load: Load<unknown>; what: string }): JSX.Elem
 export function StaffHome(): JSX.Element {
   const me = useLoad<StaffMe>('/auth/me');
   const navigate = useNavigate();
+  const location = useLocation();
   // P59: on a phone the menu folds behind a button.
   const narrow = useIsNarrow();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Each page has its own title (WCAG 2.4.2).
+  const firm = me.data?.firmName;
+  const section = location.pathname.split('/')[2] ?? '';
+  useEffect(() => {
+    if (firm) document.title = `${TITLES[section] ?? 'Clients'} · ${firm}`;
+  }, [firm, section]);
+  // The phone menu closes on Escape.
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
   const reloadMe = me.reload;
   useEffect(() => {
     window.addEventListener(ME_CHANGED, reloadMe);
@@ -172,6 +209,7 @@ export function StaffHome(): JSX.Element {
   };
   // Settings are for admins; access requests for staff who see every client.
   const { admin, allClients } = me.data;
+
   const nav = [
     'Clients',
     ...(allClients ? ['Requests', 'People'] : []),
@@ -179,24 +217,33 @@ export function StaffHome(): JSX.Element {
     'History',
     ...(admin ? ['Settings', 'Log'] : []),
   ];
-  const links = nav.map((n) => (
-    <NavLink
-      key={n}
-      to={n === 'Clients' ? '/staff' : `/staff/${n.toLowerCase()}`}
-      end={n === 'Clients' || n === 'People' ? false : true}
-      onClick={() => setMenuOpen(false)}
-      style={({ isActive }) => ({
-        padding: narrow ? '12px 12px' : '8px 12px',
-        borderRadius: tokens.radius.md,
-        textDecoration: 'none',
-        fontWeight: 500,
-        color: isActive ? 'var(--vibe-on-accent, #fff)' : tokens.color.text,
-        background: isActive ? tokens.color.accent : 'transparent',
-      })}
-    >
-      {n}
-    </NavLink>
-  ));
+  // The page shown is marked (aria-current): Clients on the list and on a client's page.
+  const path = location.pathname.replace(/\/+$/, '');
+  const isCurrent = (n: string): boolean =>
+    n === 'Clients'
+      ? path === '/staff' || path.startsWith('/staff/clients/')
+      : path === `/staff/${n.toLowerCase()}` || path.startsWith(`/staff/${n.toLowerCase()}/`);
+  const links = nav.map((n) => {
+    const on = isCurrent(n);
+    return (
+      <Link
+        key={n}
+        to={n === 'Clients' ? '/staff' : `/staff/${n.toLowerCase()}`}
+        aria-current={on ? 'page' : undefined}
+        onClick={() => setMenuOpen(false)}
+        style={{
+          padding: narrow ? '12px 12px' : '8px 12px',
+          borderRadius: tokens.radius.md,
+          textDecoration: 'none',
+          fontWeight: 500,
+          color: on ? 'var(--vibe-on-accent, #fff)' : tokens.color.text,
+          background: on ? tokens.color.accent : 'transparent',
+        }}
+      >
+        {n}
+      </Link>
+    );
+  });
   return (
     <div
       style={{
@@ -207,6 +254,9 @@ export function StaffHome(): JSX.Element {
         gap: 16,
       }}
     >
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <header
         style={{
           display: 'grid',
@@ -215,14 +265,14 @@ export function StaffHome(): JSX.Element {
           borderBottom: `1px solid ${tokens.color.border}`,
         }}
       >
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <FirmLogo height={32} />
           <strong style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
             {me.data.firmName}
             {!narrow && ' · portal staff'}
           </strong>
           {!narrow && (
-            <nav aria-label="Staff" style={{ display: 'flex', gap: 4, marginLeft: 16 }}>
+            <nav aria-label="Staff" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
               {links}
             </nav>
           )}
@@ -267,18 +317,20 @@ export function StaffHome(): JSX.Element {
           </nav>
         )}
       </header>
-      <Routes>
-        <Route index element={<Clients limited={!allClients} />} />
-        <Route path="clients/:id" element={<ClientDetail allClients={allClients} />} />
-        {allClients && <Route path="requests" element={<Requests />} />}
-        {allClients && <Route path="people" element={<People />} />}
-        {allClients && <Route path="people/:identityId" element={<Person />} />}
-        <Route path="uploads" element={<Uploads />} />
-        <Route path="history" element={<History />} />
-        {admin && <Route path="settings" element={<Settings />} />}
-        {admin && <Route path="log" element={<Log />} />}
-        <Route path="*" element={<Navigate to="/staff" replace />} />
-      </Routes>
+      <main id="main-content" tabIndex={-1} style={{ display: 'grid', gap: 16, minWidth: 0 }}>
+        <Routes>
+          <Route index element={<Clients limited={!allClients} />} />
+          <Route path="clients/:id" element={<ClientDetail allClients={allClients} />} />
+          {allClients && <Route path="requests" element={<Requests />} />}
+          {allClients && <Route path="people" element={<People />} />}
+          {allClients && <Route path="people/:identityId" element={<Person />} />}
+          <Route path="uploads" element={<Uploads />} />
+          <Route path="history" element={<History />} />
+          {admin && <Route path="settings" element={<Settings />} />}
+          {admin && <Route path="log" element={<Log />} />}
+          <Route path="*" element={<Navigate to="/staff" replace />} />
+        </Routes>
+      </main>
     </div>
   );
 }
@@ -362,7 +414,9 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
         {slice.map((c) => (
           <tr key={c.id}>
             <td style={td}>
-              <Link className="client-name" to={`/staff/clients/${c.id}`}>{c.displayName}</Link>
+              <Link className="client-name" to={`/staff/clients/${c.id}`}>
+                {c.displayName}
+              </Link>
               {!c.active && ' (switched off)'}
             </td>
             <td style={td}>{c.clientCode}</td>
@@ -416,7 +470,9 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   };
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <Link to="/staff">← All clients</Link>
+      <Link to="/staff">
+        <span aria-hidden="true">← </span>All clients
+      </Link>
       <ClientHead load={head} />
       <Problem text={error} />
       <Card title="People with access">
@@ -438,7 +494,13 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                   tags={(u.clients ?? []).map((c) => ({
                     id: c.id,
                     content:
-                      c.id === id ? c.name : <Link className="client-name" to={`/staff/clients/${c.id}`}>{c.name}</Link>,
+                      c.id === id ? (
+                        c.name
+                      ) : (
+                        <Link className="client-name" to={`/staff/clients/${c.id}`}>
+                          {c.name}
+                        </Link>
+                      ),
                   }))}
                 />
               </td>
@@ -451,12 +513,20 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                   variant="secondary"
                   disabled={busy}
                   aria-label={`${u.active ? 'Turn off' : 'Turn on'} ${label(u)}`}
-                  onClick={() =>
+                  onClick={() => {
+                    if (
+                      u.active &&
+                      !window.confirm(
+                        `Turn off ${label(u)} for this client? They are signed out at once.`,
+                      )
+                    ) {
+                      return;
+                    }
                     void act(`/v1/clients/${id}/users/${u.identityId}`, {
                       method: 'PATCH',
                       body: { active: !u.active },
-                    })
-                  }
+                    });
+                  }}
                 >
                   {u.active ? 'Turn off' : 'Turn on'}
                 </Button>
@@ -502,12 +572,17 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
             <Input
               label="Email"
               name="email"
+              type="email"
+              autoComplete="off"
+              spellCheck={false}
               value={inv.email}
               onChange={(e) => setInv({ ...inv, email: e.target.value })}
             />
             <Input
               label="Mobile number"
               name="phone"
+              type="tel"
+              autoComplete="off"
               value={inv.phone}
               onChange={(e) => setInv({ ...inv, phone: e.target.value })}
             />
@@ -561,18 +636,20 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
       <ClientUploads load={uploads} />
       {sentNote && <p role="status">{sentNote}</p>}
       {sending && files.data && (
-        <SendSecurely
-          key={sending}
-          clientId={id}
-          files={files.data.files}
-          first={sending}
-          onSent={(note) => {
-            setSending(null);
-            setSentNote(note);
-            links.reload();
-          }}
-          onCancel={() => setSending(null)}
-        />
+        <Reveal>
+          <SendSecurely
+            key={sending}
+            clientId={id}
+            files={files.data.files}
+            first={sending}
+            onSent={(note) => {
+              setSending(null);
+              setSentNote(note);
+              links.reload();
+            }}
+            onCancel={() => setSending(null)}
+          />
+        </Reveal>
       )}
       <SecureLinks
         load={links}
@@ -756,7 +833,7 @@ function ClientHead({ load }: { load: Load<ClientRow> }): JSX.Element {
   if (!c) return <Status load={load} what="the client" />;
   const n = (k: number, one: string, many: string): string => `${k} ${k === 1 ? one : many}`;
   return (
-    <header style={{ display: 'grid', gap: 4 }}>
+    <div style={{ display: 'grid', gap: 4 }}>
       <h1 style={{ margin: 0, fontSize: 24, display: 'flex', gap: 10, alignItems: 'center' }}>
         {c.displayName}
         {!c.active && (
@@ -779,7 +856,7 @@ function ClientHead({ load }: { load: Load<ClientRow> }): JSX.Element {
         {n(c.waiting, 'upload', 'uploads')} waiting for Vibe Files
         {!c.active && ' · switched off in Vibe Files: nobody can sign in for this client'}
       </p>
-    </header>
+    </div>
   );
 }
 
@@ -1385,7 +1462,10 @@ const tagStyle = {
   borderRadius: 999,
   border: '1px solid var(--vibe-color-border)',
   background: 'var(--vibe-color-surface)',
-  whiteSpace: 'nowrap',
+  // A long client name wraps inside the tag rather than past the card (UI review).
+  whiteSpace: 'normal',
+  overflowWrap: 'anywhere',
+  maxWidth: '100%',
 } as const;
 
 function ClientTags({
@@ -1447,7 +1527,9 @@ function IdPhoto({ r }: { r: AccessRequestRow }): JSX.Element {
         src={src}
         alt={`Photo ID sent by ${r.name}`}
         style={{
+          width: '100%',
           maxWidth: 320,
+          height: 'auto',
           maxHeight: 220,
           objectFit: 'contain',
           border: '1px solid var(--vibe-color-border)',
@@ -1508,16 +1590,22 @@ function Requests(): JSX.Element {
                       aria-label={`Remove ${nameOf(cid)} for ${r.name}`}
                       onClick={() => set({ clients: p.clients.filter((x) => x !== cid) })}
                       style={{
+                        // At least 24 x 24 (WCAG 2.5.8), inside the tag.
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: 24,
+                        minHeight: 24,
+                        margin: '-3px -6px -3px 0',
                         border: 0,
+                        borderRadius: 999,
                         background: 'none',
                         color: 'inherit',
                         cursor: 'pointer',
-                        fontSize: 12,
-                        padding: '0 0 0 2px',
-                        lineHeight: 1,
+                        padding: 0,
                       }}
                     >
-                      ×
+                      <CloseIcon size={14} aria-hidden="true" />
                     </button>
                   </>
                 ),
@@ -1579,7 +1667,11 @@ function Requests(): JSX.Element {
                 variant="secondary"
                 disabled={busy}
                 aria-label={`Deny ${r.name}`}
-                onClick={() => void act(`/v1/access-requests/${r.id}/deny`, { method: 'POST' })}
+                onClick={() => {
+                  if (window.confirm(`Deny ${r.name}'s request? It cannot be undone.`)) {
+                    void act(`/v1/access-requests/${r.id}/deny`, { method: 'POST' });
+                  }
+                }}
               >
                 Deny
               </Button>
@@ -1876,7 +1968,11 @@ function People(): JSX.Element {
                 label={`Clients ${personLabel(p)} can see`}
                 tags={p.clients.map((c) => ({
                   id: c.id,
-                  content: <Link className="client-name" to={`/staff/clients/${c.id}`}>{c.name}</Link>,
+                  content: (
+                    <Link className="client-name" to={`/staff/clients/${c.id}`}>
+                      {c.name}
+                    </Link>
+                  ),
                 }))}
               />
             </td>
@@ -1956,7 +2052,9 @@ function Person(): JSX.Element {
   if (!d) {
     return (
       <div style={{ display: 'grid', gap: 16 }}>
-        <Link to="/staff/people">← All people</Link>
+        <Link to="/staff/people">
+          <span aria-hidden="true">← </span>All people
+        </Link>
         <Card title="Person">
           <Status load={load} what="this person" />
         </Card>
@@ -1984,11 +2082,13 @@ function Person(): JSX.Element {
   );
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <Link to="/staff/people">← All people</Link>
-      <h2 style={{ margin: 0 }}>
+      <Link to="/staff/people">
+        <span aria-hidden="true">← </span>All people
+      </Link>
+      <h1 style={{ margin: 0, fontSize: 24 }}>
         {who}
         {off && <span style={{ ...tagStyle, marginLeft: 8, fontWeight: 400 }}>Turned off</span>}
-      </h2>
+      </h1>
       <Problem text={error} />
       {note && <p role="status">{note}</p>}
 
@@ -2143,7 +2243,9 @@ function Person(): JSX.Element {
           {d.clients.map((c) => (
             <tr key={c.id}>
               <td style={td}>
-                <Link className="client-name" to={`/staff/clients/${c.id}`}>{c.name}</Link>
+                <Link className="client-name" to={`/staff/clients/${c.id}`}>
+                  {c.name}
+                </Link>
                 {!c.clientActive && ' (client switched off)'}
               </td>
               <td style={td}>{c.roleLabel}</td>
@@ -2726,6 +2828,8 @@ function Settings(): JSX.Element {
                       disabled={busy}
                       aria-label={`${u.active ? 'Turn off' : 'Turn on'} ${u.name}`}
                       onClick={() =>
+                        (!u.active ||
+                          window.confirm(`Turn off ${u.name}? They are signed out at once.`)) &&
                         void act(`/v1/staff/${u.id}`, {
                           method: 'PATCH',
                           body: { active: !u.active },
@@ -2764,19 +2868,21 @@ function Settings(): JSX.Element {
           })}
         </Table>
         {access && (
-          <StaffAccess
-            key={access.id}
-            who={access}
-            clients={clients}
-            busy={busy}
-            error={error}
-            onCancel={() => setAccess(null)}
-            onSave={(change) =>
-              void act(`/v1/staff/${access.id}`, { method: 'PATCH', body: change }).then((r) => {
-                if (r) setAccess(null);
-              })
-            }
-          />
+          <Reveal>
+            <StaffAccess
+              key={access.id}
+              who={access}
+              clients={clients}
+              busy={busy}
+              error={error}
+              onCancel={() => setAccess(null)}
+              onSave={(change) =>
+                void act(`/v1/staff/${access.id}`, { method: 'PATCH', body: change }).then((r) => {
+                  if (r) setAccess(null);
+                })
+              }
+            />
+          </Reveal>
         )}
         <form
           style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginTop: 8 }}
@@ -2794,6 +2900,9 @@ function Settings(): JSX.Element {
           <Input
             label="Email"
             name="staffEmail"
+            type="email"
+            autoComplete="off"
+            spellCheck={false}
             value={person.email}
             onChange={(e) => setPerson({ ...person, email: e.target.value })}
           />
@@ -3047,7 +3156,15 @@ function Storage(): JSX.Element {
                   type="button"
                   variant="secondary"
                   disabled={busy}
-                  onClick={() => void act('/v1/settings/storage/b2', { method: 'DELETE' })}
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        'Remove the B2 bucket settings? The bucket itself is not emptied.',
+                      )
+                    ) {
+                      void act('/v1/settings/storage/b2', { method: 'DELETE' });
+                    }
+                  }}
                 >
                   Remove bucket
                 </Button>

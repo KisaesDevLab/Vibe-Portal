@@ -289,7 +289,10 @@ export function Shared(): JSX.Element {
   const who = [info.recipientName, info.organization].filter(Boolean).join(', ');
 
   return (
-    <main style={{ maxWidth: 960, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}>
+    <main
+      id="main-content"
+      style={{ maxWidth: 960, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}
+    >
       <header>
         <FirmLogo height={40} />
         <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.1em' }}>

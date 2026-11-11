@@ -35,7 +35,10 @@ export function FileView(): JSX.Element {
   if (signedOut) return <Navigate to="/login" replace />;
 
   return (
-    <main style={{ maxWidth: 960, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}>
+    <main
+      id="main-content"
+      style={{ maxWidth: 960, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}
+    >
       <nav>
         <Link to="/">← All files</Link>
       </nav>

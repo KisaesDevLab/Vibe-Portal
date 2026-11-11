@@ -5,9 +5,62 @@
  * system's inputs, and links take the firm colour.
  */
 
+/* UI review 2026-11-11 (WCAG 1.4.3, 1.4.11): links in the firm colour pass on a light page, but
+ * on a dark one the firm colour is too dark to read (2563eb: 3.5:1), so dark pages lighten it
+ * (about 7-9:1). Fields, whose fill is the card's, get a border of at least 3:1. */
+:root,
+[data-theme='dark'] {
+  --vibe-link: color-mix(in srgb, var(--vibe-color-accent) 50%, #ffffff);
+  --vibe-control-border: #6e7681;
+}
+[data-theme='light'] {
+  --vibe-link: var(--vibe-color-accent);
+  --vibe-control-border: #7d8590;
+}
+
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+a,
+button,
+summary,
+label {
+  touch-action: manipulation;
+}
+
 a {
-  color: var(--vibe-color-accent);
+  color: var(--vibe-link);
   text-underline-offset: 2px;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+button:not(:disabled):hover,
+.vauth-button:hover {
+  filter: brightness(1.12);
+}
+
+/* Shown on the first Tab: straight to the page's content. */
+.skip-link {
+  position: absolute;
+  left: 8px;
+  top: -48px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--vibe-color-accent);
+  color: var(--vibe-on-accent, #fff);
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+/* Numbers and dates in columns line up. */
+td {
+  font-variant-numeric: tabular-nums;
 }
 
 /* A client's name is in the text colour, not the firm colour (owner 2026-11-11); the underline
@@ -24,7 +77,7 @@ input[type='email']:not([class]) {
   box-sizing: border-box;
   min-height: 40px;
   padding: 8px 12px;
-  border: 1px solid var(--vibe-color-border);
+  border: 1px solid var(--vibe-control-border);
   border-radius: 8px;
   background: var(--vibe-color-surface);
   color: var(--vibe-color-text);

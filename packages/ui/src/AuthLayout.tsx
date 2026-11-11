@@ -57,10 +57,17 @@ export function AuthLayout({
   logo,
 }: AuthLayoutProps): JSX.Element {
   useLightAuthTheme();
+  // The tab says which page this is (WCAG 2.4.2).
+  useEffect(() => {
+    if (typeof document !== 'undefined' && typeof title === 'string') {
+      document.title = `${title} · ${typeof brand === 'string' ? brand : 'Sign in'}`;
+    }
+  }, [title, brand]);
   return (
-    <div
+    <main
+      id="main-content"
       style={{
-        minHeight: '100vh',
+        minHeight: '100dvh',
         background: tokens.color.bg,
         color: tokens.color.text,
         fontFamily: tokens.font.body,
@@ -77,7 +84,8 @@ export function AuthLayout({
           background: tokens.color.surface,
           border: `1px solid ${tokens.color.border}`,
           borderRadius: tokens.radius.lg,
-          padding: tokens.space.xxl,
+          // Roomy on a computer, more room for the content on a phone.
+          padding: 'clamp(16px, 6vw, 32px)',
         }}
       >
         {logo && <div style={{ marginBottom: tokens.space.md }}>{logo}</div>}
@@ -111,6 +119,6 @@ export function AuthLayout({
           </div>
         )}
       </div>
-    </div>
+    </main>
   );
 }
