@@ -362,7 +362,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
         {slice.map((c) => (
           <tr key={c.id}>
             <td style={td}>
-              <Link to={`/staff/clients/${c.id}`}>{c.displayName}</Link>
+              <Link className="client-name" to={`/staff/clients/${c.id}`}>{c.displayName}</Link>
               {!c.active && ' (switched off)'}
             </td>
             <td style={td}>{c.clientCode}</td>
@@ -438,7 +438,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                   tags={(u.clients ?? []).map((c) => ({
                     id: c.id,
                     content:
-                      c.id === id ? c.name : <Link to={`/staff/clients/${c.id}`}>{c.name}</Link>,
+                      c.id === id ? c.name : <Link className="client-name" to={`/staff/clients/${c.id}`}>{c.name}</Link>,
                   }))}
                 />
               </td>
@@ -1876,7 +1876,7 @@ function People(): JSX.Element {
                 label={`Clients ${personLabel(p)} can see`}
                 tags={p.clients.map((c) => ({
                   id: c.id,
-                  content: <Link to={`/staff/clients/${c.id}`}>{c.name}</Link>,
+                  content: <Link className="client-name" to={`/staff/clients/${c.id}`}>{c.name}</Link>,
                 }))}
               />
             </td>
@@ -2143,7 +2143,7 @@ function Person(): JSX.Element {
           {d.clients.map((c) => (
             <tr key={c.id}>
               <td style={td}>
-                <Link to={`/staff/clients/${c.id}`}>{c.name}</Link>
+                <Link className="client-name" to={`/staff/clients/${c.id}`}>{c.name}</Link>
                 {!c.clientActive && ' (client switched off)'}
               </td>
               <td style={td}>{c.roleLabel}</td>

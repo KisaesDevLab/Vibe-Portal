@@ -10,6 +10,12 @@ a {
   text-underline-offset: 2px;
 }
 
+/* A client's name is in the text colour, not the firm colour (owner 2026-11-11); the underline
+ * still shows it is a link. */
+a.client-name {
+  color: inherit;
+}
+
 select,
 textarea,
 input[type='search'],
