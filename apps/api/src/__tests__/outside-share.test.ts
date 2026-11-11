@@ -107,6 +107,40 @@ async function unlock(s: Sent, to = LENDER): Promise<Agent> {
 const wrongFor = (right: string): string => (right === '000000' ? '111111' : '000000');
 
 describe('a secure link to someone outside (P49)', () => {
+  it('resending a link locked by wrong codes opens it again, with a fresh count (P66)', async () => {
+    const boss = await admin();
+    const fileId = await onPortal(CLIENT, 'Return-2025.pdf', await realPdf());
+    const s1 = await send(boss, [fileId], { canDownload: true });
+    // Wrong codes until the link locks.
+    let locked = false;
+    for (let i = 0; i < 40 && !locked; i++) {
+      if (i % 5 === 0) {
+        w.later(2);
+        await request(w.app).post(`${s1.path}/code`).send({ key: s1.key }).expect(200);
+      }
+      const r = await request(w.app)
+        .post(`${s1.path}/verify`)
+        .send({ key: s1.key, code: wrongFor(w.code(LENDER)) });
+      locked = r.status === 410;
+    }
+    expect(locked).toBe(true);
+    await boss.post(`/api/staff/v1/shares/${s1.id}/resend`).expect(200);
+    const s2 = linkOf(LENDER);
+    w.later(60);
+    await request(w.app).post(`${s2.path}/code`).send({ key: s2.key }).expect(200);
+    // One wrong code does not lock it again.
+    const wrong = await request(w.app)
+      .post(`${s2.path}/verify`)
+      .send({ key: s2.key, code: wrongFor(w.code(LENDER)) });
+    expect(wrong.status).toBe(400);
+    const pat = request.agent(w.app);
+    await pat
+      .post(`${s2.path}/verify`)
+      .send({ key: s2.key, code: w.code(LENDER) })
+      .expect(200);
+    await pat.get(`${s2.path}/files/${fileId}/content?mode=download`).expect(200);
+  });
+
   it('staff resend it: a new link to the same files, and the old one stops (P66)', async () => {
     const boss = await admin();
     const fileId = await onPortal(CLIENT, 'Return-2025.pdf', await realPdf());

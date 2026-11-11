@@ -427,7 +427,8 @@ export function firmSharesRouter(ctx: Ctx): Router {
         .from(schema.fileShareItem)
         .where(eq(schema.fileShareItem.shareId, share.id));
       const secret = randomToken();
-      const set = { secretHash: sha256(secret), revokedAt: null, revokedBy: null };
+      // A locked link's count of wrong codes starts again, or the next wrong code relocks it.
+      const set = { secretHash: sha256(secret), revokedAt: null, revokedBy: null, wrongTries: 0 };
       await ctx.db.update(schema.fileShare).set(set).where(eq(schema.fileShare.id, share.id));
       try {
         await sendShareEmail(ctx, {
@@ -449,6 +450,7 @@ export function firmSharesRouter(ctx: Ctx): Router {
             secretHash: share.secretHash,
             revokedAt: share.revokedAt,
             revokedBy: share.revokedBy,
+            wrongTries: share.wrongTries,
           })
           .where(eq(schema.fileShare.id, share.id));
         throw new HttpError(502, 'email_failed');

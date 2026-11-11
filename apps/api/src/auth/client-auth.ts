@@ -248,14 +248,22 @@ export function clientAuthRouter(ctx: Ctx): Router {
         .where(eq(schema.portalIdentity.id, ch.identityId));
       if (!who || who.status !== 'active') throw new HttpError(400, 'link_expired');
       const old = who[field];
+      // Someone else has it since the link was sent: never merge two people.
+      const [taken] = await ctx.db
+        .select({ id: schema.portalIdentity.id })
+        .from(schema.portalIdentity)
+        .where(eq(schema.portalIdentity[field], ch.contact));
+      if (taken && taken.id !== who.id) throw new HttpError(409, 'contact_taken');
       try {
         await ctx.db
           .update(schema.portalIdentity)
           .set({ [field]: ch.contact })
           .where(eq(schema.portalIdentity.id, who.id));
       } catch (err) {
-        // Someone else signed up with it since the link was sent: never merge two people.
-        if ((err as { code?: string }).code === '23505') throw new HttpError(409, 'contact_taken');
+        const code =
+          (err as { code?: string; cause?: { code?: string } }).code ??
+          (err as { cause?: { code?: string } }).cause?.code;
+        if (code === '23505') throw new HttpError(409, 'contact_taken');
         throw err;
       }
       // Signed in elsewhere with the old one: sign in again with the new one.

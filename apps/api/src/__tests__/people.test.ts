@@ -208,6 +208,82 @@ describe('People view (P66)', () => {
     await request(w.app).post('/api/portal/auth/confirm-contact').send({ token }).expect(400);
   });
 
+  it('refuses at confirm a contact someone else took meanwhile', async () => {
+    const boss = await admin();
+    const mary = await w.member(MARY, CLIENT);
+    const NEW = 'shared@example.test';
+    await boss.post(`${P}/${mary.id}/contact`).send({ email: NEW }).expect(200);
+    const token = w.linkToken(NEW);
+    await w.member(NEW, OTHER);
+    const res = await request(w.app).post('/api/portal/auth/confirm-contact').send({ token });
+    expect([res.status, res.body.error]).toEqual([409, 'contact_taken']);
+    const d = await boss.get(`${P}/${mary.id}`).expect(200);
+    expect(d.body.person.email).toBe(MARY);
+  });
+
+  it('works by text: a new number, a sign-in link to a number, removing a number', async () => {
+    const boss = await admin();
+    // Someone with only a mobile number.
+    await w
+      .firm('post', `/clients/${CLIENT}/invites`)
+      .send({ phone: '+15551230001', name: 'Tim' })
+      .expect(201);
+    await request(w.app)
+      .post('/api/portal/invitations/accept')
+      .send({ token: w.linkToken('+15551230001') })
+      .expect(200);
+    const list = await boss.get(`${P}/list?q=Tim`).expect(200);
+    const tim = list.body.people[0].identityId as string;
+    // A rename is fine whatever the notify setting.
+    await boss.patch(`${P}/${tim}`).send({ name: 'Tim Roe', notify: 'sms' }).expect(200);
+
+    const sent = await boss.post(`${P}/${tim}/sign-in-link`).expect(200);
+    expect(sent.body.to).toBe('+15551230001');
+    const text = w.notes.last('+15551230001');
+    expect(text.channel).toBe('sms');
+    expect(text.body.length).toBeLessThanOrEqual(300);
+    const a = request.agent(w.app);
+    await a
+      .post('/api/portal/auth/verify-link')
+      .send({ token: w.linkToken('+15551230001') })
+      .expect(200);
+
+    // Only a number: it cannot be removed.
+    const only = await boss.delete(`${P}/${tim}/phone`);
+    expect([only.status, only.body.error]).toEqual([409, 'only_contact']);
+    // A new number, confirmed by the link texted to it.
+    await boss.post(`${P}/${tim}/contact`).send({ phone: '(555) 123-0002' }).expect(200);
+    await request(w.app)
+      .post('/api/portal/auth/confirm-contact')
+      .send({ token: w.linkToken('+15551230002') })
+      .expect(200);
+    let d = await boss.get(`${P}/${tim}`).expect(200);
+    expect(d.body.person.phone).toBe('+15551230002');
+    await a.get('/api/portal/auth/me').expect(401);
+
+    // With an email too, the number can be removed; texts stop.
+    await boss.post(`${P}/${tim}/contact`).send({ email: 'tim@example.test' }).expect(200);
+    await request(w.app)
+      .post('/api/portal/auth/confirm-contact')
+      .send({ token: w.linkToken('tim@example.test') })
+      .expect(200);
+    await boss.delete(`${P}/${tim}/phone`).expect(200);
+    d = await boss.get(`${P}/${tim}`).expect(200);
+    expect(d.body.person).toEqual(
+      expect.objectContaining({ phone: null, email: 'tim@example.test', notify: 'email' }),
+    );
+  });
+
+  it('an invitation sent after the account was turned off does not let them in', async () => {
+    const boss = await admin();
+    const mary = await w.member(MARY, CLIENT);
+    await boss.post(`${P}/${mary.id}/turn-off`).expect(200);
+    await w.firm('post', `/clients/${OTHER}/invites`).send({ email: MARY }).expect(201);
+    const a = request.agent(w.app);
+    await a.post('/api/portal/invitations/accept').send({ token: w.linkToken(MARY) });
+    await a.get('/api/portal/auth/me').expect(401);
+  });
+
   it('is for staff who see every client, and not for Vibe Files', async () => {
     const mary = await w.member(MARY, CLIENT);
     await request(w.app).get(`${P}/list`).expect(401);

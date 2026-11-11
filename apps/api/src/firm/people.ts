@@ -215,7 +215,8 @@ export function staffPeopleRouter(ctx: Ctx): Router {
     h(async (req, res) => {
       const who = await identityOf(req);
       const input = body(PatchSchema, req);
-      if (input.notify) {
+      // Checked only when it changes: a rename keeps whatever they had.
+      if (input.notify && input.notify !== who.notify) {
         const wantsEmail = input.notify === 'email' || input.notify === 'both';
         const wantsText = input.notify === 'sms' || input.notify === 'both';
         if ((wantsEmail && !who.email) || (wantsText && (!who.phone || ctx.textsOff))) {
@@ -399,7 +400,16 @@ export function staffPeopleRouter(ctx: Ctx): Router {
         await ctx.notifier.send(msg);
       } catch (err) {
         ctx.log.error({ err, channel: field === 'email' ? 'email' : 'sms' }, 'contact link failed');
-        await voidChallenges(ctx, who.id);
+        await ctx.db
+          .update(schema.signInChallenge)
+          .set({ usedAt: ctx.now() })
+          .where(
+            and(
+              eq(schema.signInChallenge.identityId, who.id),
+              eq(schema.signInChallenge.kind, 'contact_confirm'),
+              isNull(schema.signInChallenge.usedAt),
+            ),
+          );
         throw new HttpError(502, 'send_failed');
       }
       await record(ctx.db, 'contact_change_sent', staffActor(req), {
