@@ -21,7 +21,13 @@ function serve(routes: Record<string, Reply>): Calls {
       calls.push({
         path,
         method: init?.method ?? 'GET',
-        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        // A file (the photo ID, P67) is kept as it is; anything else is JSON.
+        body:
+          init?.body instanceof Blob
+            ? init.body
+            : init?.body
+              ? JSON.parse(String(init.body))
+              : undefined,
       });
       const r =
         routes[path] ??
@@ -131,12 +137,21 @@ describe('portal', () => {
   it('requests access, then confirms it with a code', async () => {
     const calls = serve({
       '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },
+      '/access-requests/r1/id-photo?name=license.jpg': { status: 201, body: { ok: true } },
       '/access-requests/r1/confirm': { body: { ok: true } },
     });
     at('/request-access');
     fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Mary Smith' } });
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'mary@example.test' } });
     fireEvent.change(screen.getByLabelText(/Whose files/), { target: { value: 'Smith, John' } });
+    // P67: no request without a photo ID.
+    expect(
+      (screen.getByRole('button', { name: 'Send request' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    const license = new File([new Uint8Array([0xff, 0xd8, 0xff])], 'license.jpg', {
+      type: 'image/jpeg',
+    });
+    fireEvent.change(screen.getByLabelText(/Photo of your ID/), { target: { files: [license] } });
     fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     await screen.findByText(/sent a 6-digit code to m\*\*\*@example.test/);
     fireEvent.change(screen.getByLabelText('Code'), { target: { value: '654321' } });
@@ -147,6 +162,8 @@ describe('portal', () => {
       email: 'mary@example.test',
       clientAs: 'Smith, John',
     });
+    expect(calls[1]).toMatchObject({ path: '/access-requests/r1/id-photo?name=license.jpg' });
+    expect(calls[1]?.body).toBe(license);
   });
 
   it('a sign-in link is used only when the person presses Sign in (scanners open links)', async () => {
@@ -211,6 +228,36 @@ describe('portal', () => {
     expect((await screen.findByRole('alert')).textContent).toMatch(/went wrong/);
   });
 
+  it('a photo ID that did not go through is sent again before the code (P67)', async () => {
+    const calls = serve({
+      '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },
+      '/access-requests/r1/id-photo?name=id.txt': { status: 415, body: { error: 'id_type' } },
+      '/access-requests/r1/id-photo?name=id.png': { status: 201, body: { ok: true } },
+    });
+    at('/request-access');
+    fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Mary' } });
+    fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'm@example.test' } });
+    fireEvent.change(screen.getByLabelText(/Whose files/), { target: { value: 'Smith' } });
+    fireEvent.change(screen.getByLabelText(/Photo of your ID/), {
+      target: { files: [new File(['x'], 'id.txt')] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
+    expect(
+      await screen.findByText('The photo ID must be a picture (JPEG, PNG or HEIC) or a PDF.'),
+    ).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Confirm' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.change(screen.getByLabelText(/Photo of your ID/), {
+      target: { files: [new File(['x'], 'id.png', { type: 'image/png' })] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send photo ID' }));
+    await waitFor(() =>
+      expect(calls.map((c) => c.path)).toContain('/access-requests/r1/id-photo?name=id.png'),
+    );
+    expect(screen.queryByRole('button', { name: 'Send photo ID' })).toBeNull();
+  });
+
   it('request access can send a new code', async () => {
     const calls = serve({
       '/access-requests': { status: 201, body: { requestId: 'r1', sentTo: 'm***@example.test' } },
@@ -220,6 +267,9 @@ describe('portal', () => {
     fireEvent.change(screen.getByLabelText('Your name'), { target: { value: 'Mary' } });
     fireEvent.change(screen.getByLabelText('Email'), { target: { value: 'm@example.test' } });
     fireEvent.change(screen.getByLabelText(/Whose files/), { target: { value: 'Smith' } });
+    fireEvent.change(screen.getByLabelText(/Photo of your ID/), {
+      target: { files: [new File(['x'], 'id.png', { type: 'image/png' })] },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Send request' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Send a new code' }));
     await waitFor(() => expect(calls.map((c) => c.path)).toContain('/access-requests/r1/resend'));

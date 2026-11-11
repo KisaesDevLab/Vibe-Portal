@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSetupLink } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
 import { BREAKGLASS_EMAIL } from '../staff/sso';
-import { CLIENT, world, type World } from './harness';
+import { CLIENT, world, type World, sendId } from './harness';
 
 let w: World;
 beforeEach(async () => {
@@ -91,6 +91,7 @@ describe('access request notice (P59)', () => {
     expect(toStaff()).toHaveLength(0); // not before the person confirms
 
     const code = w.code('mary@example.test');
+    await sendId(w, id);
     await request(w.app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code })
@@ -108,6 +109,7 @@ describe('access request notice (P59)', () => {
     expect(m.body).not.toContain('SSN');
 
     // A second confirm changes nothing and sends nothing.
+    await sendId(w, id);
     await request(w.app).post(`/api/portal/access-requests/${id}/confirm`).send({ code });
     expect(toStaff()).toHaveLength(2);
   });

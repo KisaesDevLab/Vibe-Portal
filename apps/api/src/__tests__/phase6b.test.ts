@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFirmKey } from '../firm/keys';
 import { createSetupLink, LOCK_MINUTES } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
-import { CLIENT, world, type World } from './harness';
+import { CLIENT, world, type World, sendId } from './harness';
 
 let w: World;
 beforeEach(async () => {
@@ -250,6 +250,7 @@ describe('what staff do (D13)', () => {
       .send({ name: 'Jane Smith', email: 'jane@example.test', clientAs: 'John Smith' })
       .expect(201);
     const id = created.body.requestId as string;
+    await sendId(w, id);
     await request(w.app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: w.code('jane@example.test') })

@@ -123,3 +123,17 @@ export async function world(): Promise<World> {
     },
   };
 }
+
+/** A 1x1 PNG: a photo ID for tests (P67). */
+export const ID_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+);
+
+/** Sends the photo ID an access request needs before its code is given (P67). */
+export async function sendId(w: Pick<World, 'app'>, requestId: string): Promise<void> {
+  await request(w.app)
+    .post(`/api/portal/access-requests/${requestId}/id-photo?name=id.png`)
+    .set('Content-Type', 'application/octet-stream')
+    .send(ID_PNG);
+}

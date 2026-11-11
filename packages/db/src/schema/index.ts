@@ -249,6 +249,12 @@ export const accessRequest = pgTable('access_request', {
   createdAt: ts('created_at').notNull().defaultNow(),
   confirmedAt: ts('confirmed_at'),
   confirmedContact: text('confirmed_contact'),
+  /** P67: the photo ID sent with the request, encrypted like an upload. */
+  idBlobKey: text('id_blob_key'),
+  idDekWrapped: bytea('id_dek_wrapped'),
+  idContentType: text('id_content_type'),
+  idSize: bigint('id_size', { mode: 'number' }),
+  idRemovedAt: ts('id_removed_at'),
 });
 
 export const files = pgTable('files', {
@@ -312,6 +318,8 @@ export const uploads = pgTable('uploads', {
   batchId: uuid('batch_id'),
   removedAt: ts('removed_at'),
   originalName: text('original_name'),
+  /** P67: the record (a PDF) of this approved access request, made by the portal. */
+  accessRequestId: uuid('access_request_id'),
 });
 
 export const events = pgTable('events', {

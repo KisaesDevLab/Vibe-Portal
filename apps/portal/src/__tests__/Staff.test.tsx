@@ -1083,6 +1083,47 @@ describe('staff page', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === '/v1/shares/s1/resend')).toBe(true);
   });
 
+  it('an access request shows its photo ID (P67)', async () => {
+    serve({
+      '/auth/me': ME,
+      '/v1/access-requests': {
+        body: {
+          requests: [
+            {
+              id: 'r1',
+              name: 'Mary Smith',
+              email: 'mary@example.test',
+              phone: null,
+              confirmedContact: 'mary@example.test',
+              clientAs: 'Smith, John',
+              note: '',
+              createdAt: '2026-11-11T10:00:00Z',
+              idPhoto: { contentType: 'image/jpeg', size: 1000 },
+            },
+            {
+              id: 'r2',
+              name: 'Sam Roe',
+              email: 'sam@example.test',
+              phone: null,
+              confirmedContact: 'sam@example.test',
+              clientAs: 'Roe',
+              note: '',
+              createdAt: '2026-11-11T10:00:00Z',
+              idPhoto: { contentType: 'application/pdf', size: 1000 },
+            },
+          ],
+        },
+      },
+      '/v1/clients': { body: { clients: [CLIENT] } },
+    });
+    at('/staff/requests');
+    const img = (await screen.findByAltText('Photo ID sent by Mary Smith')) as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('/api/staff/v1/access-requests/r1/id-photo');
+    expect(screen.getByRole('link', { name: 'Open the photo ID (PDF)' }).getAttribute('href')).toBe(
+      '/api/staff/v1/access-requests/r2/id-photo',
+    );
+  });
+
   it('Log shows the server warnings and errors with their details (P64)', async () => {
     serve({
       '/auth/me': ME,

@@ -1422,6 +1422,37 @@ interface AccessRequestRow {
   clientAs: string;
   note: string;
   createdAt: string;
+  /** P67: the photo ID sent with it. */
+  idPhoto?: { contentType: string | null; size: number | null } | null;
+}
+
+/** The photo ID of an access request (P67): the picture, or a link to the PDF. */
+function IdPhoto({ r }: { r: AccessRequestRow }): JSX.Element {
+  const src = `/api/staff/v1/access-requests/${r.id}/id-photo`;
+  if (!r.idPhoto) return <span>No photo ID was sent.</span>;
+  if (r.idPhoto.contentType === 'application/pdf') {
+    return (
+      <a href={src} target="_blank" rel="noreferrer">
+        Open the photo ID (PDF)
+      </a>
+    );
+  }
+  return (
+    <a href={src} target="_blank" rel="noreferrer" title="Open the photo ID full size">
+      <img
+        src={src}
+        alt={`Photo ID sent by ${r.name}`}
+        style={{
+          maxWidth: 320,
+          maxHeight: 220,
+          objectFit: 'contain',
+          border: '1px solid var(--vibe-color-border)',
+          borderRadius: 6,
+          display: 'block',
+        }}
+      />
+    </a>
+  );
 }
 
 function Requests(): JSX.Element {
@@ -1489,6 +1520,7 @@ function Requests(): JSX.Element {
             <span>
               Confirmed: {r.confirmedContact} · asked for “{r.clientAs}” · {when(r.createdAt)}
             </span>
+            <IdPhoto r={r} />
             {r.note && <span>“{r.note}”</span>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
               <label style={{ display: 'grid', gap: 4 }}>

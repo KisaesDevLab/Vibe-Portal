@@ -112,6 +112,13 @@ On the staff page, **Settings**:
     business, say): choose each client in turn before **Approve**; they sign in once and switch
     between their clients at the top of their page. To add a client for someone later, invite
     the same email or phone to it from Vibe Files.
+    Every request comes with a **photo ID** (a driver's license, state ID or passport: a phone
+    photo, a scan or a PDF), shown with the request; open it full size by clicking it. When you
+    approve, the portal makes a PDF of the request and the photo ID, and Vibe Files fetches it
+    into the Portal inbox like an upload, named with the first client's name and code and the
+    person's name (`Smith, John_1001_Access request - Mary Smith.pdf`): file it from Intake. The
+    person never sees it. The portal deletes the photo ID, and its own copy of the PDF, 7 days
+    after Vibe Files fetched the PDF; a denied request's photo ID 30 days after the denial.
 - **Portal keys**: **Make a key** for Vibe Files (next step). It is shown once.
 
 ## 5. Connect Vibe Files

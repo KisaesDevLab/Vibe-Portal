@@ -164,7 +164,9 @@ async function allInUse(ctx: Ctx): Promise<Set<string>> {
   const rows = await ctx.db.execute<{ k: string }>(sql`
     SELECT ${schema.files.blobKey} AS k FROM ${schema.files} WHERE ${schema.files.blobKey} IS NOT NULL
     UNION SELECT ${schema.uploads.blobKey} FROM ${schema.uploads} WHERE ${schema.uploads.blobKey} IS NOT NULL
-    UNION SELECT ${schema.fileShareMark.blobKey} FROM ${schema.fileShareMark}`);
+    UNION SELECT ${schema.fileShareMark.blobKey} FROM ${schema.fileShareMark}
+    UNION SELECT ${schema.accessRequest.idBlobKey} FROM ${schema.accessRequest}
+      WHERE ${schema.accessRequest.idBlobKey} IS NOT NULL`);
   return new Set(rowsOf<{ k: string }>(rows).map((r) => r.k));
 }
 

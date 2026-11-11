@@ -71,7 +71,7 @@ export function createApp(deps: AppDeps): Express {
     });
     app.use('/api/portal/auth', clientAuthRouter(ctx));
     app.use('/api/portal/invitations', invitationsRouter(ctx));
-    app.use('/api/portal/access-requests', accessRequestsRouter(ctx));
+    app.use('/api/portal/access-requests', accessRequestsRouter(ctx, deps.convertHeic));
     app.use('/api/portal/files', clientFilesRouter(ctx));
     // The signed-in person's own account: the mobile number they sign in with (P50).
     app.use('/api/portal/account', accountRouter(ctx));

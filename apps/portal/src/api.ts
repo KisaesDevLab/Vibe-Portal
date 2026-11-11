@@ -46,6 +46,8 @@ export function say(err: unknown): string {
     code_wrong: 'That code is not right, or it has expired. Ask for a new one.',
     link_expired: 'This sign-in link has expired or was already used. Ask for a new one.',
     account_off: 'This account is turned off. Contact your accountant.',
+    id_required: 'Add a photo of your ID first.',
+    id_type: 'The photo ID must be a picture (JPEG, PNG or HEIC) or a PDF.',
     invite_expired:
       'This invitation has expired or was already used. Ask the firm to send a new one.',
     no_access: 'Your access to the portal has ended. Contact the firm.',

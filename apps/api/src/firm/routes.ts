@@ -35,6 +35,7 @@ import { setAccess, withdrawInvites } from './access';
 import { firmFilesRouter } from './files';
 import { historyRows, HistoryQuery } from './history';
 import { staffPeopleRouter } from './people';
+import { fileRequestRecord, readIdPhoto } from '../portal/access-id';
 import { requireFirmKey } from './keys';
 import { firmEventsRouter } from './events';
 import { firmSharesRouter } from './shares';
@@ -570,8 +571,31 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           clientAs: a.clientAs,
           note: a.note,
           createdAt: a.createdAt,
+          // P67: the photo ID sent with it (shown from the route below).
+          idPhoto: a.idBlobKey ? { contentType: a.idContentType, size: a.idSize } : null,
         })),
       });
+    }),
+  );
+
+  // P67: the photo ID of a request (also after it is decided, until it is deleted), shown in the
+  // page. Each look is in History.
+  r.get(
+    '/access-requests/:id/id-photo',
+    h(async (req, res) => {
+      const id = z.string().uuid().safeParse(req.params['id']);
+      if (!id.success) throw new HttpError(404, 'not_found');
+      const [request] = await ctx.db
+        .select()
+        .from(schema.accessRequest)
+        .where(eq(schema.accessRequest.id, id.data));
+      const photo = request ? await readIdPhoto(ctx, request) : null;
+      if (!request || !photo) throw new HttpError(404, 'not_found');
+      res.setHeader('Content-Type', photo.contentType);
+      res.setHeader('Content-Disposition', 'inline; filename="photo-id"');
+      res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.send(photo.bytes);
     }),
   );
 
@@ -650,6 +674,15 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           detail: { accessRequestId: id },
         });
       }
+      // P67: the request and its photo ID, as a PDF for Vibe Files' Portal inbox (first client).
+      await fileRequestRecord(ctx, {
+        requestId: id,
+        identityId: done.identityId,
+        clientIds,
+        approvedBy: actor.name,
+        roleLabel: input.roleLabel,
+        firmName: firm,
+      });
       res.json({ ok: true, identityId: done.identityId, clientIds });
     }),
   );

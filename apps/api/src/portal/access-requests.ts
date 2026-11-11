@@ -7,7 +7,8 @@
 //   POST /api/portal/access-requests              { name, email?, phone?, clientAs, note? }
 //        -> { requestId, sentTo }
 //   POST /api/portal/access-requests/:id/resend   -> { sentTo }  (a new code)
-//   POST /api/portal/access-requests/:id/confirm  { code }
+//   POST /api/portal/access-requests/:id/id-photo?name=  the photo ID (P67), before confirming
+//   POST /api/portal/access-requests/:id/confirm  { code }   needs the photo ID (P67)
 
 import express, { type Router } from 'express';
 import { and, eq, isNull, ne, or } from 'drizzle-orm';
@@ -23,6 +24,8 @@ import { messageTo } from '../lib/notify';
 import { hit, LIMITS } from '../lib/rate-limit';
 import { sha256, sixDigitCode } from '../lib/secrets';
 import { BREAKGLASS_EMAIL } from '../staff/sso';
+import type { HeicConverter } from './uploads';
+import { storeIdPhoto } from './access-id';
 
 export const CONFIRM_MINUTES = 15;
 
@@ -35,7 +38,7 @@ const CreateSchema = z.object({
 });
 const ConfirmSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
 
-export function accessRequestsRouter(ctx: Ctx): Router {
+export function accessRequestsRouter(ctx: Ctx, convertHeic?: HeicConverter): Router {
   const r = express.Router();
 
   /** Sends a new confirmation code for a request to `to`. */
@@ -141,6 +144,36 @@ export function accessRequestsRouter(ctx: Ctx): Router {
     }),
   );
 
+  // P67: the photo ID, sent after the request is made and before the code is given. Sent again,
+  // it replaces the first. Only for a request still waiting for its code.
+  r.post(
+    '/:id/id-photo',
+    h(async (req, res) => {
+      const id = requestId(req.params['id']);
+      const now = ctx.now();
+      if (!(await hit(ctx.db, `id-photo:ip:${clientIp(req)}`, LIMITS.idPhotoPerIp, now))) {
+        throw new HttpError(429, 'too_many_requests');
+      }
+      const type = (req.headers['content-type'] ?? '').split(';')[0]?.trim().toLowerCase();
+      if (type !== 'application/octet-stream') throw new HttpError(415, 'id_type');
+      const name = z.string().trim().min(1).max(255).safeParse(req.query['name']);
+      if (!name.success) throw new HttpError(415, 'id_type');
+      const [request] = await ctx.db
+        .select()
+        .from(schema.accessRequest)
+        .where(
+          and(
+            eq(schema.accessRequest.id, id),
+            eq(schema.accessRequest.status, 'pending'),
+            isNull(schema.accessRequest.confirmedAt),
+          ),
+        );
+      if (!request) throw new HttpError(404, 'not_found');
+      const stored = await storeIdPhoto(ctx, request, req, name.data, convertHeic);
+      res.status(201).json({ ok: true, contentType: stored.contentType });
+    }),
+  );
+
   r.post(
     '/:id/confirm',
     h(async (req, res) => {
@@ -150,6 +183,12 @@ export function accessRequestsRouter(ctx: Ctx): Router {
       if (!(await hit(ctx.db, `verify:ip:${clientIp(req)}`, LIMITS.verifyPerIp, now))) {
         throw new HttpError(429, 'too_many_requests');
       }
+      // P67: no request reaches staff without a photo ID (asked before the code is used up).
+      const [held] = await ctx.db
+        .select({ key: schema.accessRequest.idBlobKey })
+        .from(schema.accessRequest)
+        .where(eq(schema.accessRequest.id, id));
+      if (held && !held.key) throw new HttpError(400, 'id_required');
       const ch = await checkCode(
         ctx.db,
         and(

@@ -17,7 +17,7 @@ import { createApp } from '../app';
 import type { Ctx } from '../context';
 import { createFirmKey, revokeFirmKey } from '../firm/keys';
 import { recordingNotifier } from '../lib/notify';
-import { fileServices } from './harness';
+import { fileServices, sendId } from './harness';
 
 const CLIENT = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
@@ -418,10 +418,12 @@ describe('request access -> confirm -> approve -> sign in', () => {
     expect((await firm('get', '/access-requests')).body.requests).toEqual([]);
 
     const c = code('mary@example.test');
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: c === '000000' ? '111111' : '000000' })
       .expect(400);
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: c })
@@ -463,6 +465,7 @@ describe('request access -> confirm -> approve -> sign in', () => {
       .send({ name: 'X', phone: '5553334444', clientAs: 'Someone' })
       .expect(201);
     const id = created.body.requestId as string;
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: code('+15553334444') })
@@ -522,6 +525,7 @@ describe('QA 2026-11-09', () => {
       .send({ name: 'Mallory', email: 'mallory@example.test', phone: '5559990000', clientAs: 'x' })
       .expect(201);
     const id = created.body.requestId as string;
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: code('mallory@example.test') })
@@ -602,6 +606,7 @@ describe('QA 2026-11-09', () => {
       .send({ name: 'M', email: 'm@example.test', clientAs: 'x' })
       .expect(201);
     const id = created.body.requestId as string;
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: code('m@example.test') })
@@ -618,6 +623,7 @@ describe('QA 2026-11-09', () => {
       .send({ name: 'Mary Smith', email: 'mary@example.test', clientAs: 'Smith family' })
       .expect(201);
     const id = created.body.requestId as string;
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: code('mary@example.test') })
@@ -675,6 +681,7 @@ describe('QA 2026-11-09', () => {
       .send({ name: 'M', email: 'm@example.test', clientAs: 'x' })
       .expect(201);
     const id = created.body.requestId as string;
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: code('m@example.test') })
@@ -703,6 +710,7 @@ describe('QA 2026-11-09', () => {
       .send({ name: 'M', email: 'm@example.test', clientAs: 'x' })
       .expect(201);
     const id = created.body.requestId as string;
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: code('m@example.test') })
@@ -811,11 +819,13 @@ describe('QA 2026-11-09', () => {
     await request(app).post(`/api/portal/access-requests/${id}/resend`).expect(200);
     const fresh = code('+15550006666');
     if (old !== fresh) {
+      await sendId({ app }, id);
       await request(app)
         .post(`/api/portal/access-requests/${id}/confirm`)
         .send({ code: old })
         .expect(400);
     }
+    await sendId({ app }, id);
     await request(app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: fresh })

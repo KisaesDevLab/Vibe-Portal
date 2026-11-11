@@ -21,6 +21,7 @@ import { snapshotIfDue } from './files/snapshot';
 import { applyStorage, resumeInterrupted, runMove, sweep } from './files/storage';
 import { normalizeEmail } from './lib/contact';
 import { purgeStale } from './lib/housekeeping';
+import { purgeIdPhotos } from './portal/access-id';
 import { ProblemLog } from './lib/problems';
 import { staffSessions } from './staff/auth';
 import { firstAdminOnStart } from './staff/first-admin';
@@ -166,6 +167,8 @@ async function main(): Promise<void> {
     purgeMarks(ctx).catch((err: unknown) => log.error({ err }, 'mark purge failed'));
     // P51: once a day, stored files whose delete failed (D9).
     sweep(ctx).catch((err: unknown) => log.error({ err }, 'stored file sweep failed'));
+    // P67: photo IDs of access requests past their time.
+    purgeIdPhotos(ctx).catch((err: unknown) => log.error({ err }, 'photo ID purge failed'));
     // P51: with files in B2, a database snapshot to the bucket every hour.
     snapshotIfDue(ctx).catch(() => undefined);
   }, 3_600_000).unref();

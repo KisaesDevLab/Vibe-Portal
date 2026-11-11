@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { applianceReset, createSetupLink } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
-import { CLIENT, OTHER, world, type World } from './harness';
+import { CLIENT, OTHER, world, type World, sendId } from './harness';
 
 let w: World;
 beforeEach(async () => {
@@ -337,6 +337,7 @@ describe('staff limited to some clients (P48)', () => {
       .send({ name: 'Jane Smith', email: 'jane@example.test', clientAs: 'John Smith' })
       .expect(201);
     const id = created.body.requestId as string;
+    await sendId(w, id);
     await request(w.app)
       .post(`/api/portal/access-requests/${id}/confirm`)
       .send({ code: w.code('jane@example.test') })

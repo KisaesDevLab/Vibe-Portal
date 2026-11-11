@@ -200,6 +200,8 @@ export function clientUploadsRouter(
             eq(schema.uploads.identityId, s.identityId),
             eq(schema.uploads.clientId, clientId),
             isNull(schema.uploads.removedAt),
+            // P67: the firm's record of their access request is not one of their uploads.
+            isNull(schema.uploads.accessRequestId),
           ),
         )
         .orderBy(desc(schema.uploads.uploadedAt))
@@ -226,7 +228,11 @@ export function clientUploadsRouter(
       const s = req.clientSession as ClientSession;
       const id = z.string().uuid().safeParse(req.params['id']);
       if (!id.success) throw new HttpError(404, 'not_found');
-      const mine = and(eq(schema.uploads.id, id.data), eq(schema.uploads.identityId, s.identityId));
+      const mine = and(
+        eq(schema.uploads.id, id.data),
+        eq(schema.uploads.identityId, s.identityId),
+        isNull(schema.uploads.accessRequestId),
+      );
       const [before] = await ctx.db.select().from(schema.uploads).where(mine);
       if (!before || before.removedAt) throw new HttpError(404, 'not_found');
       // One conditional update: Vibe Files fetching at the same moment wins or loses cleanly.

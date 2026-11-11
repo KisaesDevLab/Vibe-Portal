@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createSetupLink } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
-import { CLIENT, OTHER, world, type World } from './harness';
+import { CLIENT, OTHER, world, type World, sendId } from './harness';
 
 let w: World;
 beforeEach(async () => {
@@ -123,7 +123,7 @@ describe('People view (P66)', () => {
     expect([added.status, added.body]).toEqual([201, { ok: true, told: true }]);
     const notice = w.notes.last(MARY);
     expect(notice.subject).toBe("Smith Farms LLC on Example CPA's client portal");
-    let me = await mary.agent.get('/api/portal/auth/me').expect(200);
+    const me = await mary.agent.get('/api/portal/auth/me').expect(200);
     expect(me.body.clients.map((c: { id: string }) => c.id).sort()).toEqual([CLIENT, OTHER].sort());
     const again = await boss.post(`${P}/${mary.id}/clients`).send({ clientId: OTHER });
     expect([again.status, again.body.error]).toEqual([409, 'already_has_access']);
@@ -287,6 +287,7 @@ describe('People view (P66)', () => {
       .post('/api/portal/access-requests')
       .send({ name: 'Mary', email: MARY, clientAs: 'Smith Farms' })
       .expect(201);
+    await sendId(w, made.body.requestId);
     await request(w.app)
       .post(`/api/portal/access-requests/${made.body.requestId}/confirm`)
       .send({ code: w.code(MARY) })

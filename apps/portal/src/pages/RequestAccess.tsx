@@ -1,15 +1,40 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
-// Request access: the person confirms their email or phone with a code; then the firm decides.
+// Request access: the person adds a photo ID (P67) and confirms their email or phone with a code;
+// then the firm decides.
 
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Button, Input } from '@vibe/ui';
 
 import { FirmAuthLayout } from '../branding';
-import { api, say } from '../api';
+import { api, ApiError, say } from '../api';
 
-type Step = { at: 'form' } | { at: 'confirm'; id: string; sentTo: string } | { at: 'done' };
+type Step =
+  { at: 'form' } | { at: 'confirm'; id: string; sentTo: string; idSent: boolean } | { at: 'done' };
+
+/** A phone photo can be large; the portal takes up to 15 MB. */
+const ID_MAX_BYTES = 15 * 1024 * 1024;
+
+/** Sends the photo ID for a request (P67). */
+async function sendIdPhoto(requestId: string, file: File): Promise<void> {
+  if (file.size > ID_MAX_BYTES) throw new ApiError(413, 'too_large');
+  const res = await fetch(
+    `/api/portal/access-requests/${requestId}/id-photo?name=${encodeURIComponent(file.name)}`,
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    },
+  );
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(res.status, data.error ?? 'error');
+  }
+}
+
+const ID_ACCEPT = 'image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf';
 
 export function RequestAccess(): JSX.Element {
   const [form, setForm] = useState({ name: '', email: '', phone: '', clientAs: '', note: '' });
@@ -17,6 +42,7 @@ export function RequestAccess(): JSX.Element {
   const [step, setStep] = useState<Step>({ at: 'form' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [photo, setPhoto] = useState<File | null>(null);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) =>
     setForm({ ...form, [k]: e.target.value });
 
@@ -34,7 +60,14 @@ export function RequestAccess(): JSX.Element {
           ...(form.note.trim() ? { note: form.note } : {}),
         },
       });
-      setStep({ at: 'confirm', id: r.requestId, sentTo: r.sentTo });
+      let idSent = false;
+      try {
+        if (photo) await sendIdPhoto(r.requestId, photo);
+        idSent = Boolean(photo);
+      } catch (err) {
+        setError(say(err));
+      }
+      setStep({ at: 'confirm', id: r.requestId, sentTo: r.sentTo, idSent });
     } catch (err) {
       setError(say(err));
     } finally {
@@ -50,6 +83,20 @@ export function RequestAccess(): JSX.Element {
     try {
       await api(`/access-requests/${step.id}/confirm`, { body: { code: code.trim() } });
       setStep({ at: 'done' });
+    } catch (err) {
+      setError(say(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryPhoto(): Promise<void> {
+    if (step.at !== 'confirm' || !photo) return;
+    setBusy(true);
+    setError('');
+    try {
+      await sendIdPhoto(step.id, photo);
+      setStep({ ...step, idSent: true });
     } catch (err) {
       setError(say(err));
     } finally {
@@ -89,6 +136,26 @@ export function RequestAccess(): JSX.Element {
       <FirmAuthLayout brand="Client portal" title="Confirm it is you">
         <form onSubmit={confirm} style={{ display: 'grid', gap: 12 }}>
           <p>We sent a 6-digit code to {step.sentTo}. Enter it to send your request to the firm.</p>
+          {!step.idSent && (
+            <div style={{ display: 'grid', gap: 8 }}>
+              <label style={{ display: 'grid', gap: 4 }}>
+                <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
+                <input
+                  type="file"
+                  accept={ID_ACCEPT}
+                  onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy || !photo}
+                onClick={() => void retryPhoto()}
+              >
+                Send photo ID
+              </Button>
+            </div>
+          )}
           <Input
             label="Code"
             name="code"
@@ -100,7 +167,7 @@ export function RequestAccess(): JSX.Element {
             required
           />
           {error && <p role="alert">{error}</p>}
-          <Button type="submit" disabled={busy || code.trim().length !== 6}>
+          <Button type="submit" disabled={busy || !step.idSent || code.trim().length !== 6}>
             Confirm
           </Button>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => void resend()}>
@@ -145,8 +212,24 @@ export function RequestAccess(): JSX.Element {
           value={form.note}
           onChange={set('note')}
         />
+        <label style={{ display: 'grid', gap: 4 }}>
+          <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
+          <input
+            type="file"
+            name="idPhoto"
+            accept={ID_ACCEPT}
+            aria-required="true"
+            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+          />
+          <span style={{ fontSize: 13 }}>
+            A photo from your phone or a scan. Only the firm sees it, to check who you are.
+          </span>
+        </label>
         {error && <p role="alert">{error}</p>}
-        <Button type="submit" disabled={busy || !(form.email.trim() || form.phone.trim())}>
+        <Button
+          type="submit"
+          disabled={busy || !photo || !(form.email.trim() || form.phone.trim())}
+        >
           Send request
         </Button>
       </form>
