@@ -11,7 +11,7 @@
 //   DELETE /api/firm/v1/clients/:id/invites/:invitationId
 //   PATCH  /api/firm/v1/clients/:id/users/:identityId      { active }
 //   GET    /api/firm/v1/access-requests                     (confirmed, pending)
-//   POST   /api/firm/v1/access-requests/:id/approve         { clientId, roleLabel? }
+//   POST   /api/firm/v1/access-requests/:id/approve         { clientId | clientIds[], roleLabel? }
 //   POST   /api/firm/v1/access-requests/:id/deny
 
 import express, { type Request, type RequestHandler, type Router } from 'express';
@@ -52,10 +52,14 @@ const InviteSchema = z.object({
   roleLabel: z.string().trim().max(60).default(''),
 });
 const AccessSchema = z.object({ active: z.boolean() });
-const ApproveSchema = z.object({
-  clientId: Uuid,
-  roleLabel: z.string().trim().max(60).default(''),
-});
+// P61: one or more clients. Vibe Files sends `clientId`; the staff page sends `clientIds`.
+const ApproveSchema = z
+  .object({
+    clientId: Uuid.optional(),
+    clientIds: z.array(Uuid).min(1).max(50).optional(),
+    roleLabel: z.string().trim().max(60).default(''),
+  })
+  .refine((a) => a.clientId || a.clientIds?.length, 'clientId or clientIds');
 
 function param(req: Request, name: string): string {
   const v = Uuid.safeParse(req.params[name]);
@@ -484,30 +488,39 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
     h(async (req, res) => {
       const id = param(req, 'id');
       const input = body(ApproveSchema, req);
-      const [client] = await ctx.db
+      const clientIds = [
+        ...new Set([...(input.clientIds ?? []), ...(input.clientId ? [input.clientId] : [])]),
+      ];
+      const found = await ctx.db
         .select()
         .from(schema.clients)
-        .where(eq(schema.clients.id, input.clientId));
-      if (!client) throw new HttpError(404, 'client_not_found');
-      if (!client.active) throw new HttpError(409, 'client_inactive');
+        .where(inArray(schema.clients.id, clientIds));
+      // Every client must exist and be switched on, or none is given (P61).
+      if (found.length !== clientIds.length) throw new HttpError(404, 'client_not_found');
+      if (found.some((c) => !c.active)) throw new HttpError(409, 'client_inactive');
       const actor = actorOf(req);
       const done = await ctx.db.transaction(async (tx) => {
         const [request] = await decide(tx, id, {
           status: 'approved',
-          clientId: input.clientId,
+          // The request keeps the first; History has one entry per client.
+          clientId: clientIds[0],
           decidedBy: actor.name,
         });
         if (!request) return null;
         if (!request.confirmedContact) throw new Error('confirmed request without its contact');
         // Only the contact the person proved is used (QA 2026-11-09).
-        const granted = await grantAccess(tx, {
-          clientId: input.clientId,
-          proved: request.confirmedContact,
-          name: request.name,
-          roleLabel: input.roleLabel,
-          by: actor.name,
-        });
-        return { to: request.confirmedContact, identityId: granted.identityId };
+        let identityId = '';
+        for (const clientId of clientIds) {
+          const granted = await grantAccess(tx, {
+            clientId,
+            proved: request.confirmedContact,
+            name: request.name,
+            roleLabel: input.roleLabel,
+            by: actor.name,
+          });
+          identityId = granted.identityId;
+        }
+        return { to: request.confirmedContact, identityId };
       });
       if (!done) throw new HttpError(404, 'not_found');
       const firm = await firmName(ctx);
@@ -519,12 +532,14 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           `${firm} has given you access to its client portal. Sign in at ${ctx.portalUrl}`,
         ),
       );
-      await record(ctx.db, 'approve', actor, {
-        clientId: input.clientId,
-        identityId: done.identityId,
-        detail: { accessRequestId: id },
-      });
-      res.json({ ok: true, identityId: done.identityId });
+      for (const clientId of clientIds) {
+        await record(ctx.db, 'approve', actor, {
+          clientId,
+          identityId: done.identityId,
+          detail: { accessRequestId: id },
+        });
+      }
+      res.json({ ok: true, identityId: done.identityId, clientIds });
     }),
   );
 

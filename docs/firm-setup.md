@@ -108,6 +108,10 @@ On the staff page, **Settings**:
     their email or phone, with their name and who they say they are with; their contact and
     note are on the staff page's **Access requests**, where you choose their client and approve
     or deny. Only staff who see every client can be ticked, since only they see the requests.
+    Someone who should see more than one client (a spouse on a joint return and the family
+    business, say): choose each client in turn before **Approve**; they sign in once and switch
+    between their clients at the top of their page. To add a client for someone later, invite
+    the same email or phone to it from Vibe Files.
 - **Portal keys**: **Make a key** for Vibe Files (next step). It is shown once.
 
 ## 5. Connect Vibe Files

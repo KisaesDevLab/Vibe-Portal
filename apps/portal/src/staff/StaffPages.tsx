@@ -1190,7 +1190,13 @@ function Requests(): JSX.Element {
   const reqs = useLoad<{ requests: AccessRequestRow[] }>('/v1/access-requests');
   const clients = useLoad<{ clients: ClientRow[] }>('/v1/clients');
   const { act, busy, error } = useAct(reqs.reload);
-  const [pick, setPick] = useState<Record<string, { client: string; role: string }>>({});
+  // P61: the clients chosen for each request (one or more).
+  const [pick, setPick] = useState<Record<string, { clients: string[]; role: string }>>({});
+  const active = (clients.data?.clients ?? []).filter((c) => c.active);
+  const nameOf = (id: string): string => {
+    const c = active.find((x) => x.id === id);
+    return c ? `${c.displayName}${c.clientCode ? ` (${c.clientCode})` : ''}` : id;
+  };
   return (
     <Card title="Access requests">
       <p>
@@ -1202,7 +1208,7 @@ function Requests(): JSX.Element {
       <Status load={clients} what="the clients" />
       {reqs.data?.requests.length === 0 && <p>No requests waiting.</p>}
       {(reqs.data?.requests ?? []).map((r) => {
-        const p = pick[r.id] ?? { client: '', role: '' };
+        const p = pick[r.id] ?? { clients: [], role: '' };
         const set = (v: Partial<typeof p>): void => setPick({ ...pick, [r.id]: { ...p, ...v } });
         return (
           <div
@@ -1221,11 +1227,19 @@ function Requests(): JSX.Element {
             {r.note && <span>“{r.note}”</span>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
               <label style={{ display: 'grid', gap: 4 }}>
-                <span>Client for {r.name}</span>
-                <select value={p.client} onChange={(e) => set({ client: e.target.value })}>
+                <span>
+                  {p.clients.length ? 'Add another client' : 'Client'} for {r.name}
+                </span>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (id && !p.clients.includes(id)) set({ clients: [...p.clients, id] });
+                  }}
+                >
                   <option value="">Choose…</option>
-                  {(clients.data?.clients ?? [])
-                    .filter((c) => c.active)
+                  {active
+                    .filter((c) => !p.clients.includes(c.id))
                     .map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.displayName} {c.clientCode && `(${c.clientCode})`}
@@ -1240,11 +1254,11 @@ function Requests(): JSX.Element {
                 onChange={(e) => set({ role: e.target.value })}
               />
               <Button
-                disabled={busy || !p.client}
+                disabled={busy || p.clients.length === 0}
                 aria-label={`Approve ${r.name}`}
                 onClick={() =>
                   void act(`/v1/access-requests/${r.id}/approve`, {
-                    body: { clientId: p.client, roleLabel: p.role },
+                    body: { clientIds: p.clients, roleLabel: p.role },
                   })
                 }
               >
@@ -1259,6 +1273,43 @@ function Requests(): JSX.Element {
                 Deny
               </Button>
             </div>
+            {p.clients.length > 0 && (
+              <ul
+                aria-label={`Clients for ${r.name}`}
+                style={{
+                  listStyle: 'none',
+                  margin: 0,
+                  padding: 0,
+                  display: 'flex',
+                  gap: 6,
+                  flexWrap: 'wrap',
+                }}
+              >
+                {p.clients.map((id) => (
+                  <li
+                    key={id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '2px 4px 2px 10px',
+                      borderRadius: 999,
+                      border: '1px solid var(--vibe-color-border)',
+                    }}
+                  >
+                    {nameOf(id)}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      aria-label={`Remove ${nameOf(id)} for ${r.name}`}
+                      onClick={() => set({ clients: p.clients.filter((x) => x !== id) })}
+                    >
+                      ×
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         );
       })}

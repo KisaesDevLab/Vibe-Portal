@@ -574,6 +574,73 @@ describe('QA 2026-11-09', () => {
     expect(await t.db.select().from(schema.clientAccess)).toHaveLength(1);
   });
 
+  it('approves one request for several clients at once (P61)', async () => {
+    const created = await request(app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'Mary Smith', email: 'mary@example.test', clientAs: 'Smith family' })
+      .expect(201);
+    const id = created.body.requestId as string;
+    await request(app)
+      .post(`/api/portal/access-requests/${id}/confirm`)
+      .send({ code: code('mary@example.test') })
+      .expect(200);
+    const res = await firm('post', `/access-requests/${id}/approve`)
+      .send({ clientIds: [CLIENT, OTHER, CLIENT], roleLabel: 'Spouse' })
+      .expect(200);
+    expect(res.body.clientIds).toEqual([CLIENT, OTHER]);
+    // One email, one account, both clients.
+    expect(notes.sent.filter((m) => m.to === 'mary@example.test')).toHaveLength(2); // code, approval
+    expect(await t.db.select().from(schema.portalIdentity)).toHaveLength(1);
+    const agent = request.agent(app);
+    await agent.post('/api/portal/auth/login').send({ contact: 'mary@example.test' }).expect(200);
+    await agent
+      .post('/api/portal/auth/verify-link')
+      .send({ token: linkToken('mary@example.test') })
+      .expect(200);
+    const me = await agent.get('/api/portal/auth/me').expect(200);
+    expect(me.body.clients).toEqual(
+      expect.arrayContaining([
+        { id: CLIENT, name: 'Smith, John' },
+        { id: OTHER, name: 'Smith Farms LLC' },
+      ]),
+    );
+    expect(me.body.clients).toHaveLength(2);
+    for (const c of [CLIENT, OTHER]) {
+      const users = await firm('get', `/clients/${c}/users`).expect(200);
+      expect(users.body.users).toEqual([
+        expect.objectContaining({ name: 'Mary Smith', roleLabel: 'Spouse', status: 'active' }),
+      ]);
+    }
+  });
+
+  it('several clients: one switched off or unknown, and nobody is given access (P61)', async () => {
+    const created = await request(app)
+      .post('/api/portal/access-requests')
+      .send({ name: 'M', email: 'm@example.test', clientAs: 'x' })
+      .expect(201);
+    const id = created.body.requestId as string;
+    await request(app)
+      .post(`/api/portal/access-requests/${id}/confirm`)
+      .send({ code: code('m@example.test') })
+      .expect(200);
+    const unknown = '33333333-3333-4333-8333-333333333333';
+    await firm('post', `/access-requests/${id}/approve`)
+      .send({ clientIds: [CLIENT, unknown] })
+      .expect(404);
+    await firm('put', `/clients/${OTHER}`)
+      .send({ displayName: 'Smith Farms LLC', active: false })
+      .expect(200);
+    await firm('post', `/access-requests/${id}/approve`)
+      .send({ clientIds: [CLIENT, OTHER] })
+      .expect(409);
+    await firm('post', `/access-requests/${id}/approve`).send({ clientIds: [] }).expect(400);
+    expect(await t.db.select().from(schema.portalIdentity)).toHaveLength(0);
+    // Still waiting: it can be approved for the right clients.
+    await firm('post', `/access-requests/${id}/approve`)
+      .send({ clientIds: [CLIENT] })
+      .expect(200);
+  });
+
   it('approving onto a switched-off client is refused', async () => {
     const created = await request(app)
       .post('/api/portal/access-requests')

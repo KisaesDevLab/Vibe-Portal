@@ -354,10 +354,66 @@ describe('staff page', () => {
     fireEvent.change(within(box).getByLabelText('Client for Jane Smith'), {
       target: { value: CLIENT.id },
     });
+    expect(
+      within(within(box).getByRole('list', { name: 'Clients for Jane Smith' })).getByText(
+        /Smith, John/,
+      ),
+    ).toBeTruthy();
     fireEvent.click(approve);
     await waitFor(() =>
       expect(calls.find((c) => c.path === '/v1/access-requests/r1/approve')?.body).toEqual({
-        clientId: CLIENT.id,
+        clientIds: [CLIENT.id],
+        roleLabel: '',
+      }),
+    );
+  });
+
+  it('approves an access request for several clients, and one can be taken off (P61)', async () => {
+    const farm = { ...CLIENT, id: 'c2', displayName: 'Smith Farms LLC', clientCode: 'FARM' };
+    const jones = { ...CLIENT, id: 'c3', displayName: 'Jones, Ann', clientCode: 'JONES' };
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/clients': { body: { clients: [CLIENT, farm, jones] } },
+      '/v1/access-requests': {
+        body: {
+          requests: [
+            {
+              id: 'r1',
+              name: 'Jane Smith',
+              email: 'jane@example.test',
+              phone: null,
+              confirmedContact: 'jane@example.test',
+              clientAs: 'The Smiths',
+              note: '',
+              createdAt: '2026-11-01T10:00:00Z',
+            },
+          ],
+        },
+      },
+      'POST /v1/access-requests/r1/approve': { body: { ok: true } },
+    });
+    at('/staff/requests');
+    const box = (await screen.findByText('Jane Smith')).parentElement as HTMLElement;
+    await within(box).findByRole('option', { name: /Smith, John/ });
+    fireEvent.change(within(box).getByLabelText('Client for Jane Smith'), {
+      target: { value: CLIENT.id },
+    });
+    // Once one is chosen it leaves the list, and the list offers another.
+    const more = within(box).getByLabelText('Add another client for Jane Smith');
+    expect(within(more).queryByRole('option', { name: /Smith, John/ })).toBeNull();
+    fireEvent.change(more, { target: { value: 'c2' } });
+    fireEvent.change(within(box).getByLabelText('Add another client for Jane Smith'), {
+      target: { value: 'c3' },
+    });
+    fireEvent.click(
+      within(box).getByRole('button', { name: 'Remove Jones, Ann (JONES) for Jane Smith' }),
+    );
+    const chosen = within(box).getByRole('list', { name: 'Clients for Jane Smith' });
+    expect(within(chosen).getAllByRole('listitem')).toHaveLength(2);
+    fireEvent.click(within(box).getByRole('button', { name: 'Approve Jane Smith' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === '/v1/access-requests/r1/approve')?.body).toEqual({
+        clientIds: [CLIENT.id, 'c2'],
         roleLabel: '',
       }),
     );

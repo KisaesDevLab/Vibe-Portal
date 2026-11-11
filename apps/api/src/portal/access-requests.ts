@@ -213,7 +213,7 @@ export async function tellStaff(ctx: Ctx, r: { name: string; clientAs: string })
         s.email,
         `Access request from ${r.name}`,
         `${r.name} asked for access to ${firm}'s client portal and confirmed their contact. ` +
-          `They say they are with: ${r.clientAs}\n\nChoose their client and approve or deny the ` +
+          `They say they are with: ${r.clientAs}\n\nChoose their clients and approve or deny the ` +
           `request on the staff page: ${link}`,
       ),
     );
