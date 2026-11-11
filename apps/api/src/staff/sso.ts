@@ -13,11 +13,16 @@
 //   - Vibe Auth's own second-factor policy is trusted (the portal does not ask for its code).
 //
 // Everything lives under /api/staff/sso/auth/...: the portal is served from the root, and its
-// client pages already use /auth/verify.
+// client pages already use /auth/verify. Two things the appliance expects at the root are also
+// answered there (ssoRouter): GET /auth/status (the console's check before it registers the
+// portal) and GET /auth/oidc/logged-out (the only sign-out return address the broker registers
+// with Vibe Auth, baseUrl + /auth/oidc/logged-out); sign-out names that root address.
 
 import {
   createPgStores,
   createVibeAuth,
+  sendHttpResponse,
+  toHttpRequest,
   type AuditSink,
   type QueryFn,
   type SecretWrap,
@@ -28,7 +33,7 @@ import {
   type VibeUser,
 } from '@kisaesdevlab/vibe-auth';
 import { and, count, eq, ne, or, sql, type SQL } from 'drizzle-orm';
-import type { Request, Response } from 'express';
+import express, { type NextFunction, type Request, type Response, type Router } from 'express';
 import { schema, type Database } from '@vibe-portal/db';
 
 import type { Ctx } from '../context';
@@ -297,4 +302,58 @@ export function createStaffSso(ctx: Ctx, sessions: StaffSessions): VibeAuth {
       error: (m, meta) => ctx.log.error(meta ?? {}, m),
     },
   });
+}
+
+/** Where Vibe Auth sends the browser after signing out: the root address the broker registers. */
+export function rootLogoutReturn(location: string): string {
+  let url: URL;
+  try {
+    url = new URL(location);
+  } catch {
+    return location;
+  }
+  const back = url.searchParams.get('post_logout_redirect_uri');
+  if (!back) return location;
+  try {
+    const b = new URL(back);
+    const tail = `${SSO_BASE}/auth/oidc/logged-out`;
+    if (!b.pathname.endsWith(tail)) return location;
+    b.pathname = b.pathname.slice(0, -tail.length) + '/auth/oidc/logged-out';
+    url.searchParams.set('post_logout_redirect_uri', b.toString());
+    return url.toString();
+  } catch {
+    return location;
+  }
+}
+
+/**
+ * Vibe Auth's routes for the app: under SSO_BASE as mounted, plus the two root addresses the
+ * appliance expects (see the top of this file).
+ */
+export function ssoRouter(auth: VibeAuth): Router {
+  const r = express.Router();
+  const run =
+    (path?: string) =>
+    async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+      try {
+        const httpReq = toHttpRequest(req, res);
+        if (path) httpReq.url = SSO_BASE + path;
+        const out = await auth.handle(httpReq);
+        if (!out) return next();
+        for (const k of Object.keys(out.headers)) {
+          const v = out.headers[k];
+          if (k.toLowerCase() === 'location' && typeof v === 'string') {
+            out.headers[k] = rootLogoutReturn(v);
+          }
+        }
+        sendHttpResponse(res, out);
+      } catch (err) {
+        next(err);
+      }
+    };
+  r.get('/auth/status', run('/auth/status'));
+  r.get('/auth/oidc/logged-out', run('/auth/oidc/logged-out'));
+  // The identity provider posts back-channel logout as a form.
+  r.use(SSO_BASE, express.urlencoded({ extended: false, limit: '64kb' }), run());
+  return r;
 }

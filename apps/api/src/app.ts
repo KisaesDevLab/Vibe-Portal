@@ -8,10 +8,9 @@ import type { HealthResponse } from '@vibe-portal/types';
 import { clientAuthRouter } from './auth/client-auth';
 import type { Ctx } from './context';
 import { firmRouter, staffApi } from './firm/routes';
-import { vibeAuthExpress } from '@kisaesdevlab/vibe-auth';
 
 import { requireStaff, staffAuthRouter } from './staff/auth';
-import { SSO_BASE } from './staff/sso';
+import { ssoRouter } from './staff/sso';
 import { brandingRouter, staffSettingsRouter } from './staff/settings';
 import { errorHandler, requireJson, TRUST_CF_IP } from './lib/http';
 import { accountRouter } from './portal/account';
@@ -84,13 +83,7 @@ export function createApp(deps: AppDeps): Express {
     app.use('/api/firm/v1', firmRouter(ctx));
     // P44: Vibe Auth's routes (staff sign-in by single sign-on). Before the JSON-only rule: the
     // identity provider posts back-channel logout as a form.
-    if (ctx.sso) {
-      app.use(
-        SSO_BASE,
-        express.urlencoded({ extended: false, limit: '64kb' }),
-        vibeAuthExpress(ctx.sso),
-      );
-    }
+    if (ctx.sso) app.use(ssoRouter(ctx.sso));
     // The staff web page (D13): staff sign-in, then the firm API's work and Settings.
     app.use('/api/staff', requireJson);
     app.use('/api/staff/auth', staffAuthRouter(ctx));

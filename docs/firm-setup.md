@@ -208,9 +208,8 @@ Vibe Auth is the appliance's single sign-on. When it is installed, the appliance
 registers the portal with it, gives the portal its settings and restarts it. Until an admin
 turns it on, staff sign in with their email, password and authenticator code as before.
 
-To turn it on, an admin opens **Settings › Sign-in with Vibe Auth** on the staff page, presses
-**Test connection** (it signs them in through Vibe Auth once), then picks Sign-in mode **both**
-and saves. Then:
+To turn it on, an admin opens **Settings › Sign-in with Vibe Auth** on the staff page, picks
+Sign-in mode **both** and saves. Then:
 
 - The staff sign-in page shows **Sign in with** and the firm's Vibe Auth name. Staff passwords
   still work beside it.
@@ -234,12 +233,15 @@ An admin chooses how staff sign in under **Sign-in mode** on **Settings › Sign
 | both         | The button, and the password sign-in under it  |
 | oidc_only    | Only the button. A password sign-in is refused |
 
-**oidc_only** needs two things first: a successful **Test connection** on that page, and
-the emergency account (`vibe-breakglass`) the appliance makes when it registers the portal. Its
+**oidc_only** needs two things first: a successful **Test connection** on that page, and the
+emergency account (`vibe-breakglass`) the appliance makes when it registers the portal. Its
 password is kept by the appliance console. If Vibe Auth is ever down, open
 `https://files.yourfirm.com/staff/login?local=1` and sign in with the email
 `vibe-breakglass@vibe-auth.local` and that password; it needs no authenticator code. The portal
 refuses to start in oidc_only without that account, so the firm is never locked out.
+
+Known problem (Vibe Auth 1.0.19): **Test connection** ends on a Vibe Auth "Not Found" page, so
+oidc_only cannot be chosen on that page yet. Use **both** until a Vibe Auth update fixes it.
 
 If Vibe Auth cannot be reached when the portal starts, the portal still starts; the button says
 Vibe Auth cannot be reached, and password sign-in (when allowed) works as usual.

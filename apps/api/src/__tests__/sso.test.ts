@@ -12,7 +12,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { createApp } from '../app';
 import { staffSessions } from '../staff/auth';
-import { BREAKGLASS_EMAIL, createStaffSso, queryFn, staffUsers } from '../staff/sso';
+import {
+  BREAKGLASS_EMAIL,
+  createStaffSso,
+  queryFn,
+  rootLogoutReturn,
+  staffUsers,
+} from '../staff/sso';
 import { world, type World } from './harness';
 
 let w: World;
@@ -43,6 +49,23 @@ describe('Vibe Auth staff sign-in (P44)', () => {
     const at = new Date('2026-11-10T12:00:00Z');
     await run('UPDATE x SET a = $1, b = $2 WHERE c = $1', [at, 'b']);
     expect(sent).toEqual(['2026-11-10T12:00:00.000Z', 'b', '2026-11-10T12:00:00.000Z']);
+  });
+
+  it('answers the appliance at the root: /auth/status and the sign-out return address', async () => {
+    const app = await withSso();
+    const s = await request(app).get('/auth/status').expect(200);
+    expect(s.body).toEqual(expect.objectContaining({ mode: 'local' }));
+    expect(typeof s.body.oidc).toBe('object');
+    const out = await request(app).get('/auth/oidc/logged-out').expect(200);
+    expect(out.text).toContain('/staff/login');
+    // The broker registers baseUrl + /auth/oidc/logged-out; sign-out must name exactly that.
+    const end =
+      'https://auth.example/application/o/p/end-session/?id_token_hint=x&post_logout_redirect_uri=' +
+      encodeURIComponent('https://files.example/api/staff/sso/auth/oidc/logged-out');
+    const back = new URL(rootLogoutReturn(end)).searchParams;
+    expect(back.get('post_logout_redirect_uri')).toBe('https://files.example/auth/oidc/logged-out');
+    expect(back.get('id_token_hint')).toBe('x');
+    expect(rootLogoutReturn('/staff/login')).toBe('/staff/login');
   });
 
   it('changes nothing until the firm turns it on', async () => {

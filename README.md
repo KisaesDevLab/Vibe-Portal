@@ -101,9 +101,8 @@ instead, see **Settings › Storage** on the staff page and
 ### Optional: staff sign in with Vibe Auth
 
 When Vibe Auth is installed on the appliance, the console registers the portal with it. An
-admin then turns it on: **Settings › Sign-in with Vibe Auth**, **Test connection**, and Sign-in
-mode **both**. The staff sign-in page gets a **Sign in with …** button beside the password
-sign-in. Anyone in Vibe Auth can then sign in to the staff page; an account is made the first
+admin then turns it on: **Settings › Sign-in with Vibe Auth**, Sign-in mode **both**, Save. The staff sign-in page gets a **Sign in with …** button beside
+the password sign-in. Anyone in Vibe Auth can then sign in to the staff page; an account is made the first
 time. Vibe Auth's groups decide who is an admin (vibe-admin, vibe-it and vibe-partner are
 admins; others are staff), and Vibe Auth asks for the second step, not the portal. See
 [docs/firm-setup.md](docs/firm-setup.md#staff-sign-in-with-vibe-auth-optional).
