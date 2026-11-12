@@ -455,7 +455,7 @@ describe('portal', () => {
     at('/');
     fireEvent.click(await screen.findByRole('button', { name: 'Remove W-2.pdf' }));
     expect(screen.queryByRole('button', { name: 'Remove 1099.pdf' })).toBeNull();
-    expect(screen.getByText(/received by the firm/)).toBeTruthy();
+    expect(screen.getByText('Received')).toBeTruthy();
     await waitFor(() => expect(calls.find((c) => c.path === '/uploads/u1')?.method).toBe('DELETE'));
   });
 
@@ -553,5 +553,40 @@ describe('portal', () => {
     expect(
       (screen.getByRole('button', { name: 'Send 21 files' }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+});
+
+describe('the client link at the top (P76)', () => {
+  it('shows the message and opens the link in a new tab', async () => {
+    serve({
+      '/auth/me': { body: ME },
+      '/client-link': {
+        body: {
+          link: {
+            url: 'https://pay.example.com/c/1',
+            message: 'Your invoice is ready.',
+            button: 'Pay now',
+          },
+        },
+      },
+    });
+    at('/');
+    expect(await screen.findByText('Your invoice is ready.')).toBeTruthy();
+    const a = screen.getByRole('link', { name: /Pay now/ }) as HTMLAnchorElement;
+    expect(a.href).toBe('https://pay.example.com/c/1');
+    expect(a.target).toBe('_blank');
+    expect(a.rel).toContain('noopener');
+  });
+
+  it('never shows a link that is not a web address', async () => {
+    serve({
+      '/auth/me': { body: ME },
+      '/client-link': {
+        body: { link: { url: 'javascript:alert(1)', message: 'Bad', button: 'Go' } },
+      },
+    });
+    at('/');
+    await screen.findByText('Signed in as John Smith.');
+    expect(screen.queryByText('Bad')).toBeNull();
   });
 });

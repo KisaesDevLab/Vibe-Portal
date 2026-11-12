@@ -41,6 +41,7 @@ import { Reveal } from '../components/Reveal';
 import { AuthSettingsPage } from '@kisaesdevlab/vibe-auth/react';
 import { usePages, useUrlSearch, useUrlState } from '../paging';
 import { ApiError } from '../api';
+import { ClientLinksImport, ClientPortalLink } from './ClientLinks';
 import {
   staffApi,
   staffSay,
@@ -443,6 +444,9 @@ const td = { padding: '6px 8px', borderTop: '1px solid var(--vibe-color-border)'
 
 function Clients({ limited }: { limited: boolean }): JSX.Element {
   const load = useLoad<{ clients: ClientRow[] }>('/v1/clients');
+  // P76: which clients have a link at the top of their portal.
+  const links = useLoad<{ links: { clientId: string }[] }>('/v1/client-links');
+  const linked = new Set((links.data?.links ?? []).map((l) => l.clientId));
   const [typed, q, setTyped] = useUrlSearch();
   const rows = (load.data?.clients ?? []).filter((c) =>
     `${c.displayName} ${c.clientCode}`.toLowerCase().includes(q.trim().toLowerCase()),
@@ -455,6 +459,9 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
         shared from Vibe Files.
       </p>
       {limited && <p>You see the clients an admin chose for you.</p>}
+      <div style={{ marginBottom: 12 }}>
+        <ClientLinksImport onChanged={links.reload} />
+      </div>
       <Input
         label="Find a client"
         name="q"
@@ -471,7 +478,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
               : 'No clients on the portal yet.'}
         </p>
       )}
-      <Table head={['Client', 'ID', 'People', 'Files', 'Uploads waiting']}>
+      <Table head={['Client', 'ID', 'People', 'Files', 'Uploads waiting', 'Portal link']}>
         {slice.map((c) => (
           <tr key={c.id}>
             <td style={td}>
@@ -484,6 +491,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
             <td style={td}>{c.users}</td>
             <td style={td}>{c.files}</td>
             <td style={td}>{c.waiting}</td>
+            <td style={td}>{linked.has(c.id) ? 'Yes' : ''}</td>
           </tr>
         ))}
       </Table>
@@ -684,6 +692,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
           </Reveal>
         )}
       </Card>
+      <ClientPortalLink clientId={id} onChanged={history.reload} />
       <ClientFiles
         load={files}
         people={people.data?.users ?? []}
@@ -814,6 +823,8 @@ const DID: Record<string, string> = {
   client_added: 'Client added',
   sign_in_link_sent: 'Sign-in link sent',
   id_viewed: 'Looked at a photo ID',
+  client_link_set: 'Portal link set',
+  client_link_removed: 'Portal link removed',
 };
 
 /** What happened on one client (P65), or what one person did and had done (P66), newest first. */

@@ -9,6 +9,7 @@ import { Button, CloseIcon, Input, tokens } from '@vibe/ui';
 
 import { ActionButton, Actions, ItemRow } from '../components/Action';
 import { Select, TextArea } from '../components/Field';
+import { Section } from '../components/FileKind';
 
 import { api, say } from '../api';
 import { usePages } from '../paging';
@@ -205,13 +206,17 @@ export function ClientLinksList({
     onChanged();
   }
   return (
-    <section aria-label="Links you sent" style={{ display: 'grid', gap: 8 }}>
-      <h2 style={{ fontSize: 16, margin: 0 }}>Links you sent</h2>
+    <Section
+      id="links-heading"
+      title="Links you sent"
+      sub="Secure links to files, sent to people outside. You can end a link at any time."
+    >
       {error && <p role="alert">{error}</p>}
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+      <ul className="p-list">
         {slice.map((l) => (
           <ItemRow
             key={l.id}
+            bare
             title={l.files.map((f) => f.name).join(', ')}
             meta={
               <>
@@ -240,6 +245,7 @@ export function ClientLinksList({
               l.status === 'sent' || l.status === 'opened' ? (
                 <Actions>
                   <ActionButton
+                    tone="red"
                     onClick={() => void stop(l)}
                     ariaLabel={`End the link sent to ${l.email}`}
                     icon={<CloseIcon size={16} />}
@@ -252,6 +258,6 @@ export function ClientLinksList({
         ))}
       </ul>
       {pager}
-    </section>
+    </Section>
   );
 }

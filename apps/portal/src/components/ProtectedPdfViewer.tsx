@@ -282,6 +282,7 @@ export function ProtectedPdfViewer({
       {canDownload ? (
         <div style={{ marginTop: tokens.space.sm }}>
           <ActionDownload
+            tone="green"
             href={downloadUrl ?? url}
             filename={filename}
             label="Download PDF"

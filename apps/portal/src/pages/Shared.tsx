@@ -336,7 +336,7 @@ export function Shared(): JSX.Element {
                 <Actions>
                   {f.preview && (
                     <ActionButton
-                      tone={viewing === f.id ? 'primary' : 'default'}
+                      tone={viewing === f.id ? 'primary' : 'blue'}
                       pressed={viewing === f.id}
                       ariaLabel={`View ${f.name}`}
                       onClick={() => setViewing(f.id)}
@@ -346,6 +346,7 @@ export function Shared(): JSX.Element {
                   )}
                   {canDl(f) && (
                     <ActionDownload
+                      tone="green"
                       href={url(f, 'download')}
                       filename={f.name}
                       ariaLabel={`Download ${f.name}`}

@@ -40,7 +40,8 @@ export function Input({
     <div style={{ fontFamily: tokens.font.body }}>
       <label htmlFor={inputId} style={{ display: 'block' }}>
         {label && (
-          <div style={{ fontSize: 12, color: tokens.color.textMuted, marginBottom: 4 }}>
+          // Vibe Portal (owner 2026-11-11, readability): 13 px in the text colour, not 12 px grey.
+          <div style={{ fontSize: 13, fontWeight: 500, color: tokens.color.text, marginBottom: 6 }}>
             {label}
           </div>
         )}
@@ -67,7 +68,7 @@ export function Input({
         <div
           id={hintId}
           style={{
-            fontSize: 12,
+            fontSize: 13,
             color: tokens.color.textMuted,
             marginTop: 4,
           }}

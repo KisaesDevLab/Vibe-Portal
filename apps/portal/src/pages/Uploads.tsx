@@ -4,11 +4,13 @@
 // sent one after another with progress. "Your uploads" shows what was sent; a file can be
 // removed until the firm has received it (P32).
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { Button, tokens, Trash } from '@vibe/ui';
+import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { Button, CloseIcon, EmptyState, Trash } from '@vibe/ui';
 
 import { ActionButton, Actions, ItemRow } from '../components/Action';
 import { Select, TextArea } from '../components/Field';
+import { Badge, FileTile, Section, UploadIcon } from '../components/FileKind';
+import { dateText, sizeText } from './Files';
 
 import { api, ApiError, say } from '../api';
 
@@ -76,6 +78,34 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
   const [staff, setStaff] = useState<{ id: string; name: string }[]>([]);
   const [tell, setTell] = useState('');
   const [told, setTold] = useState('');
+  const [over, setOver] = useState(false);
+
+  /** Files chosen or dropped are added to the list (the same file once). */
+  const add = (list: File[]): void => {
+    setResults([]);
+    setTold('');
+    setChosen((had) => [
+      ...had,
+      ...list.filter(
+        (f) =>
+          !had.some(
+            (h) => h.name === f.name && h.size === f.size && h.lastModified === f.lastModified,
+          ),
+      ),
+    ]);
+  };
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const drop = (e: DragEvent): void => {
+    e.preventDefault();
+    setOver(false);
+    if (busy) return;
+    // The chooser offers only these kinds; a dropped file is held to the same.
+    const kinds = ACCEPT.split(',');
+    const all = Array.from(e.dataTransfer.files);
+    const ok = all.filter((f) => kinds.some((k) => f.name.toLowerCase().endsWith(k)));
+    setSkipped(all.filter((f) => !ok.includes(f)).map((f) => f.name));
+    add(ok);
+  };
 
   useEffect(() => {
     setTell('');
@@ -146,6 +176,7 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
       }
     }
     setBusy(false);
+    setSkipped([]);
     setChosen([]);
     setNote('');
     if (input.current) input.current.value = '';
@@ -163,118 +194,197 @@ export function Uploads({ clientId }: { clientId: string }): JSX.Element {
   }
 
   const tooMany = chosen.length > BATCH_MAX;
+  const mb = limitBytes > 0 ? Math.floor(limitBytes / 1048576) : 0;
   return (
-    <section aria-label="Send files to the firm" style={{ display: 'grid', gap: 12 }}>
-      <h2 style={{ fontSize: 16, margin: 0 }}>Send files to the firm</h2>
-      <form onSubmit={send} style={{ display: 'grid', gap: 8 }}>
-        <label
-          style={{
-            display: 'grid',
-            gap: 8,
-            padding: 16,
-            border: `1px dashed ${tokens.color.border}`,
-            borderRadius: tokens.radius.md,
-            background: tokens.color.bg,
-          }}
-        >
-          <span style={{ fontSize: 12, color: tokens.color.textMuted }}>
-            Files (up to {BATCH_MAX}: PDF, photos, Word, Excel, CSV or text)
-          </span>
-          <input
-            ref={input}
-            type="file"
-            multiple
-            accept={ACCEPT}
-            onChange={(e) => setChosen(Array.from(e.target.files ?? []))}
-          />
-          {chosen.length > 1 && (
-            <small style={{ color: tokens.color.textMuted, overflowWrap: 'anywhere' }}>
-              {chosen.map((c) => c.name).join(', ')}
-            </small>
-          )}
-        </label>
-        {tooMany && <p role="alert">Choose at most {BATCH_MAX} files at a time.</p>}
-        <TextArea
-          label="Note for the firm (optional)"
-          value={note}
-          maxLength={1000}
-          rows={2}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        {staff.length > 0 && (
-          <Select
-            label="Let someone at the firm know (optional)"
-            value={tell}
-            onChange={(e) => setTell(e.target.value)}
+    <>
+      <Section
+        id="send-heading"
+        title="Send files to the firm"
+        sub="Tax documents, statements, receipts: anything the firm asked for."
+      >
+        <form onSubmit={send} style={{ display: 'grid', gap: 16 }}>
+          {/* The whole area opens the file chooser; files can also be dropped on it. */}
+          <label
+            className={`p-drop${over ? ' is-over' : ''}`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setOver(true);
+            }}
+            onDragLeave={() => setOver(false)}
+            onDrop={drop}
           >
-            <option value="">No one in particular</option>
-            {staff.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </Select>
-        )}
-        <Button type="submit" disabled={busy || chosen.length === 0 || tooMany}>
-          {busy ? 'Sending…' : chosen.length > 1 ? `Send ${chosen.length} files` : 'Send'}
-        </Button>
-        {progress && (
-          <div style={{ display: 'grid', gap: 4 }}>
-            {/* Announced when a new file starts; the bar shows how far (not read out). */}
-            <p role="status" style={{ margin: 0, overflowWrap: 'anywhere' }}>
-              {progress.label}
-            </p>
-            <progress
-              value={progress.pct}
-              max={100}
-              aria-label={`${progress.label}, ${progress.pct}%`}
-              style={{ width: '100%' }}
+            <span className="p-drop-icon">
+              <UploadIcon />
+            </span>
+            <span>
+              <span className="p-drop-choose">Choose files</span> or drag them here
+            </span>
+            <small>
+              Up to {BATCH_MAX} at a time: PDF, photos, Word, Excel, CSV or text
+              {mb ? `, ${mb} MB each at most` : ''}
+            </small>
+            <input
+              ref={input}
+              className="visually-hidden"
+              type="file"
+              multiple
+              accept={ACCEPT}
+              disabled={busy}
+              aria-label={`Files (up to ${BATCH_MAX}: PDF, photos, Word, Excel, CSV or text)`}
+              onChange={(e) => {
+                setSkipped([]);
+                add(Array.from(e.target.files ?? []));
+                // The same file can be chosen again after it is taken off the list.
+                e.target.value = '';
+              }}
             />
-          </div>
-        )}
-        {told && <p role="status">{told}</p>}
-        {results.length > 0 && (
-          <ul aria-label="Sent" style={{ margin: 0 }}>
-            {results.map((r, i) => (
-              <li key={i}>
-                {r.name}: {r.error ? <span role="alert">{r.error}</span> : 'sent'}
-              </li>
+          </label>
+          {chosen.length > 0 && (
+            <ul className="p-list" aria-label="Files to send">
+              {chosen.map((c, i) => (
+                <li
+                  key={`${c.name}-${c.size}-${c.lastModified}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0' }}
+                >
+                  <FileTile name={c.name} contentType={c.type} small />
+                  <span style={{ flex: '1 1 auto', minWidth: 0, overflowWrap: 'anywhere' }}>
+                    {c.name}
+                    <span className="p-sub" style={{ fontSize: 13 }}>
+                      {' '}
+                      · {sizeText(c.size)}
+                    </span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    aria-label={`Take ${c.name} off the list`}
+                    onClick={() => setChosen((l) => l.filter((_, k) => k !== i))}
+                  >
+                    <CloseIcon size={16} />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {skipped.length > 0 && (
+            <p role="alert" style={{ overflowWrap: 'anywhere' }}>
+              Not added (the portal does not take this kind of file): {skipped.join(', ')}
+            </p>
+          )}
+          <p role="status" className="visually-hidden">
+            {chosen.length === 0
+              ? ''
+              : `${chosen.length} ${chosen.length === 1 ? 'file' : 'files'} chosen`}
+          </p>
+          {tooMany && <p role="alert">Choose at most {BATCH_MAX} files at a time.</p>}
+          {chosen.length > 0 && (
+            <>
+              <div className={staff.length > 0 ? 'p-form-grid' : undefined}>
+                <TextArea
+                  label="Note for the firm (optional)"
+                  value={note}
+                  maxLength={1000}
+                  rows={2}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+                {staff.length > 0 && (
+                  <Select
+                    label="Let someone at the firm know (optional)"
+                    value={tell}
+                    onChange={(e) => setTell(e.target.value)}
+                  >
+                    <option value="">No one in particular</option>
+                    {staff.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </div>
+              <div className="p-form-end">
+                <Button type="submit" disabled={busy || tooMany} style={{ minWidth: 160 }}>
+                  {busy ? 'Sending…' : chosen.length > 1 ? `Send ${chosen.length} files` : 'Send'}
+                </Button>
+              </div>
+            </>
+          )}
+          {progress && (
+            <div style={{ display: 'grid', gap: 4 }}>
+              {/* Announced when a new file starts; the bar shows how far (not read out). */}
+              <p role="status" style={{ margin: 0, overflowWrap: 'anywhere' }}>
+                {progress.label}
+              </p>
+              <progress
+                value={progress.pct}
+                max={100}
+                aria-label={`${progress.label}, ${progress.pct}%`}
+                style={{ width: '100%' }}
+              />
+            </div>
+          )}
+          {told && <p role="status">{told}</p>}
+          {results.length > 0 && (
+            <ul aria-label="Sent" style={{ margin: 0, paddingLeft: 20 }}>
+              {results.map((r, i) => (
+                <li key={i} style={{ overflowWrap: 'anywhere' }}>
+                  {r.name}: {r.error ? <span role="alert">{r.error}</span> : 'sent'}
+                </li>
+              ))}
+            </ul>
+          )}
+        </form>
+      </Section>
+
+      <Section
+        id="uploads-heading"
+        title="Your uploads"
+        sub="A file can be removed until the firm has received it."
+      >
+        {error && <p role="alert">{error}</p>}
+        {uploads === null ? (
+          <p role="status">Loading…</p>
+        ) : uploads.length === 0 ? (
+          <EmptyState
+            title="You have not sent any files yet."
+            body="Files you send appear here, with whether the firm has them."
+            style={{ padding: '8px 16px 12px' }}
+          />
+        ) : (
+          <ul className="p-list">
+            {uploads.map((u) => (
+              <ItemRow
+                key={u.id}
+                bare
+                icon={<FileTile name={u.name} />}
+                title={u.name}
+                badge={
+                  u.received ? (
+                    <Badge tone="success">Received</Badge>
+                  ) : (
+                    <Badge>Waiting for the firm</Badge>
+                  )
+                }
+                meta={`Sent ${dateText(u.uploadedAt)}`}
+                actions={
+                  u.received ? undefined : (
+                    <Actions>
+                      <ActionButton
+                        tone="red"
+                        onClick={() => void remove(u.id)}
+                        ariaLabel={`Remove ${u.name}`}
+                        icon={<Trash size={16} />}
+                        label="Remove"
+                      />
+                    </Actions>
+                  )
+                }
+              />
             ))}
           </ul>
         )}
-      </form>
-
-      <h3 style={{ fontSize: 14, margin: 0 }}>Your uploads</h3>
-      {error && <p role="alert">{error}</p>}
-      {uploads === null ? (
-        <p role="status">Loading…</p>
-      ) : uploads.length === 0 ? (
-        <p>You have not sent any files yet.</p>
-      ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-          {uploads.map((u) => (
-            <ItemRow
-              key={u.id}
-              title={u.name}
-              meta={`Sent ${new Date(u.uploadedAt).toLocaleDateString()} · ${
-                u.received ? 'received by the firm' : 'waiting for the firm'
-              }`}
-              actions={
-                u.received ? undefined : (
-                  <Actions>
-                    <ActionButton
-                      onClick={() => void remove(u.id)}
-                      ariaLabel={`Remove ${u.name}`}
-                      icon={<Trash size={16} />}
-                      label="Remove"
-                    />
-                  </Actions>
-                )
-              }
-            />
-          ))}
-        </ul>
-      )}
-    </section>
+      </Section>
+    </>
   );
 }

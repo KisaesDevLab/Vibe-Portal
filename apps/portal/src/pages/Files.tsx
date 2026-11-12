@@ -4,10 +4,11 @@
 // filter and a search (P19). PDFs and pictures open in the portal (P22); everything downloads.
 
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Download, EmptyState, Eye, Input, Pill, ShareIcon } from '@vibe/ui';
+import { Button, Download, EmptyState, Eye, ShareIcon } from '@vibe/ui';
 
 import { ActionButton, ActionDownload, ActionLink, Actions, ItemRow } from '../components/Action';
-import { Select } from '../components/Field';
+import { SearchField, Select } from '../components/Field';
+import { Badge, FileTile } from '../components/FileKind';
 import { usePages, useUrlState } from '../paging';
 import { api, say } from '../api';
 
@@ -32,7 +33,7 @@ export function sizeText(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function dateText(iso: string): string {
+export function dateText(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -43,8 +44,11 @@ function dateText(iso: string): string {
 export function Files({
   clientId,
   onSend,
+  onCount,
 }: {
   clientId: string;
+  /** How many files there are (shown beside the heading). */
+  onCount?: (n: number) => void;
   /** P55: when the firm allows clients to send secure links, beside each file. */
   onSend?: (f: PortalFile) => void;
 }): JSX.Element {
@@ -73,9 +77,10 @@ export function Files({
       .then((r) => {
         setFiles(r.files);
         setYears(r.years);
+        if (!params.toString()) onCount?.(r.files.length);
       })
       .catch((err: unknown) => setError(say(err)));
-  }, [year, query]);
+  }, [year, query, onCount]);
 
   useEffect(load, [load, clientId]);
 
@@ -97,13 +102,12 @@ export function Files({
 
   const filtering = Boolean(year || query);
   return (
-    <section aria-label="Files" style={{ display: 'grid', gap: 12 }}>
+    <div style={{ display: 'grid', gap: 8 }}>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'end' }}>
         <div style={{ flex: '1 1 220px' }}>
-          <Input
+          <SearchField
             label="Search"
             name="search"
-            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="File name"
@@ -132,12 +136,14 @@ export function Files({
           }
         />
       ) : (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        <ul className="p-list">
           {page.map((f) => (
             <ItemRow
               key={f.id}
+              bare
+              icon={<FileTile name={f.name} contentType={f.contentType} />}
               title={f.name}
-              badge={f.isNew ? <Pill tone="accent">New</Pill> : undefined}
+              badge={f.isNew ? <Badge tone="accent">New</Badge> : undefined}
               meta={
                 <>
                   {f.updatedAt
@@ -150,6 +156,7 @@ export function Files({
                 <Actions>
                   {f.preview && (
                     <ActionLink
+                      tone="blue"
                       to={`/files/${f.id}`}
                       state={{ file: f }}
                       onClick={() => opened(f.id)}
@@ -159,6 +166,7 @@ export function Files({
                     />
                   )}
                   <ActionDownload
+                    tone="green"
                     href={contentUrl(f.id, 'download')}
                     filename={f.name}
                     onClick={() => opened(f.id)}
@@ -168,6 +176,7 @@ export function Files({
                   />
                   {onSend && (
                     <ActionButton
+                      tone="violet"
                       onClick={() => onSend(f)}
                       ariaLabel={`Send ${f.name} to someone outside`}
                       icon={<ShareIcon size={16} />}
@@ -181,6 +190,6 @@ export function Files({
         </ul>
       )}
       {pager}
-    </section>
+    </div>
   );
 }

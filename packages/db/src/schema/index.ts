@@ -170,6 +170,18 @@ export const clients = pgTable('clients', {
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
+/** P76: a client's link from another service, shown at the top of its portal. */
+export const clientLink = pgTable('client_link', {
+  clientId: uuid('client_id')
+    .primaryKey()
+    .references(() => clients.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  message: text('message').notNull(),
+  button: text('button').notNull(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+  updatedBy: text('updated_by').notNull().default(''),
+});
+
 /** The clients a limited staff member sees (P48); used only while `allClients` is false. */
 export const staffClient = pgTable(
   'staff_client',

@@ -7,6 +7,7 @@ import type { HealthResponse } from '@vibe-portal/types';
 
 import { clientAuthRouter } from './auth/client-auth';
 import type { Ctx } from './context';
+import { clientLinkRouter } from './portal/client-link';
 import { firmRouter, staffApi } from './firm/routes';
 
 import { requireStaff, staffAuthRouter } from './staff/auth';
@@ -60,6 +61,8 @@ export function createApp(deps: AppDeps): Express {
     const ctx = deps.ctx;
     // A staff member's client list can be long (up to 20,000 ids): that route takes more.
     app.use('/api/staff/v1/staff', express.json({ limit: '1mb' }));
+    // P76: a CSV of client links, one row per client.
+    app.use('/api/staff/v1/client-links/import', express.json({ limit: '3mb' }));
     // JSON bodies only; file uploads (application/octet-stream) are streamed by their route.
     app.use('/api', express.json({ limit: '64kb' }));
     // Cookie-signed client calls must be JSON (no cross-site form posts). The firm API is
@@ -75,6 +78,8 @@ export function createApp(deps: AppDeps): Express {
     app.use('/api/portal/files', clientFilesRouter(ctx));
     // The signed-in person's own account: the mobile number they sign in with (P50).
     app.use('/api/portal/account', accountRouter(ctx));
+    // P76: the active client's link from another service, for the top of the home page.
+    app.use('/api/portal/client-link', clientLinkRouter(ctx));
     app.use('/api/portal/uploads', clientUploadsRouter(ctx, deps.convertHeic));
     // Someone outside the client, with a secure link (P49): no account, no session.
     app.use('/api/portal/shared', sharedRouter(ctx));

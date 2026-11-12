@@ -326,6 +326,30 @@ clients each can see. Find a person by name, email or mobile number, and open th
 - **Activity**: what they did and what staff did about them, newest first, with the client each
   was on.
 
+## A link at the top of a client's portal
+
+A client can have its own link from another service (for example, to pay an invoice or book a
+meeting), shown at the top of their portal as a short message and a button that opens the link
+in a new tab. Any staff member can set it for the clients they see.
+
+- **One client:** on the client's page, **Link on the portal** > **Add a link** (or **Change**,
+  **Remove**). Enter the message, the button text (Open if empty) and the URL. The preview shows
+  how it looks.
+- **Many clients:** on **Clients**, **Portal links from a CSV…**. The file needs a header row
+  with `client_code` and/or `client_name`, `url`, `message` and, if you like, `button`:
+
+  ```
+  client_code,client_name,url,message,button
+  SMIJ01,"Smith, John",https://pay.example.com/c/8f2a,Your invoice is ready.,Pay now
+  ```
+
+  Rows are matched by client code first, then by name. Choosing the file only checks it: the
+  table says what each row would do, and nothing changes until **Apply**. A row replaces that
+  client's link; a row with no URL removes it. **Download the current links** gives the same
+  format, to edit in a spreadsheet and upload again.
+
+Links must start with `https://` (or `http://`).
+
 ## When something is wrong
 
 | What you see                                                                 | What to check                                                                                                                                                                           |

@@ -22,6 +22,11 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Full-width bars reach the window's edges (browsers add 8 px round the page by default). */
+body {
+  margin: 0;
+}
+
 a,
 button,
 summary,
@@ -278,4 +283,460 @@ html[data-narrow='1'] table.staff-table td button {
 
 .vauth-error {
   color: var(--vibe-color-danger);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * The client's home (owner 2026-11-11: "modern UI and readability"). A tinted page with white
+ * cards in light mode, one type scale (page 26, section 18, body 15, details 13), file-type
+ * tiles, quiet row actions that never wrap under a long name, a drop zone, status badges.
+ * ------------------------------------------------------------------------------------------- */
+
+:root,
+[data-theme='dark'] {
+  --p-shadow: none;
+  --p-hover: #1a2029;
+  --p-badge-fg: #c9d1d9;
+  --p-badge-bg: #1f2630;
+  --p-ok-fg: #86efac;
+  --p-ok-bg: rgba(34, 197, 94, 0.15);
+  --p-warn-fg: #fcd34d;
+  --p-warn-bg: rgba(245, 158, 11, 0.15);
+  --p-tint: 22%;
+  --p-pdf: #f87171;
+  --p-image: #a78bfa;
+  --p-sheet: #4ade80;
+  --p-doc: #60a5fa;
+}
+
+/* Light: the page is tinted and cards and fields are white, so cards stand out from the page
+ * (theme.css, kept as copied, has a white page with grey cards). */
+[data-theme='light'] {
+  --vibe-color-bg: #f3f5f8;
+  --vibe-color-surface: #ffffff;
+  --vibe-color-border: #dde3ea;
+  --vibe-color-text-muted: #556070;
+  --p-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 2px 6px rgba(16, 24, 40, 0.05);
+  --p-hover: #f1f4f8;
+  --p-badge-fg: #374151;
+  --p-badge-bg: #eef1f5;
+  --p-ok-fg: #166534;
+  --p-ok-bg: #dcfce7;
+  --p-warn-fg: #92400e;
+  --p-warn-bg: #fef3c7;
+  --p-tint: 12%;
+  --p-pdf: #dc2626;
+  --p-image: #7c3aed;
+  --p-sheet: #16a34a;
+  --p-doc: #2563eb;
+}
+
+.p-topbar {
+  background: var(--vibe-color-surface);
+  border-bottom: 1px solid var(--vibe-color-border);
+}
+.p-topbar-inner,
+.p-page {
+  box-sizing: border-box;
+  max-width: 960px;
+  margin: 0 auto;
+  padding-left: 24px;
+  padding-right: 24px;
+}
+.p-topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 64px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.p-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font-size: 17px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.p-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.p-page {
+  display: grid;
+  gap: 20px;
+  padding-top: 28px;
+  padding-bottom: 48px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+.p-page p {
+  margin: 0;
+}
+
+.p-intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+.p-intro h1 {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.p-sub {
+  color: var(--vibe-color-text-muted);
+}
+.p-intro .p-sub {
+  margin-top: 4px;
+}
+.p-switch {
+  width: 280px;
+  max-width: 100%;
+}
+
+.p-section {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px 24px;
+  border: 1px solid var(--vibe-color-border);
+  border-radius: 14px;
+  background: var(--vibe-color-surface);
+  box-shadow: var(--p-shadow);
+}
+.p-section-head {
+  display: grid;
+  gap: 2px;
+}
+.p-section-head h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+  font-weight: 600;
+}
+.p-section-head .p-sub {
+  font-size: 14px;
+}
+.p-count {
+  margin-left: 6px;
+  color: var(--vibe-color-text-muted);
+  font-size: 15px;
+  font-weight: 400;
+}
+
+/* Status: tinted, with text dark (light) or light (dark) enough to read. */
+.p-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+  color: var(--p-badge-fg);
+  background: var(--p-badge-bg);
+}
+.p-badge.is-accent {
+  color: var(--vibe-link);
+  background: color-mix(in srgb, var(--vibe-color-accent) var(--p-tint), transparent);
+}
+.p-badge.is-success {
+  color: var(--p-ok-fg);
+  background: var(--p-ok-bg);
+}
+.p-badge.is-warning {
+  color: var(--p-warn-fg);
+  background: var(--p-warn-bg);
+}
+
+/* A file's kind at a glance. */
+.p-tile {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: var(--p-tile, var(--vibe-color-text-muted));
+  background: color-mix(
+    in srgb,
+    var(--p-tile, var(--vibe-color-text-muted)) var(--p-tint),
+    transparent
+  );
+}
+.p-tile.is-small {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+.p-tile.is-pdf {
+  --p-tile: var(--p-pdf);
+}
+.p-tile.is-image {
+  --p-tile: var(--p-image);
+}
+.p-tile.is-sheet {
+  --p-tile: var(--p-sheet);
+}
+.p-tile.is-doc {
+  --p-tile: var(--p-doc);
+}
+
+/* Lists: a divider between rows, none under the last. */
+.p-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.p-list > li + li {
+  border-top: 1px solid var(--vibe-color-border);
+}
+
+/* An icon beside a label keeps its size when a narrow button squeezes the label. */
+button > svg,
+a > svg {
+  flex: none;
+}
+
+/* Coloured row actions (owner 2026-11-11): tinted, one colour per kind of action. Text on its
+ * tint is at least 4.5:1 in both themes. */
+:root,
+[data-theme='dark'] {
+  --p-blue-fg: #93c5fd;
+  --p-blue-bg: rgba(59, 130, 246, 0.16);
+  --p-blue-line: rgba(96, 165, 250, 0.4);
+  --p-blue-hover: rgba(59, 130, 246, 0.26);
+  --p-green-fg: #86efac;
+  --p-green-bg: rgba(34, 197, 94, 0.13);
+  --p-green-line: rgba(74, 222, 128, 0.35);
+  --p-green-hover: rgba(34, 197, 94, 0.23);
+  --p-violet-fg: #c4b5fd;
+  --p-violet-bg: rgba(139, 92, 246, 0.17);
+  --p-violet-line: rgba(167, 139, 250, 0.4);
+  --p-violet-hover: rgba(139, 92, 246, 0.27);
+  --p-red-fg: #fca5a5;
+  --p-red-bg: rgba(239, 68, 68, 0.14);
+  --p-red-line: rgba(248, 113, 113, 0.38);
+  --p-red-hover: rgba(239, 68, 68, 0.24);
+}
+[data-theme='light'] {
+  --p-blue-fg: #1d4ed8;
+  --p-blue-bg: #eef4ff;
+  --p-blue-line: #c7d8fb;
+  --p-blue-hover: #dfe9fe;
+  --p-green-fg: #15803d;
+  --p-green-bg: #ecf8f0;
+  --p-green-line: #bde5ca;
+  --p-green-hover: #dcf2e3;
+  --p-violet-fg: #6d28d9;
+  --p-violet-bg: #f4f0fe;
+  --p-violet-line: #d8cbfb;
+  --p-violet-hover: #e9e1fd;
+  --p-red-fg: #b91c1c;
+  --p-red-bg: #fdf0f0;
+  --p-red-line: #f3c4c4;
+  --p-red-hover: #fbe1e1;
+}
+.p-act.is-blue {
+  --p-act-fg: var(--p-blue-fg);
+  --p-act-bg: var(--p-blue-bg);
+  --p-act-border: var(--p-blue-line);
+  --p-act-hover: var(--p-blue-hover);
+}
+.p-act.is-green {
+  --p-act-fg: var(--p-green-fg);
+  --p-act-bg: var(--p-green-bg);
+  --p-act-border: var(--p-green-line);
+  --p-act-hover: var(--p-green-hover);
+}
+.p-act.is-violet {
+  --p-act-fg: var(--p-violet-fg);
+  --p-act-bg: var(--p-violet-bg);
+  --p-act-border: var(--p-violet-line);
+  --p-act-hover: var(--p-violet-hover);
+}
+.p-act.is-red {
+  --p-act-fg: var(--p-red-fg);
+  --p-act-bg: var(--p-red-bg);
+  --p-act-border: var(--p-red-line);
+  --p-act-hover: var(--p-red-hover);
+}
+a.p-act:hover,
+button.p-act:not(:disabled):hover {
+  --p-act-bg: var(--p-act-hover);
+  filter: none;
+}
+
+/* A quiet row action: no box until pointed at. */
+.p-quiet:hover {
+  background: var(--p-hover) !important;
+  filter: none !important;
+}
+
+/* Search with its magnifier inside the field. */
+.p-search {
+  position: relative;
+}
+.p-search > svg {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  color: var(--vibe-color-text-muted);
+  pointer-events: none;
+}
+/* Search and Year line up: the same height side by side. */
+.p-page select,
+.p-search input {
+  height: 44px;
+}
+.p-search input {
+  padding-left: 38px !important;
+}
+
+/* Drop zone: the whole area opens the file chooser; a ring when the chooser has focus. */
+.p-drop {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 28px 16px;
+  border: 1.5px dashed var(--vibe-control-border);
+  border-radius: 12px;
+  background: var(--vibe-color-bg);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+.p-drop:hover,
+.p-drop.is-over {
+  border-color: var(--vibe-color-accent);
+  background: color-mix(in srgb, var(--vibe-color-accent) 6%, var(--vibe-color-surface));
+}
+.p-drop:focus-within {
+  outline: 2px solid var(--vibe-color-accent);
+  outline-offset: 2px;
+}
+.p-drop-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  color: var(--vibe-link);
+  background: color-mix(in srgb, var(--vibe-color-accent) var(--p-tint), transparent);
+}
+.p-drop-choose {
+  color: var(--vibe-link);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.p-drop small {
+  color: var(--vibe-color-text-muted);
+  font-size: 13px;
+}
+
+.p-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.p-form-end {
+  display: flex;
+  justify-content: flex-end;
+}
+.p-narrow-form {
+  display: grid;
+  gap: 12px;
+  max-width: 360px;
+}
+
+html[data-narrow='1'] .p-topbar-inner,
+html[data-narrow='1'] .p-page {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+html[data-narrow='1'] .p-page {
+  padding-top: 20px;
+  gap: 16px;
+}
+html[data-narrow='1'] .p-section {
+  padding: 16px;
+}
+html[data-narrow='1'] .p-intro h1 {
+  font-size: 22px;
+}
+html[data-narrow='1'] .p-switch {
+  width: 100%;
+}
+html[data-narrow='1'] .p-form-grid {
+  grid-template-columns: 1fr;
+}
+html[data-narrow='1'] .p-form-end > * {
+  width: 100%;
+}
+
+/* P76: the client's link from another service, at the top of their home page. */
+.p-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding: 16px 20px;
+  border: 1px solid color-mix(in srgb, var(--vibe-color-accent) 35%, transparent);
+  border-radius: 14px;
+  background: color-mix(
+    in srgb,
+    var(--vibe-color-accent) var(--p-tint, 12%),
+    var(--vibe-color-surface)
+  );
+  box-shadow: var(--p-shadow, none);
+}
+.p-banner-text {
+  flex: 1 1 260px;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.p-banner-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 10px;
+  background: var(--vibe-color-accent);
+  color: var(--vibe-on-accent, #fff);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+a.p-banner-button:hover {
+  filter: brightness(1.08);
+  text-decoration: none;
+}
+html[data-narrow='1'] .p-banner-button {
+  width: 100%;
 }

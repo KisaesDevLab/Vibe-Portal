@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
-// Signed-in home: which client, its files, sign out, and signing in by text (P50).
+// Signed-in home: which client, its files, sign out, and signing in by text (P50). Laid out
+// as a top bar and cards on a tinted page (owner 2026-11-11: modern look, readability).
 
 import { Reveal } from '../components/Reveal';
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Button, Card, ThemeToggle } from '@vibe/ui';
+import { Button, ThemeToggle } from '@vibe/ui';
 
+import { Select } from '../components/Field';
+import { Section } from '../components/FileKind';
 import { FirmLogo } from '../branding';
 import { api, ApiError, say, type Me } from '../api';
 import { ClientLinksList, SendLinkForm, useClientLinks } from './ClientLinks';
@@ -39,6 +42,25 @@ export function Home(): JSX.Element {
   const [state, setState] = useState<State>('loading');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [fileCount, setFileCount] = useState<number | undefined>(undefined);
+  // P76: the active client's link from another service, at the top of the page.
+  const [clientLink, setClientLink] = useState<{
+    url: string;
+    message: string;
+    button: string;
+  } | null>(null);
+  useEffect(() => {
+    setClientLink(null);
+    setFileCount(undefined);
+    if (!shownClient) return;
+    let current = true;
+    api<{ link: { url: string; message: string; button: string } | null }>('/client-link')
+      .then((r) => current && setClientLink(r.link))
+      .catch(() => current && setClientLink(null));
+    return () => {
+      current = false;
+    };
+  }, [shownClient]);
 
   /** A failed call: signed out -> sign in; anything else -> a message. */
   const fail = useCallback((err: unknown, whole: boolean) => {
@@ -77,11 +99,7 @@ export function Home(): JSX.Element {
   if (state === 'loading') return <p role="status">Loading…</p>;
   if (state === 'error' || !me) {
     return (
-      <main
-        id="main-content"
-        tabIndex={-1}
-        style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 12 }}
-      >
+      <main id="main-content" tabIndex={-1} className="p-page">
         <p role="alert">{error}</p>
         <Button onClick={load}>Try again</Button>
       </main>
@@ -111,94 +129,125 @@ export function Home(): JSX.Element {
   }
 
   document.title = `Your files · ${me.firmName}`;
+  const who = me.identity.name || me.identity.email || me.identity.phone;
   return (
-    <main
-      id="main-content"
-      tabIndex={-1}
-      style={{ maxWidth: 760, margin: '0 auto', padding: 16, display: 'grid', gap: 16 }}
-    >
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-          <FirmLogo height={40} />
-          <h1 style={{ fontSize: 20, margin: 0 }}>{me.firmName}</h1>
+    <>
+      <header className="p-topbar">
+        <div className="p-topbar-inner">
+          <div className="p-brand">
+            <FirmLogo height={36} />
+            <span>{me.firmName}</span>
+          </div>
+          <div className="p-account">
+            {/* Light or dark, remembered in this browser (the device's setting until chosen). */}
+            <ThemeToggle />
+            <Button variant="secondary" size="sm" onClick={() => void signOut()}>
+              Sign out
+            </Button>
+          </div>
         </div>
-        <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Light or dark, remembered in this browser (the device's setting until chosen). */}
-          <ThemeToggle />
-          <Button variant="secondary" size="sm" onClick={() => void signOut()}>
-            Sign out
-          </Button>
-        </span>
       </header>
-      {notice && <p role="alert">{notice}</p>}
-      <Card title={active?.name ?? ''}>
-        <p style={{ overflowWrap: 'anywhere' }}>
-          Signed in as {me.identity.name || me.identity.email || me.identity.phone}.
-        </p>
-        {me.clients.length > 1 && (
-          <label style={{ display: 'grid', gap: 4, maxWidth: 320 }}>
-            <span>Showing files for</span>
-            <select value={me.activeClientId} onChange={(e) => void switchTo(e.target.value)}>
-              {me.clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </label>
+      <main id="main-content" tabIndex={-1} className="p-page">
+        <div className="p-intro">
+          <div style={{ minWidth: 0 }}>
+            <h1>{active?.name ?? me.firmName}</h1>
+            <p className="p-sub" style={{ overflowWrap: 'anywhere' }}>
+              Signed in as {who}.
+            </p>
+          </div>
+          {me.clients.length > 1 && (
+            <div className="p-switch">
+              <Select
+                label="Showing files for"
+                value={me.activeClientId}
+                onChange={(e) => void switchTo(e.target.value)}
+              >
+                {me.clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          )}
+        </div>
+        {notice && <p role="alert">{notice}</p>}
+        {/* Only a web address: the server takes no other kind, and none is ever put in the page. */}
+        {clientLink && /^https?:\/\//i.test(clientLink.url) && (
+          <aside className="p-banner" aria-label="From your firm">
+            <p className="p-banner-text">{clientLink.message}</p>
+            <a
+              className="p-banner-button"
+              href={clientLink.url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {clientLink.button}
+              <span className="visually-hidden"> (opens in a new tab)</span>
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+              </svg>
+            </a>
+          </aside>
         )}
-        {sentNote && (
-          <p role="status" style={{ overflowWrap: 'anywhere' }}>
-            {sentNote}
-          </p>
-        )}
-        {sending && (
-          <Reveal>
-            <SendLinkForm
-              key={sending.id}
-              clientId={me.activeClientId}
-              file={{ id: sending.id, name: sending.name, preview: sending.preview !== null }}
-              maxDays={links.maxDays}
-              onSent={(note) => {
-                setSending(null);
-                setSentNote(note);
-                links.reload();
-              }}
-              onCancel={() => setSending(null)}
-            />
-          </Reveal>
-        )}
-        <Files
-          clientId={me.activeClientId}
-          {...(links.enabled
-            ? {
-                onSend: (f: PortalFile) => {
-                  setSentNote('');
-                  setSending(f);
-                },
-              }
-            : {})}
-        />
+        <Section
+          id="files-heading"
+          title="Files from the firm"
+          count={fileCount}
+          sub={`Shared with you by ${me.firmName}. PDFs and pictures open here; everything downloads.`}
+        >
+          {sentNote && (
+            <p role="status" style={{ overflowWrap: 'anywhere' }}>
+              {sentNote}
+            </p>
+          )}
+          {sending && (
+            <Reveal>
+              <SendLinkForm
+                key={sending.id}
+                clientId={me.activeClientId}
+                file={{ id: sending.id, name: sending.name, preview: sending.preview !== null }}
+                maxDays={links.maxDays}
+                onSent={(note) => {
+                  setSending(null);
+                  setSentNote(note);
+                  links.reload();
+                }}
+                onCancel={() => setSending(null)}
+              />
+            </Reveal>
+          )}
+          <Files
+            clientId={me.activeClientId}
+            onCount={setFileCount}
+            {...(links.enabled
+              ? {
+                  onSend: (f: PortalFile) => {
+                    setSentNote('');
+                    setSending(f);
+                  },
+                }
+              : {})}
+          />
+        </Section>
         <ClientLinksList links={links.links} onChanged={links.reload} />
-      </Card>
-      <Card>
         <Uploads clientId={me.activeClientId} />
-      </Card>
-      <Card>
         <PhoneSignIn
           me={me}
           pending={pending}
           onChange={(phone) => setMe((m) => (m ? { ...m, identity: { ...m.identity, phone } } : m))}
         />
-      </Card>
-    </main>
+      </main>
+    </>
   );
 }

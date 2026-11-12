@@ -30,6 +30,9 @@ function serve(routes: Record<string, Reply>): Calls {
         // A client page's heading and its uploads (P54), unless a test says otherwise.
         (/^\/v1\/clients\/[^/?]+$/.test(path) ? { body: CLIENT } : undefined) ??
         (path.startsWith('/v1/uploads?clientId=') ? { body: { uploads: [] } } : undefined) ??
+        // P76: a client's portal link, and the list of them, unless a test says otherwise.
+        (/^\/v1\/clients\/[^/?]+\/link$/.test(path) ? { body: { link: null } } : undefined) ??
+        (path === '/v1/client-links' ? { body: { links: [] } } : undefined) ??
         // P74: the uploads page's list of uploads fetched and not filed.
         (path === '/v1/uploads/unfiled'
           ? { body: { state: 'unfiled', keepDays: 30, capDays: 180, uploads: [] } }
@@ -1445,5 +1448,75 @@ describe('staff page', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByLabelText('Recipient email')).toBeNull();
+  });
+});
+
+describe('a client link on the staff page (P76)', () => {
+  it('is added on the client page', async () => {
+    const id = CLIENT.id;
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      [`/v1/clients/${id}/history?limit=50`]: { body: { events: [] } },
+      [`PUT /v1/clients/${id}/link`]: {
+        body: { link: { url: 'https://pay.example.com/c/1', message: 'Pay here', button: 'Open' } },
+      },
+    });
+    at(`/staff/clients/${id}`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a link' }));
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'Pay here' } });
+    fireEvent.change(screen.getByLabelText('URL'), {
+      target: { value: 'https://pay.example.com/c/1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/^Saved\./)).toBeTruthy();
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
+      url: 'https://pay.example.com/c/1',
+      message: 'Pay here',
+      button: '',
+    });
+  });
+
+  it('a CSV is checked first, then applied', async () => {
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/clients': { body: { clients: [CLIENT] } },
+      'POST /v1/client-links/import': {
+        body: {
+          applied: false,
+          changes: 1,
+          rows: [
+            { line: 2, status: 'new', client: 'Smith, John', clientCode: '1001' },
+            { line: 3, status: 'not_found', asked: 'NOPE' },
+          ],
+        },
+      },
+    });
+    at('/staff');
+    fireEvent.click(await screen.findByRole('button', { name: 'Portal links from a CSV…' }));
+    const file = new File(
+      ['client_code,url,message\n1001,https://x.test,Hi\nNOPE,https://y.test,Hi\n'],
+      'links.csv',
+      {
+        type: 'text/csv',
+      },
+    );
+    // jsdom's File has no text() (browsers do).
+    Object.assign(file, { text: async () => 'client_code,url,message' });
+    fireEvent.change(screen.getByLabelText('CSV file'), { target: { files: [file] } });
+    expect(await screen.findByText('No such client')).toBeTruthy();
+    expect(screen.getByText(/Nothing has changed yet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply 1 change' }));
+    await waitFor(() =>
+      expect(
+        calls
+          .filter((c) => c.path === '/v1/client-links/import')
+          .map((c) => (c.body as { apply: boolean }).apply),
+      ).toEqual([false, true]),
+    );
+    // The panel closes and says what was done.
+    expect(await screen.findByText('Done: 1 client changed.')).toBeTruthy();
   });
 });

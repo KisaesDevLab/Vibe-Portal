@@ -13,9 +13,9 @@ Each copied file's second line names its source path and TB commit. This file is
 
 | Here | From TB | Notes |
 |---|---|---|
-| `packages/ui/src/**` | `packages/ui/src/**` | Whole design system; package name kept as `@vibe/ui`. Changed: `Button.tsx` shows a disabled primary or danger button grey (P54), and primary text in `--vibe-on-accent`; a small button is 36 px tall (44 on a phone) with 14 px text, like the portal's row actions (P59) |
+| `packages/ui/src/**` | `packages/ui/src/**` | Whole design system; package name kept as `@vibe/ui`. Changed: `Button.tsx` shows a disabled primary or danger button grey (P54), and primary text in `--vibe-on-accent`; a small button is 36 px tall (44 on a phone) with 14 px text, like the portal's row actions (P59); `Input.tsx` labels 13 px in the text colour, hints 13 px (owner 2026-11-11, readability) |
 | `packages/crypto/src/**` | `packages/crypto/src/**` | Envelope encryption + firm key manager (P6); package name kept as `@vibe/crypto` |
-| `apps/portal/src/components/ProtectedPdfViewer.tsx` | `apps/portal/src/components/ProtectedPdfViewer.tsx` | PDF viewer (pdf.js, canvas, lazy pages) |
+| `apps/portal/src/components/ProtectedPdfViewer.tsx` | `apps/portal/src/components/ProtectedPdfViewer.tsx` | PDF viewer (pdf.js, canvas, lazy pages). Changed: its Download action is green, like every Download (owner 2026-11-11) |
 | `.eslintrc.cjs`, `.prettierrc`, `.prettierignore`, `.editorconfig`, `.gitattributes`, `.nvmrc`, `.gitignore`, `LICENSE.md` | same | Tooling and licence |
 
 ## Based on (changed)

@@ -82,5 +82,8 @@ export const EVENT_KINDS = [
   'storage_swept',
   'storage_sweep_refused',
   'storage_snapshot_failed',
+  // P76: a client's link at the top of its portal set (or changed) or removed.
+  'client_link_set',
+  'client_link_removed',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];

@@ -8,7 +8,17 @@ import type { CSSProperties, MouseEventHandler, ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { tokens, useIsNarrow } from '@vibe/ui';
 
-type Tone = 'default' | 'primary' | 'danger';
+/** blue, green, violet, red: one colour per kind of action, tinted (owner 2026-11-11: Open
+ *  blue, Download green, Share violet, Remove and End red). */
+type Colour = 'blue' | 'green' | 'violet' | 'red';
+type Tone = 'default' | 'primary' | 'danger' | 'quiet' | Colour;
+const COLOURS: readonly string[] = ['blue', 'green', 'violet', 'red'];
+
+/** The class that sets a tone's colours for the theme (portal.css), or none. */
+function toneClass(tone: Tone): string | undefined {
+  if (tone === 'quiet') return 'p-quiet';
+  return COLOURS.includes(tone) ? `p-act is-${tone}` : undefined;
+}
 
 function look(tone: Tone, narrow: boolean, disabled = false): CSSProperties {
   const base: CSSProperties = {
@@ -44,6 +54,19 @@ function look(tone: Tone, narrow: boolean, disabled = false): CSSProperties {
   }
   if (tone === 'danger') {
     return { ...base, color: tokens.color.danger, borderColor: tokens.color.danger };
+  }
+  if (COLOURS.includes(tone)) {
+    return {
+      ...base,
+      border: '1px solid var(--p-act-border)',
+      background: 'var(--p-act-bg)',
+      color: 'var(--p-act-fg)',
+    };
+  }
+  if (tone === 'quiet') {
+    // Owner 2026-11-11 (modern look): a row's less used actions are text and icon, boxed only
+    // when pointed at (.p-quiet), so a list is not a wall of buttons.
+    return { ...base, borderColor: 'transparent', background: 'transparent' };
   }
   return base;
 }
@@ -81,6 +104,7 @@ export function ActionButton({
       aria-pressed={pressed}
       disabled={disabled}
       onClick={onClick}
+      className={toneClass(tone)}
       style={{ ...look(tone, narrow, disabled), ...style }}
     >
       {icon}
@@ -107,6 +131,7 @@ export function ActionLink({
       state={state}
       aria-label={ariaLabel}
       onClick={onClick}
+      className={toneClass(tone)}
       style={{ ...look(tone, narrow), ...style }}
     >
       {icon}
@@ -120,6 +145,7 @@ export function ActionDownload({
   icon,
   label,
   ariaLabel,
+  tone = 'default',
   href,
   filename,
   onClick,
@@ -132,7 +158,8 @@ export function ActionDownload({
       download={filename}
       aria-label={ariaLabel}
       onClick={onClick}
-      style={{ ...look('default', narrow), ...style }}
+      className={toneClass(tone)}
+      style={{ ...look(tone, narrow), ...style }}
     >
       {icon}
       {label}
@@ -170,11 +197,17 @@ export function ItemRow({
   badge,
   meta,
   actions,
+  icon,
+  bare,
 }: {
   title: ReactNode;
   badge?: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
+  /** A file-kind tile before the title (home page). */
+  icon?: ReactNode;
+  /** In a .p-list, which draws the lines between rows itself. */
+  bare?: boolean;
 }): JSX.Element {
   const narrow = useIsNarrow();
   return (
@@ -184,20 +217,37 @@ export function ItemRow({
         flexDirection: narrow ? 'column' : 'row',
         alignItems: narrow ? 'stretch' : 'center',
         gap: narrow ? 10 : 16,
-        padding: '12px 0',
-        borderBottom: `1px solid ${tokens.color.border}`,
+        padding: bare ? '14px 0' : '12px 0',
+        ...(bare ? {} : { borderBottom: `1px solid ${tokens.color.border}` }),
       }}
     >
-      <div style={{ minWidth: 0, flex: '1 1 auto', display: 'grid', gap: 4 }}>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <strong style={{ overflowWrap: 'anywhere' }}>{title}</strong>
-          {badge}
+      <div
+        style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', gap: 14, alignItems: 'center' }}
+      >
+        {icon}
+        <div style={{ minWidth: 0, flex: '1 1 auto', display: 'grid', gap: 2 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <strong style={{ overflowWrap: 'anywhere', fontWeight: 600, lineHeight: 1.4 }}>
+              {title}
+            </strong>
+            {badge}
+          </div>
+          {meta && (
+            <small
+              style={{
+                color: tokens.color.textMuted,
+                fontSize: 13,
+                lineHeight: 1.45,
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {meta}
+            </small>
+          )}
         </div>
-        {meta && (
-          <small style={{ color: tokens.color.textMuted, overflowWrap: 'anywhere' }}>{meta}</small>
-        )}
       </div>
-      {actions}
+      {/* Beside the item, the actions keep their width: a long name wraps, never the buttons. */}
+      {actions && (narrow ? actions : <div style={{ flex: 'none' }}>{actions}</div>)}
     </li>
   );
 }

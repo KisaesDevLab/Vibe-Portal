@@ -7,6 +7,7 @@ import { useState, type FormEvent } from 'react';
 import { Button, Input } from '@vibe/ui';
 
 import { api, say, type Me } from '../api';
+import { Section } from '../components/FileKind';
 
 /** A code is on its way to `phone` (masked) and waits to be typed. */
 export interface Pending {
@@ -74,8 +75,7 @@ export function PhoneSignIn({
     });
 
   return (
-    <section aria-label="Sign in by text" style={{ display: 'grid', gap: 8 }}>
-      <h2 style={{ fontSize: 16, margin: 0 }}>Sign in by text</h2>
+    <Section id="phone-heading" title="Sign in by text">
       {current && !pending && (
         <>
           <p style={{ margin: 0 }}>You can sign in with a code texted to {current}.</p>
@@ -92,7 +92,7 @@ export function PhoneSignIn({
         <p style={{ margin: 0 }}>You sign in by email. This portal does not send text messages.</p>
       )}
       {!current && !pending && me.textsOn !== false && (
-        <form onSubmit={(e) => void send(e)} style={{ display: 'grid', gap: 8, maxWidth: 320 }}>
+        <form onSubmit={(e) => void send(e)} className="p-narrow-form">
           <p style={{ margin: 0 }}>
             Add a US or Canadian mobile number to sign in with a code by text as well as by email.
           </p>
@@ -114,10 +114,7 @@ export function PhoneSignIn({
       {current && !pending && me.textsOn !== false && me.identity.email && (
         <details>
           <summary>Use another number</summary>
-          <form
-            onSubmit={(e) => void send(e)}
-            style={{ display: 'grid', gap: 8, maxWidth: 320, marginTop: 8 }}
-          >
+          <form onSubmit={(e) => void send(e)} className="p-narrow-form" style={{ marginTop: 12 }}>
             <Input
               label="New mobile number"
               name="phone"
@@ -135,7 +132,7 @@ export function PhoneSignIn({
         </details>
       )}
       {pending && (
-        <form onSubmit={(e) => void verify(e)} style={{ display: 'grid', gap: 8, maxWidth: 320 }}>
+        <form onSubmit={(e) => void verify(e)} className="p-narrow-form">
           <p style={{ margin: 0 }}>
             A 6-digit code is on its way by text to {pending.phone}. It works for 5 minutes.
           </p>
@@ -165,6 +162,6 @@ export function PhoneSignIn({
       )}
       {error && <p role="alert">{error}</p>}
       {done && <p role="status">{done}</p>}
-    </section>
+    </Section>
   );
 }
