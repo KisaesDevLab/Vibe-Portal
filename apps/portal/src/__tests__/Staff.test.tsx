@@ -29,7 +29,11 @@ function serve(routes: Record<string, Reply>): Calls {
         routes[path] ??
         // A client page's heading and its uploads (P54), unless a test says otherwise.
         (/^\/v1\/clients\/[^/?]+$/.test(path) ? { body: CLIENT } : undefined) ??
-        (path.startsWith('/v1/uploads?clientId=') ? { body: { uploads: [] } } : undefined);
+        (path.startsWith('/v1/uploads?clientId=') ? { body: { uploads: [] } } : undefined) ??
+        // P74: the uploads page's list of uploads fetched and not filed.
+        (path === '/v1/uploads/unfiled'
+          ? { body: { state: 'unfiled', keepDays: 30, capDays: 180, uploads: [] } }
+          : undefined);
       if (!r) return new Response(JSON.stringify({ error: 'not_found' }), { status: 404 });
       return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
     }),
@@ -732,6 +736,38 @@ describe('staff page', () => {
     at('/staff/uploads');
     fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
     await waitFor(() => expect(calls.filter((c) => c.path === '/v1/uploads')).toHaveLength(2));
+  });
+
+  it('the uploads page lists what Vibe Files fetched and has not filed (P74)', async () => {
+    serve({
+      '/auth/me': ME,
+      '/v1/uploads': { body: { uploads: [] } },
+      '/v1/uploads/unfiled': {
+        body: {
+          state: 'unfiled',
+          keepDays: 14,
+          capDays: 180,
+          uploads: [
+            {
+              uploadId: 'u1',
+              clientName: 'Smith, John',
+              clientCode: '1001',
+              name: '2025 W-2.pdf',
+              size: 3,
+              note: '',
+              uploadedAt: '2026-11-09T15:00:00.000Z',
+              fetchedAt: '2026-11-09T15:05:00.000Z',
+              fetchedBy: 'PC1',
+              from: { name: 'Mary', email: null, phone: null },
+            },
+          ],
+        },
+      },
+    });
+    at('/staff/uploads');
+    expect(await screen.findByRole('heading', { name: 'Fetched, not filed yet' })).toBeTruthy();
+    expect(await screen.findByRole('link', { name: '2025 W-2.pdf' })).toBeTruthy();
+    expect(screen.getByText(/keep period \(14 days\) starts then/)).toBeTruthy();
   });
 
   it('a reload part way through setup says to open the link again', async () => {

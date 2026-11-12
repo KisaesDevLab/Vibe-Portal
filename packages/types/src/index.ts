@@ -48,6 +48,8 @@ export const EVENT_KINDS = [
   'staff_access',
   'upload_removed',
   'upload_purged',
+  'upload_filed',
+  'upload_dismissed',
   'file_added',
   'firm_key_created',
   'firm_key_revoked',

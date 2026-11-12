@@ -207,8 +207,9 @@ export async function readIdPhoto(
   }
 }
 
-/** Days the photo ID and the portal's copy of the record are kept once Vibe Files has fetched
- *  the record (owner 2026-11-11). */
+/** Days the photo ID and the portal's copy of the record are kept once Vibe Files has filed
+ *  the record (owner 2026-11-11; P74: filed or dismissed, not only fetched; an older Vibe Files
+ *  is filed when it fetches). */
 export const FETCHED_KEEP_DAYS = 7;
 /** Days after approval the photo ID is kept at most, fetched or not (owner 2026-11-11: a firm
  *  that does not fetch for a while does not keep IDs for ever). */
@@ -217,7 +218,7 @@ export const APPROVED_MAX_DAYS = 90;
 /**
  * Removes photo IDs past their time (run hourly), first making any record an approval could
  * not make:
- * - approved: 7 days after Vibe Files fetched the record PDF; the portal's copy of the PDF goes
+ * - approved: 7 days after Vibe Files filed the record PDF; the portal's copy of the PDF goes
  *   too. Kept until then (a record that cannot be made is tried again hourly, and the Log says
  *   why), but never more than 90 days after approval (the Log says so).
  * - denied: 30 days after the decision.
@@ -233,20 +234,28 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
       uploadId: schema.uploads.id,
       clientId: schema.uploads.clientId,
       blobKey: schema.uploads.blobKey,
-      fetchedAt: schema.uploads.fetchedAt,
+      filedAt: schema.uploads.filedAt,
+      dismissedAt: schema.uploads.dismissedAt,
     })
     .from(schema.uploads)
     .where(isNotNull(schema.uploads.accessRequestId));
-  const fetchedLongAgo = new Set(
+  // P74: kept until Vibe Files filed (or dismissed) it: a fetched record lost from the Portal
+  // inbox can still be fetched again.
+  const settledAt = (r: (typeof records)[number]): Date | null => r.filedAt ?? r.dismissedAt;
+  const filedLongAgo = new Set(
     records
-      .filter((r) => r.fetchedAt && r.fetchedAt < ago(FETCHED_KEEP_DAYS))
+      .filter((r) => {
+        const at = settledAt(r);
+        return at !== null && at < ago(FETCHED_KEEP_DAYS);
+      })
       .map((r) => r.requestId),
   );
   const hasRecord = new Set(records.map((r) => r.requestId));
-  const fetchedEver = new Set(records.filter((r) => r.fetchedAt).map((r) => r.requestId));
-  // The portal's copy of a fetched record.
+  const filedEver = new Set(records.filter((r) => settledAt(r)).map((r) => r.requestId));
+  // The portal's copy of a filed record.
   for (const r of records) {
-    if (r.blobKey && r.fetchedAt && r.fetchedAt < ago(FETCHED_KEEP_DAYS)) {
+    const at = settledAt(r);
+    if (r.blobKey && at && at < ago(FETCHED_KEEP_DAYS)) {
       const [done] = await ctx.db
         .update(schema.uploads)
         .set({ purgedAt: now, blobKey: null, dekWrapped: null })
@@ -271,22 +280,22 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
   const due = held.filter((r) => {
     if (!r.confirmedAt) return r.createdAt < ago(UNCONFIRMED_ID_DAYS);
     if (r.status === 'pending' || !r.decidedAt) return false;
-    // Approved: 7 days after Vibe Files fetched the record; never fetched (or never made), 90
-    // days after approval. A record fetched lately keeps its 7 days.
+    // Approved: 7 days after Vibe Files filed the record; never filed (or never made), 90
+    // days after approval. A record filed lately keeps its 7 days.
     if (r.status === 'approved') {
-      if (fetchedEver.has(r.id)) return fetchedLongAgo.has(r.id);
+      if (filedEver.has(r.id)) return filedLongAgo.has(r.id);
       return r.decidedAt < ago(APPROVED_MAX_DAYS);
     }
     return r.decidedAt < ago(ID_KEEP_DAYS);
   });
   for (const r of due) {
-    if (r.status === 'approved' && !fetchedEver.has(r.id)) {
-      // Past the cap and never fetched: the portal's copy of the record goes too, and the Log
+    if (r.status === 'approved' && !filedEver.has(r.id)) {
+      // Past the cap and never filed: the portal's copy of the record goes too, and the Log
       // says why.
       ctx.log.warn(
         { accessRequestId: r.id, days: APPROVED_MAX_DAYS },
         hasRecord.has(r.id)
-          ? 'photo ID deleted after 90 days: Vibe Files never fetched the request PDF'
+          ? 'photo ID deleted after 90 days: Vibe Files never filed the request PDF'
           : 'photo ID deleted after 90 days: the request PDF could never be made',
       );
       for (const rec of records.filter((x) => x.requestId === r.id && x.blobKey)) {

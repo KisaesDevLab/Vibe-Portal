@@ -372,7 +372,15 @@ export function StaffHome(): JSX.Element {
           {allClients && <Route path="requests" element={<Requests />} />}
           {allClients && <Route path="people" element={<People />} />}
           {allClients && <Route path="people/:identityId" element={<Person />} />}
-          <Route path="uploads" element={<Uploads />} />
+          <Route
+            path="uploads"
+            element={
+              <>
+                <Uploads />
+                <Unfiled />
+              </>
+            }
+          />
           <Route path="history" element={<History />} />
           {admin && <Route path="settings" element={<Settings />} />}
           {admin && <Route path="log" element={<Log />} />}
@@ -774,6 +782,8 @@ const DID: Record<string, string> = {
   fetch: 'Fetched an upload',
   upload_removed: 'Removed an upload',
   upload_purged: 'Upload cleared after the keep period',
+  upload_filed: 'Upload filed in Vibe Files',
+  upload_dismissed: 'Upload dismissed in Vibe Files',
   invite: 'Invited someone',
   invite_revoked: 'Withdrew an invitation',
   invite_accepted: 'Accepted an invitation',
@@ -1812,6 +1822,52 @@ function Uploads(): JSX.Element {
   );
 }
 
+interface UnfiledRow extends UploadRow {
+  fetchedAt: string;
+  fetchedBy: string | null;
+}
+
+/** P74: what Vibe Files fetched but has not filed yet. The portal keeps these. */
+function Unfiled(): JSX.Element {
+  const load = useLoad<{ uploads: UnfiledRow[]; keepDays: number; capDays: number }>(
+    '/v1/uploads/unfiled',
+  );
+  const data = load.data;
+  const { slice, pager } = usePages(data?.uploads ?? []);
+  return (
+    <Card title="Fetched, not filed yet">
+      <p>
+        What Vibe Files fetched into its Portal inbox but has not filed yet. The portal keeps each
+        one until Vibe Files files it or someone dismisses it there; the keep period
+        {data ? ` (${data.keepDays} days)` : ''} starts then. Anything not filed is cleared
+        {data ? ` ${data.capDays}` : ''} days after it was fetched.
+      </p>
+      <Status load={load} what="the uploads not filed yet" />
+      {data?.uploads.length === 0 && (
+        <p>Nothing waiting: Vibe Files has filed everything it fetched.</p>
+      )}
+      <Table head={['Fetched', 'By', 'Client', 'File', 'From']}>
+        {slice.map((u) => (
+          <tr key={u.uploadId}>
+            <td style={td}>{when(u.fetchedAt)}</td>
+            <td style={td}>{u.fetchedBy}</td>
+            <td style={td}>
+              {u.clientName} {u.clientCode && `(${u.clientCode})`}
+            </td>
+            <td style={td}>
+              <a href={`/api/staff/v1/uploads/${u.uploadId}/content`} download={u.name}>
+                {u.name}
+              </a>
+            </td>
+            <td style={td}>{u.from.name || u.from.email || u.from.phone}</td>
+          </tr>
+        ))}
+      </Table>
+      {pager}
+    </Card>
+  );
+}
+
 interface EventRow {
   id: number;
   at: string;
@@ -2691,7 +2747,7 @@ function Settings(): JSX.Element {
               onChange={(e) => setForm({ ...form, uploadLimitMb: Number(e.target.value) })}
             />
             <Input
-              label="Keep files Vibe Files collected for (days)"
+              label="Keep files Vibe Files filed for (days after filing)"
               name="keep"
               type="number"
               min={0}

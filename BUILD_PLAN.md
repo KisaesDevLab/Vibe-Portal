@@ -121,8 +121,10 @@ appends to `events`. Rate-limited per key.
 | DELETE | `/files/:id` | Remove from portal (blob deleted, row kept with `removed_at`) |
 | GET | `/files?client_id=…` / `?vf_document_id=…` | What is on the portal, and for whom |
 | GET | `/uploads?unfetched=1` | Client uploads waiting for the firm |
+| GET | `/uploads/unfiled` | Fetched by Vibe Files, not filed or dismissed yet (P74) |
 | GET | `/uploads/:id/content` | Download one |
 | POST | `/uploads/:id/fetched` | Marks it fetched (by which PC). Only the first caller wins; others get 409 |
+| POST | `/uploads/:id/filed`, `/uploads/:id/dismissed` | Vibe Files filed it, or a person dismissed it; the keep period counts from here (P74) |
 | GET | `/events?since=…` | For Vibe Files' audit trail |
 
 ## 4. Client side (portal web)

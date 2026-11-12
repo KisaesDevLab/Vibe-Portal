@@ -324,6 +324,12 @@ export const uploads = pgTable('uploads', {
   originalName: text('original_name'),
   /** P67: the record (a PDF) of this approved access request, made by the portal. */
   accessRequestId: uuid('access_request_id'),
+  /** P74: Vibe Files filed it from its Portal inbox; the keep period counts from here. */
+  filedAt: ts('filed_at'),
+  filedBy: text('filed_by'),
+  /** P74: a person in Vibe Files said it is not to be filed (junk, a duplicate). */
+  dismissedAt: ts('dismissed_at'),
+  dismissedBy: text('dismissed_by'),
 });
 
 export const events = pgTable('events', {
