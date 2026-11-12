@@ -5,7 +5,7 @@
 // (email, text, both or none, P4). File names are not put in the message: the person signs in
 // to see them.
 
-import { and, asc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { schema } from '@vibe-portal/db';
 
 import type { Executor } from '../auth/grant';
@@ -57,7 +57,11 @@ export async function flush(ctx: Ctx): Promise<number> {
     .from(schema.notifyQueue)
     .where(and(isNull(schema.notifyQueue.sentAt), isNull(schema.notifyQueue.droppedAt)))
     .groupBy(schema.notifyQueue.identityId)
-    .having(lte(sql`min(${schema.notifyQueue.createdAt})`, due))
+    // The time as text, cast: compared with a bare SQL expression, drizzle cannot tell it is a
+    // timestamp and hands the Date to the driver as it is, which postgres-js refuses ("The
+    // "string" argument must be of type string... Received an instance of Date"); PGlite, in
+    // the tests, takes it.
+    .having(sql`min(${schema.notifyQueue.createdAt}) <= ${due.toISOString()}::timestamptz`)
     .orderBy(asc(schema.notifyQueue.identityId));
   let sent = 0;
   for (const { identityId } of ready) {
