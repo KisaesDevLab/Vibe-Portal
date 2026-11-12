@@ -1385,9 +1385,10 @@ describe('staff page', () => {
     });
     fireEvent.change(screen.getByLabelText('Recipient name'), { target: { value: 'Lee Poe' } });
     fireEvent.change(screen.getByLabelText('Organization'), { target: { value: 'Title Co' } });
-    fireEvent.change(screen.getByLabelText('Access'), { target: { value: 'download' } });
-    fireEvent.change(screen.getByLabelText('Link works for'), { target: { value: '7' } });
-    fireEvent.click(screen.getByLabelText(/^Watermark PDFs/));
+    // A new link starts as view and download, 7 days, watermarked (owner 2026-11-12).
+    expect((screen.getByLabelText('Access') as HTMLSelectElement).value).toBe('download');
+    expect((screen.getByLabelText('Link works for') as HTMLSelectElement).value).toBe('7');
+    expect((screen.getByLabelText(/^Watermark PDFs/) as HTMLInputElement).checked).toBe(true);
     fireEvent.change(screen.getByLabelText('Message in the email (optional)'), {
       target: { value: 'For the closing.' },
     });

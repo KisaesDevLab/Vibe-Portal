@@ -1326,9 +1326,10 @@ function SendSecurely({
   const { act, busy, error } = useAct(() => undefined);
   const [picked, setPicked] = useState<Set<string>>(new Set([first]));
   const [to, setTo] = useState({ email: '', name: '', organization: '', message: '' });
-  const [download, setDownload] = useState(false);
-  const [watermark, setWatermark] = useState(false);
-  const [days, setDays] = useState(30);
+  // Owner 2026-11-12: a new link starts as view and download, 7 days, watermarked.
+  const [download, setDownload] = useState(true);
+  const [watermark, setWatermark] = useState(true);
+  const [days, setDays] = useState(7);
   const toggle = (fileId: string, on: boolean): void => {
     const next = new Set(picked);
     if (on) next.add(fileId);
