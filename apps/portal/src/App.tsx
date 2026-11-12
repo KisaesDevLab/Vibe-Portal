@@ -2,6 +2,7 @@
 //
 // Client portal routes.
 
+import { ClientPreview } from './staff/ClientPreview';
 import { useEffect, useRef } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
 
@@ -53,6 +54,7 @@ export function App(): JSX.Element {
         <Route path="/shared" element={<Shared />} />
         <Route path="/staff/login" element={<StaffLogin />} />
         <Route path="/staff/setup" element={<StaffSetup />} />
+        <Route path="/staff/preview/:id" element={<ClientPreview />} />
         <Route path="/staff/*" element={<StaffHome />} />
         <Route path="*" element={<Home />} />
       </Routes>

@@ -740,3 +740,34 @@ a.p-banner-button:hover {
 html[data-narrow='1'] .p-banner-button {
   width: 100%;
 }
+
+/* P77: staff previewing a client's portal: always on screen, never mistaken for the real page. */
+.p-preview-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  /* The tint over the page colour: opaque, so the page never shows through when scrolled. */
+  background: linear-gradient(var(--p-warn-bg), var(--p-warn-bg)), var(--vibe-color-bg);
+  color: var(--p-warn-fg);
+  border-bottom: 1px solid color-mix(in srgb, var(--p-warn-fg) 35%, transparent);
+}
+.p-preview-inner {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 10px 24px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.p-preview-inner p {
+  flex: 1 1 320px;
+  margin: 0;
+}
+html[data-narrow='1'] .p-preview-inner {
+  padding: 10px 16px;
+}

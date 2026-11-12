@@ -350,6 +350,14 @@ in a new tab. Any staff member can set it for the clients they see.
 
 Links must start with `https://` (or `http://`).
 
+## Seeing a client's portal as they do
+
+On a client's page, **See this client’s portal as they do** opens their portal in a new tab, read
+only: the same page they see, with their link and their files. Each person sees only the files
+shared with them, so the preview lists the files someone at the client can see. PDFs and pictures
+open; nothing downloads, and opening a file here does not count as the client having seen it (it
+is in History as yours).
+
 ## When something is wrong
 
 | What you see                                                                 | What to check                                                                                                                                                                           |

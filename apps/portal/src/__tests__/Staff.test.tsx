@@ -1520,3 +1520,42 @@ describe('a client link on the staff page (P76)', () => {
     expect(await screen.findByText('Done: 1 client changed.')).toBeTruthy();
   });
 });
+
+describe('the preview of a client portal (P77)', () => {
+  it('shows the client page read only; files open; other buttons say they do nothing', async () => {
+    const id = CLIENT.id;
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/preview`]: {
+        body: {
+          firmName: 'Example CPA',
+          client: { id, name: 'Smith, John', active: true },
+          people: 2,
+          link: { url: 'https://pay.example.com/c/1', message: 'Pay here', button: 'Pay now' },
+          files: [
+            {
+              id: 'f1',
+              name: 'Return.png',
+              size: 10,
+              contentType: 'image/png',
+              taxYear: 2025,
+              sharedAt: '2026-11-09T15:00:00Z',
+              updatedAt: null,
+              isNew: false,
+              preview: 'image',
+            },
+          ],
+        },
+      },
+    });
+    at(`/staff/preview/${id}`);
+    expect(await screen.findByText(/Preview of Smith, John’s portal/)).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Smith, John');
+    expect(screen.getByText('Pay here')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^Download Return\.png/ }));
+    expect(screen.getByText('Download does nothing in the preview.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Return.png' }));
+    const img = (await screen.findByAltText('Return.png')) as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe(`/api/staff/v1/clients/${id}/preview/files/f1/content`);
+  });
+});

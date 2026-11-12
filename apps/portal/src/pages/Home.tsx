@@ -9,6 +9,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Button, ThemeToggle } from '@vibe/ui';
 
 import { Select } from '../components/Field';
+import { ClientLinkBanner } from '../components/ClientBanner';
 import { Section } from '../components/FileKind';
 import { FirmLogo } from '../branding';
 import { api, ApiError, say, type Me } from '../api';
@@ -172,34 +173,7 @@ export function Home(): JSX.Element {
           )}
         </div>
         {notice && <p role="alert">{notice}</p>}
-        {/* Only a web address: the server takes no other kind, and none is ever put in the page. */}
-        {clientLink && /^https?:\/\//i.test(clientLink.url) && (
-          <aside className="p-banner" aria-label="From your firm">
-            <p className="p-banner-text">{clientLink.message}</p>
-            <a
-              className="p-banner-button"
-              href={clientLink.url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {clientLink.button}
-              <span className="visually-hidden"> (opens in a new tab)</span>
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
-              </svg>
-            </a>
-          </aside>
-        )}
+        {clientLink && <ClientLinkBanner link={clientLink} />}
         <Section
           id="files-heading"
           title="Files from the firm"

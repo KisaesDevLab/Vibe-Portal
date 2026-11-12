@@ -543,6 +543,13 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
         <span aria-hidden="true">← </span>All clients
       </Link>
       <ClientHead load={head} />
+      {/* P77: the client's portal as its people see it, read only, in a new tab. */}
+      <p style={{ margin: 0 }}>
+        <a href={`/staff/preview/${id}`} target="_blank" rel="noopener noreferrer">
+          See this client’s portal as they do
+          <span className="visually-hidden"> (opens in a new tab)</span>
+        </a>
+      </p>
       <Problem text={error} />
       <Card title="People with access">
         <Status load={people} what="the people" />
@@ -825,6 +832,7 @@ const DID: Record<string, string> = {
   id_viewed: 'Looked at a photo ID',
   client_link_set: 'Portal link set',
   client_link_removed: 'Portal link removed',
+  preview_view: 'Opened a file in the portal preview',
 };
 
 /** What happened on one client (P65), or what one person did and had done (P66), newest first. */

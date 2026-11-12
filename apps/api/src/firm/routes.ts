@@ -37,6 +37,7 @@ import { firmFilesRouter } from './files';
 import { historyRows, HistoryQuery } from './history';
 import { staffPeopleRouter } from './people';
 import { staffClientLinksRouter } from './client-links';
+import { staffPreviewRouter } from './preview';
 import { fileRequestRecord, readIdPhoto } from '../portal/access-id';
 import { requireFirmKey } from './keys';
 import { firmEventsRouter } from './events';
@@ -137,6 +138,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   if (staff) r.use('/people', staffPeopleRouter(ctx));
   // P76: each client's link at the top of its portal: any staff member, for their clients.
   if (staff) r.use(staffClientLinksRouter(ctx));
+  // P77: a client's portal as its people see it, read only.
+  if (staff) r.use(staffPreviewRouter(ctx));
 
   const clientExists = async (id: string): Promise<boolean> =>
     (

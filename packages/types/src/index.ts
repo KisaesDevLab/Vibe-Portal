@@ -85,5 +85,7 @@ export const EVENT_KINDS = [
   // P76: a client's link at the top of its portal set (or changed) or removed.
   'client_link_set',
   'client_link_removed',
+  // P77: staff opened a file in the preview of a client's portal.
+  'preview_view',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
