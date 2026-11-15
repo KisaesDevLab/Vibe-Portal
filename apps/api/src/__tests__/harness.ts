@@ -15,6 +15,7 @@ import { expect } from 'vitest';
 
 import { createApp } from '../app';
 import type { Ctx } from '../context';
+import type { BarcodeReader } from '../files/barcode';
 import { BlobStore } from '../files/blobs';
 import { openKeyring } from '../files/keyring';
 import { createFirmKey } from '../firm/keys';
@@ -53,7 +54,9 @@ export interface World {
   close(): Promise<void>;
 }
 
-export async function world(): Promise<World> {
+/** `readBarcode`: a stand-in for the barcode reader (Addendum 01, layer A), which otherwise
+ *  runs in a process of its own. */
+export async function world(opts: { readBarcode?: BarcodeReader } = {}): Promise<World> {
   const t = await createTestDb();
   let clock = T0;
   const notes = recordingNotifier();
@@ -69,7 +72,11 @@ export async function world(): Promise<World> {
     keyring: services.keyring,
     blobs: services.blobs,
   };
-  const app = createApp({ pingDb: async () => true, ctx });
+  const app = createApp({
+    pingDb: async () => true,
+    ctx,
+    ...(opts.readBarcode ? { readBarcode: opts.readBarcode } : {}),
+  });
   await t.db.update(schema.firm).set({ name: 'Example CPA' });
   const key = (await createFirmKey(t.db, 'Office')).key;
   const firm: World['firm'] = (method, path) =>

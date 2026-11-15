@@ -53,6 +53,10 @@ const SettingsSchema = z.object({
   clientLinks: z.boolean().optional(),
   /** Downloads each new secure link allows, 0 for no limit (P58). Left out: unchanged. */
   shareDownloadLimit: z.number().int().min(0).max(1000).optional(),
+  /** What a request for access must carry (P88). Left out: unchanged. */
+  requestIdMode: z.enum(['none', 'photo', 'scan']).optional(),
+  /** Staff must say how they checked before Approve works (P88). Left out: unchanged. */
+  requestCheck: z.enum(['off', 'required']).optional(),
 });
 const KeySchema = z.object({ label: z.string().trim().min(1).max(60) });
 /** The only clients a staff member sees, or null for every client. */
@@ -148,6 +152,8 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         portalUrl: ctx.portalUrl,
         clientLinks: Boolean(f?.clientLinks),
         shareDownloadLimit: f?.shareDownloadLimit ?? 5,
+        requestIdMode: f?.requestIdMode ?? 'photo',
+        requestCheck: f?.requestCheck ?? 'off',
       });
     }),
   );
@@ -163,6 +169,8 @@ export function staffSettingsRouter(ctx: Ctx): Router {
         uploadKeepDays: s.uploadKeepDays,
         ...(s.clientLinks !== undefined ? { clientLinks: s.clientLinks } : {}),
         ...(s.shareDownloadLimit !== undefined ? { shareDownloadLimit: s.shareDownloadLimit } : {}),
+        ...(s.requestIdMode !== undefined ? { requestIdMode: s.requestIdMode } : {}),
+        ...(s.requestCheck !== undefined ? { requestCheck: s.requestCheck } : {}),
         updatedAt: ctx.now(),
       });
       await record(ctx.db, 'settings_updated', actor(req), { detail: s });
@@ -480,6 +488,8 @@ export function brandingRouter(ctx: Ctx): Router {
         accentColor: f?.accentColor ?? '#0f6cbd',
         hasLogo: Boolean(f?.logo),
         hasDarkLogo: Boolean(f?.logoDark),
+        // P88: what the request page asks for (no ID, a picture, or front and back).
+        requestIdMode: f?.requestIdMode ?? 'photo',
       });
     }),
   );

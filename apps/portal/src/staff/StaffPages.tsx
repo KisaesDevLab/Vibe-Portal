@@ -5,6 +5,7 @@
 // is already here to someone outside the client, by a secure link, is done here (P49).
 
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -780,6 +781,8 @@ interface ClientEvent {
   recipient: string | null;
   /** The client it was on (P66). */
   client?: string | null;
+  /** An approval: how staff checked who was asking (Addendum 01, layer B). */
+  check?: string | null;
 }
 
 const CLIENT_HISTORY_PAGE = 50;
@@ -898,6 +901,7 @@ function HistoryCard({
                 e.file,
                 e.person && e.person !== e.who ? e.person : null,
                 e.recipient && `to ${e.recipient}`,
+                e.check,
               ]
                 .filter(Boolean)
                 .join(' · ')}
@@ -1619,13 +1623,58 @@ interface AccessRequestRow {
   createdAt: string;
   /** P67: the photo ID sent with it. */
   idPhoto?: { contentType: string | null; size: number | null } | null;
+  /** Addendum 01, layer A: the back, what its barcode said, and the flags. */
+  idBack?: { contentType: string | null; size: number | null } | null;
+  idScan?: IdScan | null;
+  idFlags?: IdFlag[];
 }
 
-/** The photo ID of an access request (P67): the picture, or a link to the PDF. */
-function IdPhoto({ r }: { r: AccessRequestRow }): JSX.Element {
-  const src = `/api/staff/v1/access-requests/${r.id}/id-photo`;
-  if (!r.idPhoto) return <span>No photo ID was sent.</span>;
-  if (r.idPhoto.contentType === 'application/pdf') {
+/** What the barcode on the back of an ID said (never the licence number). */
+interface IdScan {
+  familyName: string;
+  firstName: string;
+  middleName: string;
+  dob: string | null;
+  expires: string | null;
+  issued: string | null;
+  address: { street: string; city: string; state: string; zip: string };
+  issuer: string;
+}
+type IdFlag = 'expired' | 'name_differs' | 'unreadable' | 'no_barcode';
+
+/** The flags of an ID, in words (the approval PDF says the same). */
+const FLAG_WORDS: Record<IdFlag, string> = {
+  expired: 'The ID has expired',
+  name_differs: 'The name on the ID differs from the name on the request',
+  unreadable: 'The barcode on the back could not be read',
+  no_barcode: 'The person said the ID has no barcode',
+};
+
+/** How staff checked who is asking (Addendum 01, layer B). The client record is in Vibe Files,
+ *  so matching it is not a choice here; nor is writing to the contact on the request, which is
+ *  what is being checked. */
+type CheckMethod = 'callback' | 'in_person' | 'other';
+const CHECKS: { method: CheckMethod; label: string; note: string | null }[] = [
+  { method: 'callback', label: 'Called the number in our records', note: 'Who you spoke to' },
+  { method: 'in_person', label: 'Met in person', note: null },
+  { method: 'other', label: 'Known to me, other', note: 'How you know this person' },
+];
+
+/** The photo ID of an access request (P67): the picture, or a link to the PDF. With front and
+ *  back (layer A), each side. */
+function IdPhoto({
+  r,
+  side = 'front',
+}: {
+  r: AccessRequestRow;
+  side?: 'front' | 'back';
+}): JSX.Element {
+  const back = side === 'back';
+  const src = `/api/staff/v1/access-requests/${r.id}/id-photo${back ? '?side=back' : ''}`;
+  const file = back ? r.idBack : r.idPhoto;
+  if (!file)
+    return <span>{back ? 'No picture of the back was sent.' : 'No photo ID was sent.'}</span>;
+  if (file.contentType === 'application/pdf') {
     return (
       <a href={src} target="_blank" rel="noreferrer">
         Open the photo ID (PDF)
@@ -1633,10 +1682,15 @@ function IdPhoto({ r }: { r: AccessRequestRow }): JSX.Element {
     );
   }
   return (
-    <a href={src} target="_blank" rel="noreferrer" title="Open the photo ID full size">
+    <a
+      href={src}
+      target="_blank"
+      rel="noreferrer"
+      title={back ? 'Open the back of the ID full size' : 'Open the photo ID full size'}
+    >
       <img
         src={src}
-        alt={`ID sent by ${r.name}`}
+        alt={back ? `Back of the ID sent by ${r.name}` : `ID sent by ${r.name}`}
         style={{
           width: '100%',
           maxWidth: 320,
@@ -1652,8 +1706,99 @@ function IdPhoto({ r }: { r: AccessRequestRow }): JSX.Element {
   );
 }
 
+/** What the barcode on the back said, beside the pictures, and the flags (layer A). */
+function IdScanFacts({ r }: { r: AccessRequestRow }): JSX.Element | null {
+  const scan = r.idScan;
+  const flags = r.idFlags ?? [];
+  if (!scan && flags.length === 0) return null;
+  const a = scan?.address;
+  const rows: [string, string][] = scan
+    ? [
+        ['Name', [scan.firstName, scan.middleName, scan.familyName].filter(Boolean).join(' ')],
+        ['Date of birth', scan.dob ?? ''],
+        ['Expires', scan.expires ?? ''],
+        ['Issued', [scan.issued, scan.issuer && `by ${scan.issuer}`].filter(Boolean).join(' ')],
+        [
+          'Address',
+          a
+            ? [a.street, [a.city, a.state].filter(Boolean).join(', '), a.zip]
+                .filter(Boolean)
+                .join(', ')
+            : '',
+        ],
+      ]
+    : [];
+  return (
+    <div style={{ display: 'grid', gap: 6, minWidth: 0 }}>
+      {flags.length > 0 && (
+        <ul
+          aria-label={`Flags on ${r.name}'s ID`}
+          style={{
+            listStyle: 'none',
+            margin: 0,
+            padding: 0,
+            display: 'flex',
+            gap: 6,
+            flexWrap: 'wrap',
+          }}
+        >
+          {flags.map((f) => (
+            <li
+              key={f}
+              style={{
+                border: '1px solid var(--vibe-color-danger)',
+                color: 'var(--vibe-color-danger)',
+                borderRadius: 999,
+                padding: '2px 10px',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              {FLAG_WORDS[f]}
+            </li>
+          ))}
+        </ul>
+      )}
+      {scan && (
+        <>
+          <span style={{ fontSize: 13 }}>
+            Read from the barcode on the back. A barcode can be made by anyone: compare it with the
+            front.
+          </span>
+          <dl
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'max-content 1fr',
+              gap: '2px 12px',
+              margin: 0,
+            }}
+          >
+            {rows
+              .filter(([, v]) => v)
+              .map(([k, v]) => (
+                <Fragment key={k}>
+                  <dt style={{ fontWeight: 600 }}>{k}</dt>
+                  <dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{v}</dd>
+                </Fragment>
+              ))}
+          </dl>
+        </>
+      )}
+    </div>
+  );
+}
+
 function Requests(): JSX.Element {
-  const reqs = useLoad<{ requests: AccessRequestRow[] }>('/v1/access-requests');
+  const reqs = useLoad<{ requests: AccessRequestRow[]; requestCheck?: 'off' | 'required' }>(
+    '/v1/access-requests',
+  );
+  // P88: with the firm's "Check before approving", Approve first asks how the person was checked.
+  const mustCheck = reqs.data?.requestCheck === 'required';
+  const [asking, setAsking] = useState<string | null>(null);
+  const [check, setCheck] = useState<{ method: CheckMethod | ''; note: string }>({
+    method: '',
+    note: '',
+  });
   const clients = useLoad<{ clients: ClientRow[] }>('/v1/clients');
   const [recordNote, setRecordNote] = useState('');
   const { act, busy, error } = useAct(reqs.reload);
@@ -1678,6 +1823,24 @@ function Requests(): JSX.Element {
       {(reqs.data?.requests ?? []).map((r) => {
         const p = pick[r.id] ?? { clients: [], role: '' };
         const set = (v: Partial<typeof p>): void => setPick({ ...pick, [r.id]: { ...p, ...v } });
+        const chosen = CHECKS.find((c) => c.method === check.method);
+        const approve = (how?: { method: CheckMethod; note: string }): void => {
+          void act(`/v1/access-requests/${r.id}/approve`, {
+            body: {
+              clientIds: p.clients,
+              roleLabel: p.role,
+              ...(how ? { check: { method: how.method, note: how.note.trim() } } : {}),
+            },
+          }).then((res) => {
+            if (res) setAsking(null);
+            // P67: the PDF for Vibe Files could not be made yet (the Log says why).
+            if (res && (res as { recorded?: boolean }).recorded === false) {
+              setRecordNote(
+                `${r.name} was approved, but the PDF of the request and photo ID could not be made yet. The portal tries again every hour; Log says why.`,
+              );
+            }
+          });
+        };
         return (
           <div
             key={r.id}
@@ -1725,7 +1888,15 @@ function Requests(): JSX.Element {
             <span>
               Confirmed: {r.confirmedContact} · asked for “{r.clientAs}” · {when(r.createdAt)}
             </span>
-            <IdPhoto r={r} />
+            {r.idBack || r.idScan || (r.idFlags ?? []).length > 0 ? (
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'start' }}>
+                <IdPhoto r={r} />
+                {r.idBack && <IdPhoto r={r} side="back" />}
+                <IdScanFacts r={r} />
+              </div>
+            ) : (
+              <IdPhoto r={r} />
+            )}
             {r.note && <span>“{r.note}”</span>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
               <label style={{ display: 'grid', gap: 4 }}>
@@ -1756,20 +1927,14 @@ function Requests(): JSX.Element {
                 onChange={(e) => set({ role: e.target.value })}
               />
               <Button
-                disabled={busy || p.clients.length === 0}
+                disabled={busy || p.clients.length === 0 || asking === r.id}
                 aria-label={`Approve ${r.name}`}
                 onClick={() => {
                   setRecordNote('');
-                  void act(`/v1/access-requests/${r.id}/approve`, {
-                    body: { clientIds: p.clients, roleLabel: p.role },
-                  }).then((res) => {
-                    // P67: the PDF for Vibe Files could not be made yet (the Log says why).
-                    if (res && (res as { recorded?: boolean }).recorded === false) {
-                      setRecordNote(
-                        `${r.name} was approved, but the PDF of the request and photo ID could not be made yet. The portal tries again every hour; Log says why.`,
-                      );
-                    }
-                  });
+                  if (mustCheck) {
+                    setCheck({ method: '', note: '' });
+                    setAsking(r.id);
+                  } else approve();
                 }}
               >
                 Approve
@@ -1787,6 +1952,59 @@ function Requests(): JSX.Element {
                 Deny
               </Button>
             </div>
+            {asking === r.id && (
+              <fieldset
+                style={{
+                  border: '1px solid var(--vibe-color-border)',
+                  borderRadius: 6,
+                  padding: 12,
+                  display: 'grid',
+                  gap: 8,
+                  margin: 0,
+                }}
+              >
+                <legend>How did you check {r.name}?</legend>
+                <span style={{ fontSize: 13 }}>
+                  It is kept with the approval and printed in its PDF. A text or email to the
+                  contact on the request does not count: that contact is what is being checked.
+                </span>
+                {CHECKS.map((c) => (
+                  <label key={c.method} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="radio"
+                      name={`check-${r.id}`}
+                      checked={check.method === c.method}
+                      onChange={() => setCheck({ method: c.method, note: '' })}
+                    />
+                    <span>{c.label}</span>
+                  </label>
+                ))}
+                {chosen?.note && (
+                  <Input
+                    label={chosen.note}
+                    name={`check-note-${r.id}`}
+                    value={check.note}
+                    maxLength={300}
+                    onChange={(e) => setCheck({ ...check, note: e.target.value })}
+                    required
+                  />
+                )}
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button
+                    disabled={busy || !chosen || (chosen.note !== null && !check.note.trim())}
+                    aria-label={`Approve ${r.name} with this check`}
+                    onClick={() => {
+                      if (chosen) approve({ method: chosen.method, note: check.note });
+                    }}
+                  >
+                    Approve
+                  </Button>
+                  <Button variant="secondary" disabled={busy} onClick={() => setAsking(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </fieldset>
+            )}
           </div>
         );
       })}
@@ -2667,6 +2885,10 @@ interface SettingsData {
   /** Downloads each new secure link allows; 0 for no limit (P58). */
   /** Empty while being typed: not saved until it is a number. */
   shareDownloadLimit: number | '';
+  /** P88: what a request for access must carry. */
+  requestIdMode?: 'none' | 'photo' | 'scan';
+  /** P88: staff must say how they checked before Approve works. */
+  requestCheck?: 'off' | 'required';
 }
 
 function Settings(): JSX.Element {
@@ -2835,6 +3057,93 @@ function Settings(): JSX.Element {
               reloadBranding();
             }}
           />
+        </Card>
+      )}
+      {form && (
+        <Card title="Access requests">
+          <form
+            style={{ display: 'grid', gap: 12, maxWidth: 520 }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (form.shareDownloadLimit === '') return;
+              void actAt('requests')('/v1/settings', {
+                method: 'PUT',
+                body: {
+                  firmName: form.firmName,
+                  accentColor: form.accentColor,
+                  uploadLimitMb: Number(form.uploadLimitMb),
+                  uploadKeepDays: Number(form.uploadKeepDays),
+                  clientLinks: form.clientLinks,
+                  shareDownloadLimit: form.shareDownloadLimit,
+                  requestIdMode: form.requestIdMode ?? 'photo',
+                  requestCheck: form.requestCheck ?? 'off',
+                },
+              }).then((r) => {
+                if (r) {
+                  setForm(null);
+                  // The request page asks for what is chosen here.
+                  reloadBranding();
+                }
+              });
+            }}
+          >
+            <p style={{ margin: 0 }}>
+              What someone who asks for access must send, and what staff must do before approving.
+              People you invite are not asked for any of this.
+            </p>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>ID with a request</span>
+              <select
+                name="requestIdMode"
+                value={form.requestIdMode ?? 'photo'}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    requestIdMode: e.target.value as NonNullable<SettingsData['requestIdMode']>,
+                  })
+                }
+              >
+                <option value="none">None</option>
+                <option value="photo">A picture of a photo ID</option>
+                <option value="scan">Front and back, barcode read</option>
+              </select>
+              <span style={{ fontSize: 13 }}>
+                <strong>Front and back</strong>: the portal reads the barcode on the back of a US or
+                Canadian license or ID and shows staff the name, date of birth, address and expiry,
+                with a flag when the ID has expired, the name differs or the barcode cannot be read.
+                It catches a wrong or old ID; it does not prove the ID is genuine.{' '}
+                <strong>None</strong>: only the email or mobile number is confirmed. An identity
+                check by Stripe is not offered yet.
+              </span>
+            </label>
+            <label style={{ display: 'grid', gap: 4 }}>
+              <span>Check before approving</span>
+              <select
+                name="requestCheck"
+                value={form.requestCheck ?? 'off'}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    requestCheck: e.target.value as NonNullable<SettingsData['requestCheck']>,
+                  })
+                }
+              >
+                <option value="off">Off</option>
+                <option value="required">Required</option>
+              </select>
+              <span style={{ fontSize: 13 }}>
+                <strong>Required</strong>: Approve works only once staff say how they checked who is
+                asking (called the number in your records, met in person, or known to them), or Vibe
+                Files finds the request matches the client record. It is printed in the approval
+                PDF. Update Vibe Files first: an older Vibe Files cannot approve requests while this
+                is required.
+              </span>
+            </label>
+            <Problem text={errorAt('requests')} />
+            <Button type="submit" disabled={busy || form.shareDownloadLimit === ''}>
+              {busyAt === 'requests' ? 'Saving…' : 'Save'}
+            </Button>
+          </form>
         </Card>
       )}
       <Card title="Portal keys (for Vibe Files › Admin › Portal)">

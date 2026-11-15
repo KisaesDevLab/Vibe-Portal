@@ -262,10 +262,28 @@ describe('moving stored files (P51)', () => {
       .expect(201);
     const id = made.body.requestId as string;
     await sendId(w, id);
+    // Addendum 01, layer A: the back is a stored file too, moved and kept by the sweep.
+    await request(w.app)
+      .post(`/api/portal/access-requests/${id}/id-photo?side=back`)
+      .set('Content-Type', 'application/octet-stream')
+      .send(ID_PNG)
+      .expect(201);
     await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
     const there = await move(boss, 'b2');
     expect(there.move.state).toBe('done');
     expect(there.storage).toBe('b2');
+    await boss.get(`/api/staff/v1/access-requests/${id}/id-photo?side=back`).expect(200);
+    // A day on, with nothing remembered as just written: the sweep takes what no row names.
+    // The back is named, so it stays.
+    (w.ctx.blobs as unknown as { recent: Map<string, number> }).recent.clear();
+    const old = new Date(w.ctx.now().getTime() - 25 * 3_600_000);
+    for (const k of bucket.items.keys()) bucket.modified.set(k, old);
+    const stray = randomUUID();
+    bucket.items.set(stray, Buffer.from('named by nothing'));
+    bucket.modified.set(stray, old);
+    await sweep(w.ctx, true);
+    expect(bucket.items.has(stray)).toBe(false);
+    await boss.get(`/api/staff/v1/access-requests/${id}/id-photo?side=back`).expect(200);
     const photo = await boss
       .get(`/api/staff/v1/access-requests/${id}/id-photo`)
       .buffer(true)
@@ -275,6 +293,7 @@ describe('moving stored files (P51)', () => {
     const back = await move(boss, 'local');
     expect(back.move.state).toBe('done');
     await boss.get(`/api/staff/v1/access-requests/${id}/id-photo`).expect(200);
+    await boss.get(`/api/staff/v1/access-requests/${id}/id-photo?side=back`).expect(200);
   });
 
   it('a move cut off part-way loses nothing, and moving again finishes it', async () => {

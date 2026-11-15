@@ -35,13 +35,16 @@
     "drizzle-orm": "^0.45.2",
     "express": "^4.19.2",
     "heic-convert": "^2.1.0",
+    "jpeg-js": "0.4.4",
     "nodemailer": "^7.0.10",
     "pdf-lib": "^1.17.1",
     "pino": "^9.1.0",
     "pino-http": "^10.1.0",
+    "pngjs": "7.0.0",
     "postgres": "^3.4.4",
     "tsx": "^4.7.0",
-    "zod": "^3.25.28"
+    "zod": "^3.25.28",
+    "zxing-wasm": "3.1.6"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.2.17",
@@ -50,6 +53,7 @@
     "@types/heic-convert": "^2.1.1",
     "@types/node": "^24.0.0",
     "@types/nodemailer": "^7.0.0",
+    "@types/pngjs": "^6.0.5",
     "@types/supertest": "^6.0.2",
     "supertest": "^7.0.0",
     "typescript": "^5.4.0",

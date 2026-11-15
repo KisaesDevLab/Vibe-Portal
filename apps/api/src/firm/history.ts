@@ -9,6 +9,7 @@ import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
 import type { Ctx } from '../context';
+import { checkWords } from '../portal/access-id';
 
 export const HistoryQuery = z.object({
   limit: z.coerce.number().int().min(1).max(500).default(50),
@@ -27,6 +28,25 @@ export interface HistoryRow {
   recipient: string | null;
   /** The client it was on (a person's activity spans their clients). */
   client: string | null;
+  /** An approval: how staff checked who was asking (Addendum 01, layer B), in words. */
+  check: string | null;
+}
+
+/** The check kept with an approval, in the words its PDF uses. */
+function checkOf(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const c = raw as { method?: unknown; matched?: unknown; note?: unknown };
+  const methods = ['record_match', 'callback', 'in_person', 'other', 'vendor'] as const;
+  const method = methods.find((m) => m === c.method);
+  if (!method) return null;
+  const matched = Array.isArray(c.matched)
+    ? c.matched.filter((m): m is schema.CheckMatched => ['email', 'mobile', 'dob'].includes(m))
+    : [];
+  return checkWords({
+    checkMethod: method,
+    checkMatched: matched,
+    checkNote: typeof c.note === 'string' ? c.note : '',
+  });
 }
 
 /** The person's name, else email, else number. */
@@ -92,6 +112,7 @@ export async function historyRows(
       file: e.file ?? e.upload ?? null,
       recipient: typeof d['to'] === 'string' ? d['to'] : null,
       client: e.client ?? null,
+      check: e.kind === 'approve' ? checkOf(d['check']) : null,
     };
   });
 }

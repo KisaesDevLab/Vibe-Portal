@@ -68,11 +68,24 @@ function likeText(q: string): string {
   return `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
 }
 // P61: one or more clients. Vibe Files sends `clientId`; the staff page sends `clientIds`.
+// Addendum 01, layer B: how staff checked who is asking. `record_match` is Vibe Files' word
+// that the request matches its client record (the record never leaves Vibe Files; only what
+// matched comes here). `vendor` waits for layer C.
+const CheckSchema = z.object({
+  method: z.enum(['record_match', 'callback', 'in_person', 'other', 'vendor']),
+  matched: z
+    .array(z.enum(['email', 'mobile', 'dob']))
+    .max(3)
+    .default([]),
+  note: z.string().trim().max(300).default(''),
+});
 const ApproveSchema = z
   .object({
     clientId: Uuid.optional(),
     clientIds: z.array(Uuid).min(1).max(50).optional(),
     roleLabel: z.string().trim().max(60).default(''),
+    /** Left out by a Vibe Files from before layer B. */
+    check: CheckSchema.optional(),
   })
   .refine((a) => a.clientId || a.clientIds?.length, 'clientId or clientIds');
 
@@ -567,7 +580,11 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           ),
         )
         .orderBy(asc(schema.accessRequest.createdAt));
+      const [firm] = await ctx.db.select({ check: schema.firm.requestCheck }).from(schema.firm);
       res.json({
+        // P88: whether Approve needs `check` (Settings is for admins; any staff member who sees
+        // every client approves, and so does Vibe Files).
+        requestCheck: firm?.check ?? 'off',
         requests: rows.map((a) => ({
           id: a.id,
           name: a.name,
@@ -580,6 +597,10 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           createdAt: a.createdAt,
           // P67: the photo ID sent with it (shown from the route below).
           idPhoto: a.idBlobKey ? { contentType: a.idContentType, size: a.idSize } : null,
+          // Layer A: the back, what its barcode said (never the licence number), the flags.
+          idBack: a.idBackBlobKey ? { contentType: a.idBackContentType, size: a.idBackSize } : null,
+          idScan: a.idScan ?? null,
+          idFlags: a.idFlags ?? [],
         })),
       });
     }),
@@ -587,16 +608,19 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
 
   // P67: the photo ID of a request (also after it is decided, until it is deleted), shown in the
   // page. History has who looked (once an hour each: the page shows it on every load).
+  // `?side=back` is the back (layer A); a look at either side is one look.
   r.get(
     '/access-requests/:id/id-photo',
     h(async (req, res) => {
       const id = z.string().uuid().safeParse(req.params['id']);
       if (!id.success) throw new HttpError(404, 'not_found');
+      const side = z.enum(['front', 'back']).default('front').safeParse(req.query['side']);
+      if (!side.success) throw new HttpError(404, 'not_found');
       const [request] = await ctx.db
         .select()
         .from(schema.accessRequest)
         .where(eq(schema.accessRequest.id, id.data));
-      const photo = request ? await readIdPhoto(ctx, request) : null;
+      const photo = request ? await readIdPhoto(ctx, request, side.data) : null;
       if (!request || !photo) throw new HttpError(404, 'not_found');
       const actor = actorOf(req);
       if (
@@ -646,6 +670,23 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       // Every client must exist and be switched on, or none is given (P61).
       if (found.length !== clientIds.length) throw new HttpError(404, 'client_not_found');
       if (found.some((c) => !c.active)) throw new HttpError(409, 'client_inactive');
+      // Layer B: with the firm's "Check before approving", an approval says how the person was
+      // checked. A Vibe Files from before it sends none and is refused, in words it shows.
+      const check = input.check;
+      const [firmRow] = await ctx.db.select({ check: schema.firm.requestCheck }).from(schema.firm);
+      if (firmRow?.check === 'required' && !check) throw new HttpError(400, 'check_required');
+      if (check) {
+        // The client record is in Vibe Files only: the staff page cannot have matched it.
+        if (check.method === 'record_match' && (staff || check.matched.length === 0)) {
+          throw new HttpError(400, 'check_invalid');
+        }
+        // Layer C is not built: nothing can have passed a vendor's check.
+        if (check.method === 'vendor') throw new HttpError(400, 'check_invalid');
+        // Who they spoke to; what "known to me" means.
+        if ((check.method === 'callback' || check.method === 'other') && !check.note) {
+          throw new HttpError(400, 'check_note_required');
+        }
+      }
       const actor = actorOf(req);
       const done = await ctx.db.transaction(async (tx) => {
         const [request] = await decide(tx, id, {
@@ -653,6 +694,13 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           // The request keeps the first; History has one entry per client.
           clientId: clientIds[0],
           decidedBy: actor.name,
+          ...(check
+            ? {
+                checkMethod: check.method,
+                checkMatched: check.method === 'record_match' ? check.matched : [],
+                checkNote: check.note,
+              }
+            : {}),
         });
         if (!request) return null;
         if (!request.confirmedContact) throw new Error('confirmed request without its contact');
@@ -689,7 +737,12 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         await record(ctx.db, 'approve', actor, {
           clientId,
           identityId: done.identityId,
-          detail: { accessRequestId: id },
+          detail: {
+            accessRequestId: id,
+            ...(check
+              ? { check: { method: check.method, matched: check.matched, note: check.note } }
+              : {}),
+          },
         });
       }
       // P67: the request and its photo ID, as a PDF for Vibe Files' Portal inbox (first client).

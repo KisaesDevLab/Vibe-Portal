@@ -388,6 +388,8 @@ describe('Settings (P36)', () => {
       accentColor: '#225588',
       hasLogo: true,
       hasDarkLogo: false,
+      // P88: what the request page asks for.
+      requestIdMode: 'photo',
     });
     const logo = await request(w.app).get('/api/portal/branding/logo').expect(200);
     expect(logo.headers['content-type']).toBe('image/png');

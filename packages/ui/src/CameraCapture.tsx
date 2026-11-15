@@ -12,6 +12,9 @@
 // and WebView — including the in-app browsers that have no getUserMedia.
 //
 // Deferred: jscanify/OpenCV edge detection + perspective crop.
+//
+// Changed here (Vibe Portal, Addendum 01): `single` takes one picture and closes, for the two
+// sides of a photo ID on the request page.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -31,6 +34,8 @@ export interface CameraCaptureProps {
   onClose: () => void;
   /** Dialog title / aria-label. */
   title?: string;
+  /** One picture, then the dialog closes (no page count, one file from the phone's camera). */
+  single?: boolean;
 }
 
 type Phase = 'starting' | 'ready' | 'error';
@@ -45,6 +50,7 @@ export function CameraCapture({
   onCapture,
   onClose,
   title = 'Scan a document',
+  single = false,
 }: CameraCaptureProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -168,7 +174,8 @@ export function CameraCapture({
         // closed. Dropping the page is right — the user chose Done/Cancel.
         if (!blob || !aliveRef.current) return;
         onCapture(blob, { source: 'scanner' });
-        setCount((c) => c + 1);
+        if (single) onClose();
+        else setCount((c) => c + 1);
       },
       'image/jpeg',
       0.92,
@@ -178,11 +185,12 @@ export function CameraCapture({
   function onNativeFiles(list: FileList | null): void {
     if (!list) return;
     let added = 0;
-    for (const f of Array.from(list)) {
+    for (const f of Array.from(list).slice(0, single ? 1 : undefined)) {
       onCapture(f, { source: 'native', filename: f.name });
       added += 1;
     }
-    if (added > 0) setCount((c) => c + added);
+    if (added > 0 && single) onClose();
+    else if (added > 0) setCount((c) => c + added);
   }
 
   const nativeInput = (
@@ -191,7 +199,7 @@ export function CameraCapture({
       type="file"
       accept={PHOTO_CAPTURE_ACCEPT}
       capture="environment"
-      multiple
+      multiple={!single}
       style={{ display: 'none' }}
       onChange={(e) => {
         onNativeFiles(e.target.files);
@@ -323,7 +331,7 @@ export function CameraCapture({
             type="button"
             onClick={snap}
             disabled={phase !== 'ready'}
-            aria-label="Capture page"
+            aria-label={single ? 'Take the picture' : 'Capture page'}
             style={{
               width: 64,
               height: 64,

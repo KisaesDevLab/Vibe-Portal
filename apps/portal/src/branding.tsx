@@ -12,6 +12,8 @@ export interface Branding {
   hasLogo: boolean;
   /** P60: a logo for dark mode (absent from older servers). */
   hasDarkLogo?: boolean;
+  /** P88: what the request page asks for (absent from older servers: one picture). */
+  requestIdMode?: 'none' | 'photo' | 'scan';
   /** Changes when the logo may have changed, so the browser fetches it again. */
   logoVersion: number;
 }

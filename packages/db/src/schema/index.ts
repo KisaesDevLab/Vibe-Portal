@@ -57,6 +57,22 @@ export interface StorageNote {
   snapshotFailedAt?: string;
 }
 
+/** What the barcode on the back of an ID said (Addendum 01, layer A). Dates are YYYY-MM-DD.
+ *  The licence number is never kept (P81). */
+export interface IdScan {
+  familyName: string;
+  firstName: string;
+  middleName: string;
+  dob: string | null;
+  expires: string | null;
+  issued: string | null;
+  address: { street: string; city: string; state: string; zip: string };
+  /** The state or province, and the country, that issued it. */
+  issuer: string;
+}
+export type IdFlag = 'expired' | 'name_differs' | 'unreadable' | 'no_barcode';
+export type CheckMatched = 'email' | 'mobile' | 'dob';
+
 /** The last setup link emailed to the first admin (P52). */
 export interface FirstAdminMail {
   email: string;
@@ -97,6 +113,15 @@ export const firm = pgTable('firm', {
   clientLinks: boolean('client_links').notNull().default(false),
   /** Downloads each file of a new secure link allows; 0 for no limit (P58). */
   shareDownloadLimit: integer('share_download_limit').notNull().default(5),
+  /** P88: what a request for access must carry: no ID, a picture of one (P67), or its front
+   *  and back with the back's barcode read (Addendum 01, layer A). */
+  requestIdMode: text('request_id_mode', { enum: ['none', 'photo', 'scan'] })
+    .notNull()
+    .default('photo'),
+  /** P88: staff must say how they checked before Approve works (Addendum 01, layer B). */
+  requestCheck: text('request_check', { enum: ['off', 'required'] })
+    .notNull()
+    .default('off'),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 });
@@ -271,6 +296,20 @@ export const accessRequest = pgTable('access_request', {
   identityId: uuid('identity_id'),
   clientIds: jsonb('client_ids').$type<string[]>(),
   roleLabel: text('role_label'),
+  /** Addendum 01, layer A: the back of the ID, kept and removed with the front. */
+  idBackBlobKey: text('id_back_blob_key'),
+  idBackDekWrapped: bytea('id_back_dek_wrapped'),
+  idBackContentType: text('id_back_content_type'),
+  idBackSize: bigint('id_back_size', { mode: 'number' }),
+  /** What the back's barcode said. Never the licence number (P81). */
+  idScan: jsonb('id_scan').$type<IdScan>(),
+  idFlags: jsonb('id_flags').$type<IdFlag[]>(),
+  /** Addendum 01, layer B: how staff checked before approving. */
+  checkMethod: text('check_method', {
+    enum: ['record_match', 'callback', 'in_person', 'other', 'vendor'],
+  }),
+  checkMatched: jsonb('check_matched').$type<CheckMatched[]>(),
+  checkNote: text('check_note'),
 });
 
 export const files = pgTable('files', {

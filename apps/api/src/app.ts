@@ -19,6 +19,7 @@ import { accessRequestsRouter } from './portal/access-requests';
 import { clientFilesRouter } from './portal/files';
 import { clientSharesRouter } from './portal/client-shares';
 import { sharedRouter } from './portal/shared';
+import type { BarcodeReader } from './files/barcode';
 import { clientUploadsRouter, type HeicConverter } from './portal/uploads';
 import { invitationsRouter } from './portal/invitations';
 import { serveClient } from './lib/static';
@@ -31,6 +32,8 @@ export interface AppDeps {
   ctx?: Ctx;
   /** HEIC to JPG (P33); tests may pass their own. */
   convertHeic?: HeicConverter;
+  /** The barcode on the back of an ID (Addendum 01, layer A); tests may pass their own. */
+  readBarcode?: BarcodeReader;
   /** The built client portal, served at / (the container). */
   staticDir?: string;
 }
@@ -74,7 +77,10 @@ export function createApp(deps: AppDeps): Express {
     });
     app.use('/api/portal/auth', clientAuthRouter(ctx));
     app.use('/api/portal/invitations', invitationsRouter(ctx));
-    app.use('/api/portal/access-requests', accessRequestsRouter(ctx, deps.convertHeic));
+    app.use(
+      '/api/portal/access-requests',
+      accessRequestsRouter(ctx, deps.convertHeic, deps.readBarcode),
+    );
     app.use('/api/portal/files', clientFilesRouter(ctx));
     // The signed-in person's own account: the mobile number they sign in with (P50).
     app.use('/api/portal/account', accountRouter(ctx));

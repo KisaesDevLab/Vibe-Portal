@@ -24,6 +24,7 @@ import { messageTo } from '../lib/notify';
 import { hit, LIMITS } from '../lib/rate-limit';
 import { sha256, sixDigitCode } from '../lib/secrets';
 import { BREAKGLASS_EMAIL } from '../staff/sso';
+import type { BarcodeReader } from '../files/barcode';
 import type { HeicConverter } from './uploads';
 import { storeIdPhoto } from './access-id';
 
@@ -36,9 +37,18 @@ const CreateSchema = z.object({
   clientAs: z.string().trim().min(1).max(200),
   note: z.string().trim().max(1000).optional(),
 });
-const ConfirmSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
+const ConfirmSchema = z.object({
+  code: z.string().regex(/^\d{6}$/),
+  /** Layer A: "My ID has no barcode" (a passport, a foreign ID): the front alone, flagged. */
+  noBarcode: z.boolean().optional(),
+});
+const Side = z.enum(['front', 'back']).default('front');
 
-export function accessRequestsRouter(ctx: Ctx, convertHeic?: HeicConverter): Router {
+export function accessRequestsRouter(
+  ctx: Ctx,
+  convertHeic?: HeicConverter,
+  readBarcode?: BarcodeReader,
+): Router {
   const r = express.Router();
 
   /** Sends a new confirmation code for a request to `to`. */
@@ -145,11 +155,14 @@ export function accessRequestsRouter(ctx: Ctx, convertHeic?: HeicConverter): Rou
   );
 
   // P67: the photo ID, sent after the request is made and before the code is given. Sent again,
-  // it replaces the first. Only for a request still waiting for its code.
+  // it replaces the first. Only for a request still waiting for its code. Layer A: `?side=back`
+  // is the back, whose barcode is read (the front when left out, as the page before sent it).
   r.post(
     '/:id/id-photo',
     h(async (req, res) => {
       const id = requestId(req.params['id']);
+      const side = Side.safeParse(req.query['side']);
+      if (!side.success) throw new HttpError(400, 'invalid_side');
       const now = ctx.now();
       if (!(await hit(ctx.db, `id-photo:ip:${clientIp(req)}`, LIMITS.idPhotoPerIp, now))) {
         throw new HttpError(429, 'too_many_requests');
@@ -168,8 +181,13 @@ export function accessRequestsRouter(ctx: Ctx, convertHeic?: HeicConverter): Rou
           ),
         );
       if (!request) throw new HttpError(404, 'not_found');
-      const stored = await storeIdPhoto(ctx, request.id, req, convertHeic);
-      res.status(201).json({ ok: true, contentType: stored.contentType });
+      const stored = await storeIdPhoto(ctx, request.id, req, side.data, convertHeic, readBarcode);
+      res.status(201).json({
+        ok: true,
+        contentType: stored.contentType,
+        // The back only: false when no licence barcode was read (the page asks once more).
+        ...(stored.readable === undefined ? {} : { readable: stored.readable }),
+      });
     }),
   );
 
@@ -177,17 +195,29 @@ export function accessRequestsRouter(ctx: Ctx, convertHeic?: HeicConverter): Rou
     '/:id/confirm',
     h(async (req, res) => {
       const id = requestId(req.params['id']);
-      const { code } = body(ConfirmSchema, req);
+      const { code, noBarcode } = body(ConfirmSchema, req);
       const now = ctx.now();
       if (!(await hit(ctx.db, `verify:ip:${clientIp(req)}`, LIMITS.verifyPerIp, now))) {
         throw new HttpError(429, 'too_many_requests');
       }
       // P67: no request reaches staff without a photo ID (asked before the code is used up).
+      // P88: unless the firm asks for none; and with "front and back", the back too, or the
+      // person's word that the ID has no barcode.
       const [held] = await ctx.db
-        .select({ key: schema.accessRequest.idBlobKey })
+        .select({
+          front: schema.accessRequest.idBlobKey,
+          back: schema.accessRequest.idBackBlobKey,
+        })
         .from(schema.accessRequest)
         .where(eq(schema.accessRequest.id, id));
-      if (held && !held.key) throw new HttpError(400, 'id_required');
+      const [firm] = await ctx.db.select({ mode: schema.firm.requestIdMode }).from(schema.firm);
+      const mode = firm?.mode ?? 'photo';
+      if (held && mode !== 'none') {
+        if (!held.front) throw new HttpError(400, 'id_required');
+        if (mode === 'scan' && !held.back && !noBarcode) {
+          throw new HttpError(400, 'id_back_required');
+        }
+      }
       const ch = await checkCode(
         ctx.db,
         and(
@@ -200,7 +230,12 @@ export function accessRequestsRouter(ctx: Ctx, convertHeic?: HeicConverter): Rou
       if (!ch) throw new HttpError(400, 'code_wrong');
       const [confirmed] = await ctx.db
         .update(schema.accessRequest)
-        .set({ confirmedAt: now, confirmedContact: ch.contact })
+        .set({
+          confirmedAt: now,
+          confirmedContact: ch.contact,
+          // Said to have no barcode, and no back was sent: flagged for staff.
+          ...(mode === 'scan' && held && !held.back ? { idFlags: ['no_barcode' as const] } : {}),
+        })
         .where(and(eq(schema.accessRequest.id, id), isNull(schema.accessRequest.confirmedAt)))
         .returning({ name: schema.accessRequest.name, clientAs: schema.accessRequest.clientAs });
       // P59: the request is now on the staff page; tell the staff an admin ticked (once).

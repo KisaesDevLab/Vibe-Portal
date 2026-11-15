@@ -150,13 +150,15 @@ export async function probe(store: ObjectStore): Promise<void> {
   if (await store.exists(key)) throw new Error('a deleted file was still there');
 }
 
-/** Whether any file, upload, marked copy or photo ID (P67) still uses this stored file. */
+/** Whether any file, upload, marked copy or photo ID (P67; its back, Addendum 01) still uses
+ *  this stored file. */
 async function inUse(ctx: Ctx, key: string): Promise<boolean> {
   const rows = await ctx.db.execute<{ n: number }>(sql`
     SELECT 1 AS n FROM ${schema.files} WHERE ${schema.files.blobKey} = ${key}
     UNION ALL SELECT 1 FROM ${schema.uploads} WHERE ${schema.uploads.blobKey} = ${key}
     UNION ALL SELECT 1 FROM ${schema.fileShareMark} WHERE ${schema.fileShareMark.blobKey} = ${key}
     UNION ALL SELECT 1 FROM ${schema.accessRequest} WHERE ${schema.accessRequest.idBlobKey} = ${key}
+    UNION ALL SELECT 1 FROM ${schema.accessRequest} WHERE ${schema.accessRequest.idBackBlobKey} = ${key}
     LIMIT 1`);
   return rowsOf<{ n: number }>(rows).length > 0;
 }
@@ -167,7 +169,9 @@ async function allInUse(ctx: Ctx): Promise<Set<string>> {
     UNION SELECT ${schema.uploads.blobKey} FROM ${schema.uploads} WHERE ${schema.uploads.blobKey} IS NOT NULL
     UNION SELECT ${schema.fileShareMark.blobKey} FROM ${schema.fileShareMark}
     UNION SELECT ${schema.accessRequest.idBlobKey} FROM ${schema.accessRequest}
-      WHERE ${schema.accessRequest.idBlobKey} IS NOT NULL`);
+      WHERE ${schema.accessRequest.idBlobKey} IS NOT NULL
+    UNION SELECT ${schema.accessRequest.idBackBlobKey} FROM ${schema.accessRequest}
+      WHERE ${schema.accessRequest.idBackBlobKey} IS NOT NULL`);
   return new Set(rowsOf<{ k: string }>(rows).map((r) => r.k));
 }
 

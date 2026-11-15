@@ -11,23 +11,31 @@
 // - Deleted 7 days after Vibe Files fetched the record (it fetches only once the checksum
 //   matches), the portal's copy of the PDF too; a denied request's 30 days after the decision;
 //   an unconfirmed request's a day after it was made.
+//
+// Addendum 01, layer A: with the firm's setting "front and back" (P88), the back is kept beside
+// the front and its barcode is read (files/barcode.ts, portal/aamva.ts): the fields and flags
+// are shown to staff and printed in the record. The back, the fields and the flags go when the
+// front does. Layer B: the record says how staff checked. With the setting "no ID", a request
+// has neither picture and the record says so.
 
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 
-import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNotNull, isNull, lt, or } from 'drizzle-orm';
 import { generateKey } from '@vibe/crypto';
 import fontkit from '@pdf-lib/fontkit';
 import { degrees, PDFDocument, rgb, type PDFFont, type PDFPage } from 'pdf-lib';
 import { schema } from '@vibe-portal/db';
 
 import { firmName, type Ctx } from '../context';
+import { BARCODE_MAX_PIXELS, readBarcodeQueued, type BarcodeReader } from '../files/barcode';
 import { convertHeicQueued, HEIC_MAX_BYTES } from '../files/heic';
 import { kindOf, SNIFF_BYTES } from '../files/sniff';
 import { record } from '../lib/events';
 import { HttpError } from '../lib/http';
+import { parseAamva, scanFlags, type IdScan } from './aamva';
 
 /** A phone photo or a scan: plenty for an ID, small enough to hold while checking it. */
 export const ID_MAX_BYTES = 15 * 1024 * 1024;
@@ -106,26 +114,35 @@ export function imageSize(b: Buffer, kind: 'png' | 'jpeg'): { w: number; h: numb
   return null;
 }
 
-/** Refuses a picture that is not one, or too large to put in the PDF. */
-function checkPicture(b: Buffer, kind: 'png' | 'jpeg'): void {
+/** Refuses a picture that is not one, or too large to put in the PDF. Its pixel count. */
+function checkPicture(b: Buffer, kind: 'png' | 'jpeg'): number {
   const size = imageSize(b, kind);
   if (!size || size.w === 0 || size.h === 0) throw new HttpError(415, 'photo_unreadable');
   if (size.w > ID_MAX_SIDE || size.h > ID_MAX_SIDE || size.w * size.h > ID_MAX_PIXELS[kind]) {
     throw new HttpError(413, 'image_too_large');
   }
+  return size.w * size.h;
 }
+
+export type IdSide = 'front' | 'back';
 
 /**
  * Stores the photo ID for a request still waiting for its code, replacing one sent before.
  * JPEG, PNG or PDF, by content; a phone's HEIC photo is converted to JPEG. Refused (and nothing
  * kept) when the request was confirmed or decided while it was being sent.
+ *
+ * The back (Addendum 01, layer A) is a picture, not a PDF: its barcode is read here, once, and
+ * the fields and flags are kept with it. `readable` is false when no licence barcode could be
+ * read: the page asks once for another picture, and a second like it is kept and flagged.
  */
 export async function storeIdPhoto(
   ctx: Ctx,
   requestId: string,
   body: Readable,
+  side: IdSide = 'front',
   convertHeic: (b: Buffer) => Promise<Buffer> = convertHeicQueued,
-): Promise<{ contentType: string; size: number }> {
+  readBarcode: BarcodeReader = readBarcodeQueued,
+): Promise<{ contentType: string; size: number; readable?: boolean }> {
   // Held in memory (at most 15 MB): a picture is checked whole before it is kept.
   const parts: Buffer[] = [];
   let size = 0;
@@ -139,7 +156,10 @@ export async function storeIdPhoto(
   if (kind !== 'jpeg' && kind !== 'png' && kind !== 'pdf' && kind !== 'heic') {
     throw new HttpError(415, 'id_type');
   }
+  // A barcode is read from a picture.
+  if (side === 'back' && kind === 'pdf') throw new HttpError(415, 'id_type');
   let contentType: string;
+  let picture: { kind: 'jpeg' | 'png'; pixels: number } | null = null;
   if (kind === 'heic') {
     try {
       bytes = await convertHeic(bytes);
@@ -147,18 +167,36 @@ export async function storeIdPhoto(
       ctx.log.warn({ err }, 'photo ID: heic conversion failed');
       throw new HttpError(415, 'photo_unreadable');
     }
-    checkPicture(bytes, 'jpeg');
+    picture = { kind: 'jpeg', pixels: checkPicture(bytes, 'jpeg') };
     contentType = TYPES.jpeg;
   } else {
-    if (kind !== 'pdf') checkPicture(bytes, kind);
+    if (kind !== 'pdf') picture = { kind, pixels: checkPicture(bytes, kind) };
     contentType = TYPES[kind];
+  }
+  let scan: IdScan | null = null;
+  if (side === 'back' && picture && picture.pixels <= BARCODE_MAX_PIXELS) {
+    try {
+      // The barcode's text holds the licence number: it is parsed and dropped here, and never
+      // logged (P81).
+      const text = await readBarcode(bytes, picture.kind);
+      scan = text ? parseAamva(text) : null;
+    } catch (err) {
+      ctx.log.warn(
+        { message: err instanceof Error ? err.message : 'failed', accessRequestId: requestId },
+        'photo ID: the barcode could not be read',
+      );
+    }
   }
   const dek = generateKey();
   const stored = await ctx.blobs.put(Readable.from([bytes]), dek, ID_MAX_BYTES);
   // Only while the request still waits for its code; the earlier ID is read in the same step.
   const old = await ctx.db.transaction(async (tx) => {
     const [cur] = await tx
-      .select({ key: schema.accessRequest.idBlobKey })
+      .select({
+        front: schema.accessRequest.idBlobKey,
+        back: schema.accessRequest.idBackBlobKey,
+        name: schema.accessRequest.name,
+      })
       .from(schema.accessRequest)
       .where(
         and(
@@ -169,38 +207,65 @@ export async function storeIdPhoto(
       )
       .for('update');
     if (!cur) return undefined;
+    const wrapped = Buffer.from(ctx.keyring.wrap(dek));
     await tx
       .update(schema.accessRequest)
-      .set({
-        idBlobKey: stored.blobKey,
-        idDekWrapped: Buffer.from(ctx.keyring.wrap(dek)),
-        idContentType: contentType,
-        idSize: stored.size,
-        idRemovedAt: null,
-      })
+      .set(
+        side === 'back'
+          ? {
+              idBackBlobKey: stored.blobKey,
+              idBackDekWrapped: wrapped,
+              idBackContentType: contentType,
+              idBackSize: stored.size,
+              idScan: scan,
+              idFlags: scanFlags(scan, cur.name, ctx.now()),
+              idRemovedAt: null,
+            }
+          : {
+              idBlobKey: stored.blobKey,
+              idDekWrapped: wrapped,
+              idContentType: contentType,
+              idSize: stored.size,
+              idRemovedAt: null,
+            },
+      )
       .where(eq(schema.accessRequest.id, requestId));
-    return cur.key;
+    return (side === 'back' ? cur.back : cur.front) ?? null;
   });
   if (old === undefined) {
     await ctx.blobs.remove(stored.blobKey);
     throw new HttpError(409, 'request_closed');
   }
   if (old) await ctx.blobs.remove(old);
-  return { contentType, size: stored.size };
+  return {
+    contentType,
+    size: stored.size,
+    ...(side === 'back' ? { readable: scan !== null } : {}),
+  };
 }
 
 /** The photo ID's bytes and type, or null when there is none (never sent, or removed). */
 export async function readIdPhoto(
   ctx: Ctx,
-  request: Pick<Request, 'id' | 'idBlobKey' | 'idDekWrapped' | 'idContentType'>,
+  request: Pick<
+    Request,
+    | 'id'
+    | 'idBlobKey'
+    | 'idDekWrapped'
+    | 'idContentType'
+    | 'idBackBlobKey'
+    | 'idBackDekWrapped'
+    | 'idBackContentType'
+  >,
+  side: IdSide = 'front',
 ): Promise<{ bytes: Buffer; contentType: string } | null> {
-  if (!request.idBlobKey || !request.idDekWrapped) return null;
+  const key = side === 'back' ? request.idBackBlobKey : request.idBlobKey;
+  const dek = side === 'back' ? request.idBackDekWrapped : request.idDekWrapped;
+  const type = side === 'back' ? request.idBackContentType : request.idContentType;
+  if (!key || !dek) return null;
   try {
-    const bytes = await ctx.blobs.read(
-      request.idBlobKey,
-      ctx.keyring.unwrap(new Uint8Array(request.idDekWrapped)),
-    );
-    return { bytes, contentType: request.idContentType ?? 'application/octet-stream' };
+    const bytes = await ctx.blobs.read(key, ctx.keyring.unwrap(new Uint8Array(dek)));
+    return { bytes, contentType: type ?? 'application/octet-stream' };
   } catch (err) {
     ctx.log.error({ err, id: request.id }, 'photo ID failed to decrypt');
     throw new HttpError(500, 'file_unreadable');
@@ -273,10 +338,53 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
       }
     }
   }
+  // P88: a request with no ID (the firm asks for none) has a record all the same. Never
+  // filed, the portal's copy goes 90 days after approval, as it does with an ID.
+  const unfiled = records.filter((r) => r.blobKey && !settledAt(r));
+  if (unfiled.length > 0) {
+    const bare = await ctx.db
+      .select({ id: schema.accessRequest.id })
+      .from(schema.accessRequest)
+      .where(
+        and(
+          inArray(
+            schema.accessRequest.id,
+            unfiled.map((r) => r.requestId).filter((id): id is string => id !== null),
+          ),
+          eq(schema.accessRequest.status, 'approved'),
+          isNull(schema.accessRequest.idBlobKey),
+          isNull(schema.accessRequest.idBackBlobKey),
+          lt(schema.accessRequest.decidedAt, ago(APPROVED_MAX_DAYS)),
+        ),
+      );
+    const bareIds = new Set(bare.map((b) => b.id));
+    for (const rec of unfiled.filter((r) => r.requestId && bareIds.has(r.requestId))) {
+      const [done] = await ctx.db
+        .update(schema.uploads)
+        .set({ purgedAt: now, blobKey: null, dekWrapped: null })
+        .where(and(eq(schema.uploads.id, rec.uploadId), isNull(schema.uploads.purgedAt)))
+        .returning({ id: schema.uploads.id });
+      if (done && rec.blobKey) {
+        ctx.log.warn(
+          { accessRequestId: rec.requestId, days: APPROVED_MAX_DAYS },
+          'request PDF deleted after 90 days: Vibe Files never filed it',
+        );
+        await ctx.blobs.remove(rec.blobKey);
+        await record(
+          ctx.db,
+          'upload_purged',
+          { kind: 'system', name: 'purge' },
+          { uploadId: rec.uploadId },
+        );
+      }
+    }
+  }
   const held = await ctx.db
     .select()
     .from(schema.accessRequest)
-    .where(isNotNull(schema.accessRequest.idBlobKey));
+    .where(
+      or(isNotNull(schema.accessRequest.idBlobKey), isNotNull(schema.accessRequest.idBackBlobKey)),
+    );
   const due = held.filter((r) => {
     if (!r.confirmedAt) return r.createdAt < ago(UNCONFIRMED_ID_DAYS);
     if (r.status === 'pending' || !r.decidedAt) return false;
@@ -316,16 +424,27 @@ export async function purgeIdPhotos(ctx: Ctx): Promise<number> {
       }
     }
     if (r.idBlobKey) await ctx.blobs.remove(r.idBlobKey);
+    // Layer A: the back, and what its barcode said, go with the front.
+    if (r.idBackBlobKey) await ctx.blobs.remove(r.idBackBlobKey);
     await ctx.db
       .update(schema.accessRequest)
-      .set({ idBlobKey: null, idDekWrapped: null, idRemovedAt: now })
+      .set({
+        idBlobKey: null,
+        idDekWrapped: null,
+        idBackBlobKey: null,
+        idBackDekWrapped: null,
+        idScan: null,
+        idFlags: null,
+        idRemovedAt: now,
+      })
       .where(eq(schema.accessRequest.id, r.id));
   }
   return due.length;
 }
 
-/** An approved request whose record could not be made (it still has its ID): made again, from
- *  what the approval stored (the person, every client, the role). */
+/** An approved request whose record could not be made: made again, from what the approval
+ *  stored (the person, every client, the role), for as long as its ID would be kept at most
+ *  (P88: a request may have no ID, so the 90 days are counted, not the ID looked for). */
 async function remakeMissingRecords(ctx: Ctx): Promise<void> {
   const rows = await ctx.db
     .select({ r: schema.accessRequest, upload: schema.uploads.id })
@@ -334,8 +453,8 @@ async function remakeMissingRecords(ctx: Ctx): Promise<void> {
     .where(
       and(
         eq(schema.accessRequest.status, 'approved'),
-        isNotNull(schema.accessRequest.idBlobKey),
         isNotNull(schema.accessRequest.identityId),
+        gt(schema.accessRequest.decidedAt, new Date(ctx.now().getTime() - APPROVED_MAX_DAYS * DAY)),
       ),
     );
   const missing = rows.filter(({ upload }) => !upload);
@@ -444,10 +563,49 @@ export interface RecordFacts {
   roleLabel: string;
 }
 
-/** The request, its decision and its photo ID, as a PDF; the original ID file is attached. */
+type IdFile = { bytes: Buffer; contentType: string };
+
+/** A date of the barcode (YYYY-MM-DD), or a dash. */
+const dayOr = (d: string | null | undefined): string => d ?? '-';
+
+/** The flags of an ID, in words (the staff page says the same). */
+export const FLAG_WORDS: Record<schema.IdFlag, string> = {
+  expired: 'The ID has expired',
+  name_differs: 'The name on the ID differs from the name on the request',
+  unreadable: 'The barcode on the back could not be read',
+  no_barcode: 'The person said the ID has no barcode',
+};
+
+/** How staff checked before approving (Addendum 01, layer B), in words. */
+export function checkWords(r: Pick<Request, 'checkMethod' | 'checkMatched' | 'checkNote'>): string {
+  const note = r.checkNote?.trim();
+  switch (r.checkMethod) {
+    case 'record_match': {
+      const what = (r.checkMatched ?? []).map(
+        (m) => ({ email: 'Email', mobile: 'Mobile number', dob: 'Date of birth' })[m],
+      );
+      return what.length > 0
+        ? `${what.join(', ')} ${what.length > 1 ? 'match' : 'matches'} the client record`
+        : 'Matches the client record';
+    }
+    case 'callback':
+      return `Called the number in the firm's records${note ? `; spoke to ${note}` : ''}`;
+    case 'in_person':
+      return `Met in person${note ? ` (${note})` : ''}`;
+    case 'other':
+      return `Known to the staff member${note ? `: ${note}` : ''}`;
+    case 'vendor':
+      return 'Passed an identity check by the vendor';
+    default:
+      return 'No check was recorded';
+  }
+}
+
+/** The request, its decision and its photo ID, as a PDF; the original ID files are attached. */
 export async function requestRecordPdf(
   facts: RecordFacts,
-  id: { bytes: Buffer; contentType: string } | null,
+  id: IdFile | null,
+  back: IdFile | null = null,
 ): Promise<Buffer> {
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
@@ -482,6 +640,10 @@ export async function requestRecordPdf(
     ['Requested', fmt(r.createdAt)],
     ['Confirmed', fmt(r.confirmedAt)],
     ['Approved', `${fmt(facts.approvedAt)} by ${facts.approvedBy}`],
+    // Layer B: what the staff member checked (only when one was recorded).
+    ...(r.checkMethod
+      ? ([[`Checked by ${facts.approvedBy}`, checkWords(r)]] as [string, string][])
+      : []),
     ['Access given to', facts.clientNames.join(', ')],
     ...(facts.roleLabel ? ([['Role', facts.roleLabel]] as [string, string][]) : []),
     ['Request id on the portal', r.id],
@@ -492,60 +654,112 @@ export async function requestRecordPdf(
     y -= 2;
   }
   y -= 8;
-  write('Photo ID', 12, bold);
-  if (!id) {
-    write('No photo ID was sent with this request.');
-  } else {
+  /** One side of the ID: attached as sent, and shown. */
+  const show = async (file: IdFile, attachAs: string, what: string): Promise<void> => {
     // The file as sent, whatever happens below.
     const ext =
-      id.contentType === 'application/pdf' ? 'pdf' : id.contentType === 'image/png' ? 'png' : 'jpg';
-    await pdf.attach(id.bytes, `photo-id.${ext}`, {
-      mimeType: id.contentType,
-      description: 'The photo ID as sent',
+      file.contentType === 'application/pdf'
+        ? 'pdf'
+        : file.contentType === 'image/png'
+          ? 'png'
+          : 'jpg';
+    await pdf.attach(file.bytes, `${attachAs}.${ext}`, {
+      mimeType: file.contentType,
+      description: `${what} as sent`,
     });
-    if (id.contentType === 'application/pdf') {
+    if (file.contentType === 'application/pdf') {
       try {
-        const src = await PDFDocument.load(id.bytes, { ignoreEncryption: true });
+        const src = await PDFDocument.load(file.bytes, { ignoreEncryption: true });
         if (src.isEncrypted) {
-          write('The photo ID is a password-protected PDF: it is attached to this document.');
+          write(`${what} is a password-protected PDF: it is attached to this document.`);
         } else {
-          write('The photo ID was sent as a PDF: its pages follow (it is also attached).');
+          write(`${what} was sent as a PDF: its pages follow (it is also attached).`);
           for (const p of await pdf.copyPages(src, src.getPageIndices())) pdf.addPage(p);
+          // Whatever follows starts on a page of its own, after the copied ones.
+          y = 0;
         }
       } catch {
-        write('The photo ID PDF could not be read: it is attached to this document.');
+        write(`${what} PDF could not be read: it is attached to this document.`);
       }
-    } else {
-      try {
-        const img =
-          id.contentType === 'image/png'
-            ? await pdf.embedPng(id.bytes)
-            : await pdf.embedJpg(id.bytes);
-        if (y - MARGIN < 200) {
-          page = pdf.addPage(PAGE);
-          y = PAGE[1] - MARGIN;
-        }
-        // A phone photo is often stored sideways with a note to turn it (EXIF orientation).
-        const turn = id.contentType === 'image/jpeg' ? jpegOrientation(id.bytes) : 1;
-        const sideways = turn === 6 || turn === 8;
-        const shownW = sideways ? img.height : img.width;
-        const shownH = sideways ? img.width : img.height;
-        const scale = Math.min(width / shownW, (y - MARGIN) / shownH, 1);
-        const w = img.width * scale;
-        const h = img.height * scale;
-        // pdf-lib turns an image about its lower-left corner, counter-clockwise.
-        const at =
-          turn === 6
-            ? { x: MARGIN, y, rotate: degrees(-90) }
-            : turn === 8
-              ? { x: MARGIN + h, y: y - w, rotate: degrees(90) }
-              : turn === 3
-                ? { x: MARGIN + w, y, rotate: degrees(180) }
-                : { x: MARGIN, y: y - h, rotate: degrees(0) };
-        page.drawImage(img, { ...at, width: w, height: h });
-      } catch {
-        write('The photo could not be shown here: it is attached to this document.');
+      return;
+    }
+    try {
+      const img =
+        file.contentType === 'image/png'
+          ? await pdf.embedPng(file.bytes)
+          : await pdf.embedJpg(file.bytes);
+      if (y - MARGIN < 200) {
+        page = pdf.addPage(PAGE);
+        y = PAGE[1] - MARGIN;
       }
+      // A phone photo is often stored sideways with a note to turn it (EXIF orientation).
+      const turn = file.contentType === 'image/jpeg' ? jpegOrientation(file.bytes) : 1;
+      const sideways = turn === 6 || turn === 8;
+      const shownW = sideways ? img.height : img.width;
+      const shownH = sideways ? img.width : img.height;
+      const scale = Math.min(width / shownW, (y - MARGIN) / shownH, 1);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      // pdf-lib turns an image about its lower-left corner, counter-clockwise.
+      const at =
+        turn === 6
+          ? { x: MARGIN, y, rotate: degrees(-90) }
+          : turn === 8
+            ? { x: MARGIN + h, y: y - w, rotate: degrees(90) }
+            : turn === 3
+              ? { x: MARGIN + w, y, rotate: degrees(180) }
+              : { x: MARGIN, y: y - h, rotate: degrees(0) };
+      page.drawImage(img, { ...at, width: w, height: h });
+      y -= shownH * scale + 12;
+    } catch {
+      write('The photo could not be shown here: it is attached to this document.');
+    }
+  };
+
+  write('Photo ID', 12, bold);
+  // Layer A: what the barcode on the back said, and the flags, before the pictures.
+  const scan = r.idScan;
+  const flags = r.idFlags ?? [];
+  if (scan) {
+    const a = scan.address;
+    const scanRows: [string, string][] = [
+      [
+        'Name in the barcode',
+        [scan.firstName, scan.middleName, scan.familyName].filter(Boolean).join(' ') || '-',
+      ],
+      ['Date of birth', dayOr(scan.dob)],
+      ['Expires', dayOr(scan.expires)],
+      ['Issued', `${dayOr(scan.issued)}${scan.issuer ? ` by ${scan.issuer}` : ''}`],
+      [
+        'Address',
+        [a.street, [a.city, a.state].filter(Boolean).join(', '), a.zip]
+          .filter(Boolean)
+          .join(', ') || '-',
+      ],
+    ];
+    write(
+      'Read from the barcode on the back. A barcode can be made by anyone: compare it with ' +
+        'the front.',
+      9,
+    );
+    for (const [k, v] of scanRows) {
+      write(k, 9, bold);
+      write(v);
+      y -= 2;
+    }
+  }
+  for (const f of flags) write(`Flag: ${FLAG_WORDS[f]}.`, 11, bold);
+  if (scan || flags.length > 0) y -= 6;
+  if (!id && !back) {
+    write('No photo ID was sent with this request.');
+  } else {
+    if (id) {
+      if (back) write('Front', 9, bold);
+      await show(id, 'photo-id', 'The photo ID');
+    }
+    if (back) {
+      write('Back', 9, bold);
+      await show(back, 'photo-id-back', 'The back of the photo ID');
     }
   }
   return Buffer.from(await pdf.save());
@@ -588,6 +802,7 @@ export async function fileRequestRecord(
         roleLabel: o.roleLabel,
       },
       await readIdPhoto(ctx, request),
+      await readIdPhoto(ctx, request, 'back'),
     );
     const dek = generateKey();
     const stored = await ctx.blobs.put(Readable.from([pdf]), dek, Number.MAX_SAFE_INTEGER);

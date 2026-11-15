@@ -2,36 +2,59 @@
 //
 // Request access: the person adds a photo ID (P67) and confirms their email or phone with a code;
 // then the firm decides.
+//
+// P88: the firm chooses what is asked: no ID, one picture of an ID (as before), or its front
+// and back (Addendum 01, layer A: the portal reads the barcode on the back). With front and
+// back, each side can be taken with the camera; an ID with no barcode (a passport, an ID from
+// another country) is sent front only, and the firm is told.
 
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, Input } from '@vibe/ui';
+import { Button, CameraCapture, Input } from '@vibe/ui';
 
-import { FirmAuthLayout } from '../branding';
+import { FirmAuthLayout, useBranding } from '../branding';
 import { api, ApiError, say } from '../api';
 
 type Step =
-  { at: 'form' } | { at: 'confirm'; id: string; sentTo: string; idSent: boolean } | { at: 'done' };
+  | { at: 'form' }
+  | {
+      at: 'confirm';
+      id: string;
+      sentTo: string;
+      idSent: boolean;
+      /** Front and back only: the back is with the portal. */
+      backSent: boolean;
+      /** The back's barcode could not be read: another picture is asked for, once. */
+      retake: boolean;
+    }
+  | { at: 'done' };
+
+type Side = 'front' | 'back';
 
 /** A phone photo can be large; the portal takes up to 15 MB. */
 const ID_MAX_BYTES = 15 * 1024 * 1024;
 
-/** Sends the photo ID for a request (P67). */
-async function sendIdPhoto(requestId: string, file: File): Promise<void> {
+/** Sends one side of the photo ID for a request (P67). For the back, whether its barcode was
+ *  read. */
+async function sendIdPhoto(requestId: string, file: File, side: Side = 'front'): Promise<boolean> {
   if (file.size > ID_MAX_BYTES) throw new ApiError(413, 'too_large');
-  const res = await fetch(`/api/portal/access-requests/${requestId}/id-photo`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: file,
-  });
-  if (!res.ok) {
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new ApiError(res.status, data.error ?? 'error');
-  }
+  const res = await fetch(
+    `/api/portal/access-requests/${requestId}/id-photo${side === 'back' ? '?side=back' : ''}`,
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file,
+    },
+  );
+  const data = (await res.json().catch(() => ({}))) as { error?: string; readable?: boolean };
+  if (!res.ok) throw new ApiError(res.status, data.error ?? 'error');
+  return data.readable !== false;
 }
 
 const ID_ACCEPT = 'image/jpeg,image/png,image/heic,image/heif,.heic,.heif,application/pdf';
+/** With front and back, each side is a picture: a barcode is not read from a PDF. */
+const PICTURE_ACCEPT = 'image/jpeg,image/png,image/heic,image/heif,.heic,.heif';
 
 /** The file itself was refused: another must be chosen. Anything else (the network, too many
  *  tries) can be sent again as it is. */
@@ -39,27 +62,111 @@ const refusedFile = (err: unknown): boolean =>
   err instanceof ApiError &&
   ['id_type', 'image_too_large', 'photo_unreadable', 'too_large'].includes(err.code);
 
+/** A phone or tablet: the camera is offered first. On a desktop, a file is chosen. */
+const hasTouchCamera = (): boolean =>
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(pointer: coarse)').matches;
+
+/** One side of the ID, with front and back: the camera on a phone, or a file. */
+function SidePicker(props: {
+  side: Side;
+  label: string;
+  hint?: string;
+  file: File | null;
+  /** Changed to give the file chooser a fresh start. */
+  pick: number;
+  onFile: (f: File | null) => void;
+}): JSX.Element {
+  const [camera, setCamera] = useState(false);
+  const name = props.side === 'back' ? 'idBack' : 'idPhoto';
+  return (
+    <div style={{ display: 'grid', gap: 4 }}>
+      <label htmlFor={`${name}-file`}>{props.label}</label>
+      {hasTouchCamera() && (
+        <Button type="button" variant="secondary" onClick={() => setCamera(true)}>
+          {props.file ? 'Take it again' : 'Use the camera'}
+        </Button>
+      )}
+      <input
+        key={props.pick}
+        id={`${name}-file`}
+        type="file"
+        name={name}
+        accept={PICTURE_ACCEPT}
+        aria-required="true"
+        aria-describedby={props.hint ? `${name}-hint` : undefined}
+        onChange={(e) => props.onFile(e.target.files?.[0] ?? null)}
+      />
+      {props.file && (
+        <span role="status" style={{ fontSize: 13 }}>
+          Ready to send: {props.file.name}
+        </span>
+      )}
+      {props.hint && (
+        <span id={`${name}-hint`} style={{ fontSize: 13 }}>
+          {props.hint}
+        </span>
+      )}
+      {camera && (
+        <CameraCapture
+          single
+          title={props.label}
+          onClose={() => setCamera(false)}
+          onCapture={(blob, meta) =>
+            props.onFile(
+              blob instanceof File
+                ? blob
+                : new File([blob], meta.filename ?? `id-${props.side}.jpg`, {
+                    type: blob.type || 'image/jpeg',
+                  }),
+            )
+          }
+        />
+      )}
+    </div>
+  );
+}
+
 export function RequestAccess(): JSX.Element {
+  // What the firm asks for (P88). Until it is known, and from an older server: one picture.
+  const mode = useBranding()?.requestIdMode ?? 'photo';
   const [form, setForm] = useState({ name: '', email: '', phone: '', clientAs: '', note: '' });
   const [code, setCode] = useState('');
   const [step, setStep] = useState<Step>({ at: 'form' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [photo, setPhoto] = useState<File | null>(null);
+  const [back, setBack] = useState<File | null>(null);
+  const [noBarcode, setNoBarcode] = useState(false);
   const [fieldError, setFieldError] = useState({ field: '', text: '' });
   const errorFor = (f: string): string | undefined =>
     fieldError.field === f ? fieldError.text : undefined;
   // Changed to give the file chooser a fresh start (choosing the same file again works).
   const [pick, setPick] = useState(0);
+  const [backPick, setBackPick] = useState(0);
   const forget = (): void => {
     setPhoto(null);
     setPick((n) => n + 1);
+  };
+  const forgetBack = (): void => {
+    setBack(null);
+    setBackPick((n) => n + 1);
   };
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => {
     setForm({ ...form, [k]: e.target.value });
     // What was wrong with this field goes once it is edited.
     setFieldError((f) => (f.field === k ? { field: '', text: '' } : f));
   };
+  const scan = mode === 'scan';
+  const hasContact = Boolean(form.email.trim() || form.phone.trim());
+  // What is still missing before the request can be sent.
+  const missing = [
+    !hasContact && 'your email or mobile number',
+    mode === 'photo' && !photo && 'a photo of your ID',
+    scan && !photo && 'the front of your ID',
+    scan && !back && !noBarcode && 'the back of your ID',
+  ].filter(Boolean);
 
   async function send(e: FormEvent): Promise<void> {
     e.preventDefault();
@@ -77,6 +184,8 @@ export function RequestAccess(): JSX.Element {
         },
       });
       let idSent = false;
+      let backSent = false;
+      let retake = false;
       try {
         if (photo) await sendIdPhoto(r.requestId, photo);
         idSent = Boolean(photo);
@@ -85,7 +194,17 @@ export function RequestAccess(): JSX.Element {
         if (refusedFile(err)) forget();
         setError(say(err));
       }
-      setStep({ at: 'confirm', id: r.requestId, sentTo: r.sentTo, idSent });
+      if (scan && back && !noBarcode) {
+        try {
+          retake = !(await sendIdPhoto(r.requestId, back, 'back'));
+          backSent = true;
+          if (retake) forgetBack();
+        } catch (err) {
+          if (refusedFile(err)) forgetBack();
+          setError(say(err));
+        }
+      }
+      setStep({ at: 'confirm', id: r.requestId, sentTo: r.sentTo, idSent, backSent, retake });
     } catch (err) {
       // About one field: shown under it (and the field marked invalid).
       const code = err instanceof ApiError ? err.code : '';
@@ -108,13 +227,23 @@ export function RequestAccess(): JSX.Element {
     setBusy(true);
     setError('');
     try {
-      await api(`/access-requests/${step.id}/confirm`, { body: { code: code.trim() } });
+      await api(`/access-requests/${step.id}/confirm`, {
+        body: {
+          code: code.trim(),
+          ...(scan && noBarcode && !step.backSent ? { noBarcode: true } : {}),
+        },
+      });
       setStep({ at: 'done' });
     } catch (err) {
       // The portal no longer has the photo ID: ask for it again.
       if (err instanceof ApiError && err.code === 'id_required') {
         forget();
         setStep({ ...step, idSent: false });
+      }
+      // The firm asks for the back as well (its setting changed, or the back was lost).
+      if (err instanceof ApiError && err.code === 'id_back_required') {
+        forgetBack();
+        setStep({ ...step, backSent: false, retake: false });
       }
       setError(say(err));
     } finally {
@@ -131,6 +260,24 @@ export function RequestAccess(): JSX.Element {
       setStep({ ...step, idSent: true });
     } catch (err) {
       if (refusedFile(err)) forget();
+      setError(say(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The back, sent from the confirm step: the first time, or once more when its barcode could
+   *  not be read. The second picture is kept whatever it shows (the firm is told). */
+  async function sendBack(): Promise<void> {
+    if (step.at !== 'confirm' || !back) return;
+    setBusy(true);
+    setError('');
+    try {
+      const readable = await sendIdPhoto(step.id, back, 'back');
+      setStep({ ...step, backSent: true, retake: !readable && !step.backSent && !step.retake });
+      if (!readable && !step.backSent && !step.retake) forgetBack();
+    } catch (err) {
+      if (refusedFile(err)) forgetBack();
       setError(say(err));
     } finally {
       setBusy(false);
@@ -165,28 +312,66 @@ export function RequestAccess(): JSX.Element {
   }
 
   if (step.at === 'confirm') {
+    const needsFront = mode !== 'none' && !step.idSent;
+    const needsBack = scan && !step.backSent && !noBarcode;
     return (
       <FirmAuthLayout brand="Client portal" title="Confirm it is you">
         <form onSubmit={confirm} style={{ display: 'grid', gap: 12 }}>
           <p>We sent a 6-digit code to {step.sentTo}. Enter it to send your request to the firm.</p>
-          {!step.idSent && (
+          {needsFront && (
             <div style={{ display: 'grid', gap: 8 }}>
-              <label style={{ display: 'grid', gap: 4 }}>
-                <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
-                <input
-                  key={pick}
-                  type="file"
-                  accept={ID_ACCEPT}
-                  onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+              {scan ? (
+                <SidePicker
+                  side="front"
+                  label="Front of your ID"
+                  file={photo}
+                  pick={pick}
+                  onFile={setPhoto}
                 />
-              </label>
+              ) : (
+                <label style={{ display: 'grid', gap: 4 }}>
+                  <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
+                  <input
+                    key={pick}
+                    type="file"
+                    accept={ID_ACCEPT}
+                    onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              )}
               <Button
                 type="button"
                 variant="secondary"
                 disabled={busy || !photo}
                 onClick={() => void retryPhoto()}
               >
-                Send photo ID
+                {scan ? 'Send the front' : 'Send photo ID'}
+              </Button>
+            </div>
+          )}
+          {scan && (needsBack || step.retake) && (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {step.retake && (
+                <p role="status" style={{ margin: 0 }}>
+                  We could not read the barcode on the back of your ID. Take it once more, flat and
+                  in good light, with the whole barcode in the picture. Or go on with the picture
+                  you sent: the firm will look at it.
+                </p>
+              )}
+              <SidePicker
+                side="back"
+                label="Back of your ID"
+                file={back}
+                pick={backPick}
+                onFile={setBack}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy || !back}
+                onClick={() => void sendBack()}
+              >
+                Send the back
               </Button>
             </div>
           )}
@@ -201,7 +386,10 @@ export function RequestAccess(): JSX.Element {
             required
           />
           {error && <p role="alert">{error}</p>}
-          <Button type="submit" disabled={busy || !step.idSent || code.trim().length !== 6}>
+          <Button
+            type="submit"
+            disabled={busy || needsFront || needsBack || code.trim().length !== 6}
+          >
             {busy ? 'Confirming…' : 'Confirm'}
           </Button>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => void resend()}>
@@ -265,37 +453,61 @@ export function RequestAccess(): JSX.Element {
           value={form.note}
           onChange={set('note')}
         />
-        <label style={{ display: 'grid', gap: 4 }}>
-          <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
-          <input
-            key={pick}
-            type="file"
-            name="idPhoto"
-            accept={ID_ACCEPT}
-            aria-required="true"
-            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-          />
-          <span style={{ fontSize: 13 }}>
-            A photo from your phone or a scan. Only the firm sees it, to check who you are.
-          </span>
-        </label>
-        {error && <p role="alert">{error}</p>}
-        {!busy && (!photo || !(form.email.trim() || form.phone.trim())) && (
-          <p style={{ margin: 0, fontSize: 13 }}>
-            To send it, add{' '}
-            {[
-              !(form.email.trim() || form.phone.trim()) && 'your email or mobile number',
-              !photo && 'a photo of your ID',
-            ]
-              .filter(Boolean)
-              .join(' and ')}
-            .
-          </p>
+        {mode === 'photo' && (
+          <label style={{ display: 'grid', gap: 4 }}>
+            <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
+            <input
+              key={pick}
+              type="file"
+              name="idPhoto"
+              accept={ID_ACCEPT}
+              aria-required="true"
+              onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+            />
+            <span style={{ fontSize: 13 }}>
+              A photo from your phone or a scan. Only the firm sees it, to check who you are.
+            </span>
+          </label>
         )}
-        <Button
-          type="submit"
-          disabled={busy || !photo || !(form.email.trim() || form.phone.trim())}
-        >
+        {scan && (
+          <>
+            <SidePicker
+              side="front"
+              label="Front of your ID (driver&rsquo;s license or state ID)"
+              hint="Only the firm sees your ID, to check who you are."
+              file={photo}
+              pick={pick}
+              onFile={setPhoto}
+            />
+            {!noBarcode && (
+              <SidePicker
+                side="back"
+                label="Back of your ID"
+                hint="Flat and in good light, with the whole barcode in the picture."
+                file={back}
+                pick={backPick}
+                onFile={setBack}
+              />
+            )}
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                name="noBarcode"
+                checked={noBarcode}
+                onChange={(e) => setNoBarcode(e.target.checked)}
+              />
+              <span>
+                My ID has no barcode (a passport, or an ID from outside the United States and
+                Canada)
+              </span>
+            </label>
+          </>
+        )}
+        {error && <p role="alert">{error}</p>}
+        {!busy && missing.length > 0 && (
+          <p style={{ margin: 0, fontSize: 13 }}>To send it, add {missing.join(' and ')}.</p>
+        )}
+        <Button type="submit" disabled={busy || missing.length > 0}>
           {busy ? 'Sending…' : 'Send request'}
         </Button>
       </form>
