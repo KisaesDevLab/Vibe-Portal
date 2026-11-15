@@ -9,8 +9,10 @@
 import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-/** A picture larger than this is not decoded (it is kept, and flagged unreadable). */
-export const BARCODE_MAX_PIXELS = 50_000_000;
+/** A picture larger than this is not decoded (it is kept, and flagged unreadable). Owner
+ *  2026-11-14: 25 MP, which takes a phone's 12 and 24 MP photos. The reader held 354 MB for
+ *  12 MP and 870 MB for 48 MP. */
+export const BARCODE_MAX_PIXELS = 25_000_000;
 /** The reader stops turning the picture after this long and answers "not read". */
 const BUDGET_MS = 20_000;
 const TIMEOUT_MS = 45_000;

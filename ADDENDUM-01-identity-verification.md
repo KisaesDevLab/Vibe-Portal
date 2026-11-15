@@ -249,9 +249,9 @@ Two firm settings, on **Settings › Access requests** (admins):
     at three sizes, plain and sharpened, for at most 20 seconds.
   - Only text that begins as a licence barcode counts. A soft picture now and then "reads" as
     noise that passes the barcode's own checks.
-  - A picture over 50 MP is kept, not decoded, and flagged `unreadable`. That limit was not
-    set from the measurements below: at 48 MP the reader held 870 MB. The owner may lower it
-    (`BARCODE_MAX_PIXELS`).
+  - A picture over 25 MP is kept, not decoded, and flagged `unreadable` (owner 2026-11-14,
+    from the measurements below: it takes a phone's 12 and 24 MP photos; at 48 MP the reader
+    held 870 MB). The 48 MP row below was measured before the limit was set.
 - **How well it reads (measured 2026-11-14).** No real licence was used. Nine public DMV
   calibration sheets carry a barcode (Florida, Georgia, Nebraska, six of Virginia). Drawn at
   300 dpi, five read as they are and four did not (Nebraska and three of Virginia, whose
@@ -273,6 +273,8 @@ Two firm settings, on **Settings › Access requests** (admins):
   - These are stand-ins. How real phone photos read is not known until a real licence is
     tried; the blur given to the large photos may be harsher or kinder than a phone's.
   - The camera page reads best, which is why the request page offers it first on a phone.
+  - Owner 2026-11-14: keep the reader on the appliance, and try a real licence on a phone
+    before release.
 - **Retake.** `POST …/id-photo?side=back` answers `readable`. The page asks once for another
   picture; the request can also go on with the first.
 - **No barcode.** The person ticks **My ID has no barcode**; the confirm call carries
