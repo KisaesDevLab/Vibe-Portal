@@ -343,6 +343,20 @@ was fixed (owner: "Fix all"):
     others, P47). Several in a cell are told apart by length, so a space between two is
     enough. Seven digits with no area code are not guessed at: they show as "differs".
 
+### The release (0.3.13, 2026-11-14)
+
+- A release tester's pass found the staff page showing "Something went wrong" for the three
+  check refusals (their words were with the client page's), the firm's guide silent on
+  Settings › Access requests, and focus lost around **How did you check?** and the camera.
+  All fixed; the guide (`docs/firm-setup.md`) now covers the settings.
+- The released 0.3.12 container was updated to this one on Postgres 16 with a request in it:
+  migrations 0026 and 0027 applied, the firm kept one photo ID and no check, and an approval
+  with no check still worked. Inside the Linux container, as its own user, the reader read a
+  made-up licence barcode and flagged a picture with none.
+- **Not done: no real licence has been tried on a phone** (the owner's condition of
+  2026-11-14 for front and back). The owner released on 2026-11-14 all the same. Front and
+  back is off until an admin chooses it: try a real licence before choosing it for clients.
+
 ### Layer C, when it is built
 
 - The SMTP password is not sealed: it is an environment variable. The pattern for a sealed
