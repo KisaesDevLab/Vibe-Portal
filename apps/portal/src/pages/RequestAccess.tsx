@@ -158,7 +158,10 @@ export function RequestAccess(): JSX.Element {
     // What was wrong with this field goes once it is edited.
     setFieldError((f) => (f.field === k ? { field: '', text: '' } : f));
   };
-  const scan = mode === 'scan';
+  // The portal asked for the back though this page did not know to (the firm's setting could
+  // not be read, or changed since the page opened): it is asked for from then on.
+  const [wantsBack, setWantsBack] = useState(false);
+  const scan = mode === 'scan' || wantsBack;
   const hasContact = Boolean(form.email.trim() || form.phone.trim());
   // What is still missing before the request can be sent.
   const missing = [
@@ -243,6 +246,7 @@ export function RequestAccess(): JSX.Element {
       // The firm asks for the back as well (its setting changed, or the back was lost).
       if (err instanceof ApiError && err.code === 'id_back_required') {
         forgetBack();
+        setWantsBack(true);
         setStep({ ...step, backSent: false, retake: false });
       }
       setError(say(err));

@@ -753,12 +753,20 @@ export async function requestRecordPdf(
   if (!id && !back) {
     write('No photo ID was sent with this request.');
   } else {
+    // A side's name stays with its picture: a new page first when the picture would start one.
+    const named = (name: string, file: IdFile): void => {
+      if (file.contentType !== 'application/pdf' && y - MARGIN < 220) {
+        page = pdf.addPage(PAGE);
+        y = PAGE[1] - MARGIN;
+      }
+      write(name, 9, bold);
+    };
     if (id) {
-      if (back) write('Front', 9, bold);
+      if (back) named('Front', id);
       await show(id, 'photo-id', 'The photo ID');
     }
     if (back) {
-      write('Back', 9, bold);
+      named('Back', back);
       await show(back, 'photo-id-back', 'The back of the photo ID');
     }
   }

@@ -131,6 +131,41 @@ describe('request page (P88, layer A)', () => {
     expect(calls.find((c) => c.path.endsWith('/confirm'))?.body).toEqual({ code: '654321' });
   });
 
+  it('asks for the back when the portal does, though the page did not know to', async () => {
+    // The firm's setting could not be read: the page asks for one picture, as it used to.
+    const routes: Record<string, Reply> = {
+      '/access-requests': made,
+      '/access-requests/r1/id-photo': { status: 201, body: { ok: true } },
+      '/access-requests/r1/id-photo?side=back': { status: 201, body: { ok: true, readable: true } },
+      '/access-requests/r1/confirm': { status: 400, body: { error: 'id_back_required' } },
+    };
+    const calls = serve(routes);
+    at('/request-access');
+    const one = await screen.findByLabelText(/Photo of your ID/);
+    fillRequest();
+    fireEvent.change(one, {
+      target: { files: [picture('front.jpg')] },
+    });
+    fireEvent.click(sendButton());
+    await screen.findByText(/sent a 6-digit code/);
+    fireEvent.change(screen.getByLabelText('Code'), { target: { value: '654321' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    // Told why, and given a way to send the back.
+    await screen.findByText(/Add a picture of the back of your ID first/);
+    const back = picture('back.jpg');
+    fireEvent.change(screen.getByLabelText('Back of your ID'), { target: { files: [back] } });
+    routes['/access-requests/r1/confirm'] = { body: { ok: true } };
+    fireEvent.click(screen.getByRole('button', { name: 'Send the back' }));
+    await waitFor(() => expect(calls.some((c) => c.path.endsWith('?side=back'))).toBe(true));
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Confirm' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await screen.findByRole('heading', { name: 'Request sent' });
+  });
+
   it('an ID with no barcode goes front only, and the portal is told', async () => {
     const calls = serve({
       '/branding': branding('scan'),

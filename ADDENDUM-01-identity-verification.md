@@ -249,14 +249,18 @@ Two firm settings, on **Settings › Access requests** (admins):
     at three sizes, plain and sharpened, for at most 20 seconds.
   - Only text that begins as a licence barcode counts. A soft picture now and then "reads" as
     noise that passes the barcode's own checks.
-  - A picture over 50 MP is kept, not decoded, and flagged `unreadable`.
-- **How well it reads (measured 2026-11-14).** No real licence was used. The five barcodes on
-  the Florida, Georgia and Virginia DMV calibration sheets were made to look like phone
+  - A picture over 50 MP is kept, not decoded, and flagged `unreadable`. That limit was not
+    set from the measurements below: at 48 MP the reader held 870 MB. The owner may lower it
+    (`BARCODE_MAX_PIXELS`).
+- **How well it reads (measured 2026-11-14).** No real licence was used. Nine public DMV
+  calibration sheets carry a barcode (Florida, Georgia, Nebraska, six of Virginia). Drawn at
+  300 dpi, five read as they are and four did not (Nebraska and three of Virginia, whose
+  barcodes are themselves soft scans). The five that read were then made to look like phone
   photos: blurred, darkened, saved as JPEG, turned 0 to 25 degrees, sideways and upside down.
 
   | Picture | Read | Most memory the reader held |
   |---|---|---|
-  | The clean sheets | 5 of 5 | |
+  | The sheets as published | 5 of 9 | |
   | Camera page, 2560×1440 | 37 of 45 | 217 MB |
   | Camera page, 1280×720 | 32 of 45 | 173 MB |
   | Phone photo, 12 MP | 44 of 90 | 354 MB |
