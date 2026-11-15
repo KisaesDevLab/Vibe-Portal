@@ -333,8 +333,15 @@ was fixed (owner: "Fix all"):
   - **How did you check?** stays open with its note when the portal refuses the approval.
   - Read from a client list: a phone number's extension, several numbers or addresses in a
     cell, `Name <address>`, a month by name, a spreadsheet's day number, and a day over 12
-    written first. A day-first list whose days are 12 or less still reads month first: such
-    a row shows as "differs", never as a wrong match.
+    written first.
+  - A date that could be read either way (6/1/1990) is read as the rest of its column is
+    written: day first when some date in the column can only be so, month first otherwise,
+    and not at all when the column has both kinds. Admin › Portal says what was found and
+    has **Dates are written** for the firm to choose.
+  - A phone number in the list is compared only when it is a US or Canadian number (ten
+    digits, the area code and the exchange starting with 2 to 9; the portal confirms no
+    others, P47). Several in a cell are told apart by length, so a space between two is
+    enough. Seven digits with no area code are not guessed at: they show as "differs".
 
 ### Layer C, when it is built
 
