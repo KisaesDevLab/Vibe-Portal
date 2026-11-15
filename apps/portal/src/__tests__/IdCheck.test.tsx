@@ -505,6 +505,27 @@ describe('request page: a webcam on a computer', () => {
     expect(screen.getByText(/A phone usually reads the barcode better than a webcam/)).toBeTruthy();
   });
 
+  it('on a phone the wording and the phone-camera buttons stay', async () => {
+    withCamera(() => Promise.reject(Object.assign(new Error('none'), { name: 'NotFoundError' })));
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('pointer: coarse'),
+      media: query,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+    }));
+    serve({ '/branding': branding('photo') });
+    at('/request-access');
+    fireEvent.click(
+      await screen.findByRole('button', { name: /^Use the camera: Photo of your ID/ }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('No usable camera found')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /Take a photo/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /Phone camera/ })).toBeTruthy();
+  });
+
   it('with no webcam plugged in, says so and sends the person back to choose a file', async () => {
     withCamera(() => Promise.reject(Object.assign(new Error('none'), { name: 'NotFoundError' })));
     serve({ '/branding': branding('photo') });
