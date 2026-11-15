@@ -14,7 +14,8 @@
 // Deferred: jscanify/OpenCV edge detection + perspective crop.
 //
 // Changed here (Vibe Portal, Addendum 01): `single` takes one picture and closes, for the two
-// sides of a photo ID on the request page.
+// sides of a photo ID on the request page. As a modal dialog it takes the focus when it opens,
+// keeps Tab inside, and closes on Escape (WCAG 2.1.2, 2.4.3); the opener puts focus back.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -53,6 +54,37 @@ export function CameraCapture({
   single = false,
 }: CameraCaptureProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // The newest onClose, for the key listener below (it is added once).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    dialogRef.current?.focus();
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const within = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])') ?? [],
+      );
+      const first = within[0];
+      const last = within[within.length - 1];
+      if (!first || !last) return;
+      const at = document.activeElement;
+      if (e.shiftKey && (at === first || at === dialogRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (at === last || !dialogRef.current?.contains(at))) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
   const streamRef = useRef<MediaStream | null>(null);
   const nativeInputRef = useRef<HTMLInputElement>(null);
   const readyRef = useRef(false);
@@ -220,10 +252,13 @@ export function CameraCapture({
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label={title}
+      tabIndex={-1}
       style={{
+        outline: 'none',
         position: 'fixed',
         inset: 0,
         background: '#000',

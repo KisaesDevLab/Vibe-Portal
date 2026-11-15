@@ -218,7 +218,7 @@ async function main(job) {
 
 process.once('message', (job) => {
   main(job)
-    .then((text) => ({ ok: true, text, peakMb: Math.round(process.resourceUsage().maxRSS / 1024) }))
+    .then((text) => ({ ok: true, text }))
     .catch((err) => ({ ok: false, message: String((err && err.message) || err) }))
     .then((answer) => process.send(answer, () => process.exit(0)));
 });

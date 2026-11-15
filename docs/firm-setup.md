@@ -112,13 +112,36 @@ On the staff page, **Settings**:
     business, say): choose each client in turn before **Approve**; they sign in once and switch
     between their clients at the top of their page. To add a client for someone later, invite
     the same email or phone to it from Vibe Files.
-    Every request comes with a **photo ID** (a driver's license, state ID or passport: a phone
-    photo, a scan or a PDF), shown with the request; open it full size by clicking it. When you
+    Unless you change it, every request comes with a **photo ID** (a driver's license, state
+    ID or passport: a phone photo, a scan or a PDF), shown with the request; open it full size
+    by clicking it. An admin can change what is asked on **Settings › Access requests** (see
+    below). When you
     approve, the portal makes a PDF of the request and the photo ID, and Vibe Files fetches it
     into the Portal inbox like an upload, named with the first client's name and code and the
     person's name, and the date and time of the approval (`Smith, John_1001_Access request - Mary Smith - 2026-11-11 1430.pdf`): file it from Intake. The
-    person never sees it. The portal deletes the photo ID, and its own copy of the PDF, 7 days
+    person never sees it. The portal deletes the photo ID (both sides, and what the barcode said), and its own copy of the PDF, 7 days
     after Vibe Files fetched the PDF, and in any case 90 days after approval (if Vibe Files never fetched it, the Log says so); a denied request's photo ID 30 days after the denial.
+- **Access requests**: what someone who asks for access must send, and what staff must do
+  before approving. People you invite are not asked for any of this.
+  - **ID with a request**: **None**, **A picture of a photo ID** (what a firm has until it
+    changes this), or **Front and back, barcode read**. With front and back, the person
+    photographs both sides (on a phone, with its camera), and the portal reads the barcode on
+    the back of a US or Canadian license or ID. Staff see the name, date of birth, address
+    and expiry beside both pictures, with a flag when the ID has expired, the name differs from
+    the request's, the barcode could not be read, or the person said the ID has no barcode (a
+    passport or an ID from another country: front only). It catches a wrong or old ID. It does
+    not prove the ID is genuine: a barcode can be made by anyone, so compare it with the front.
+    With **None**, only the email or mobile number is confirmed; the approval PDF is still
+    made.
+  - **Check before approving**: with **Required**, **Approve** asks how you checked the person:
+    called the number in your records (and who you spoke to), met in person, or you know them
+    another way (and how). A text or email to the contact on the request does not count: that
+    contact is what is being checked. The answer is in History and in the approval PDF. In
+    Vibe Files, a request that matches the client's row of your client list (its email, mobile
+    or date of birth; choose the columns in Admin › Portal) approves in one step.
+    **Update Vibe Files before choosing Required**: an older Vibe Files cannot approve while
+    it is required, and shows "The portal said no (400: check_required)"; approve on this
+    page meanwhile.
 - **Portal keys**: **Make a key** for Vibe Files (next step). It is shown once.
 
 ## 5. Connect Vibe Files
@@ -373,4 +396,4 @@ is in History as yours).
 | A staff member does not see a client, or has no **Requests** or **Settings** | An admin limited them: Settings › Staff › **Access**                                                                                                                                    |
 | Someone sent a secure link gets no access code                               | Their spam folder. One code a minute and ten a day per link. `sudo vibe logs portal` for the SMTP error                                                                                 |
 | Someone sent a secure link sees **Access locked**                            | 15 wrong codes ended the link: send a new one from the client's page                                                                                                                    |
-| **Send securely** says a PDF cannot be watermarked                           | The PDF is locked with a password or damaged: send it without the watermark, or share an unlocked copy from Vibe Files                                                                  |
+| A secure link went without the watermark on a PDF | The PDF is locked with a password, damaged or over 30 MB, so it was sent as it is; the page named it when the link was sent. From Vibe Files such a PDF is refused instead: send it without the watermark, or share an unlocked copy |

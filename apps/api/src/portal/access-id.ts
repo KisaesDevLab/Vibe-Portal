@@ -764,7 +764,10 @@ export async function requestRecordPdf(
       ],
       ['Date of birth', dayOr(scan.dob)],
       ['Expires', dayOr(scan.expires)],
-      ['Issued', `${dayOr(scan.issued)}${scan.issuer ? ` by ${scan.issuer}` : ''}`],
+      [
+        'Issued',
+        [scan.issued, scan.issuer && `by ${scan.issuer}`].filter(Boolean).join(' ') || '-',
+      ],
       [
         'Address',
         [a.street, [a.city, a.state].filter(Boolean).join(', '), a.zip]

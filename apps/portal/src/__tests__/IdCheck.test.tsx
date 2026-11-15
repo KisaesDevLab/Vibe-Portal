@@ -375,6 +375,13 @@ describe('staff page (layers A and B)', () => {
     routes['/v1/access-requests'] = { body: { requestCheck: 'required', requests: [REQUEST] } };
     fireEvent.click(screen.getByRole('button', { name: 'Approve Jane Smith' }));
     const how = await screen.findByRole('group', { name: 'How did you check Jane Smith?' });
+    // Why the approval was refused, in words, beside the question; and focus is in it.
+    expect(within(how).getByText('Say how you checked who this is before approving.')).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(how).getByLabelText('Called the number in our records'),
+      ),
+    );
     routes['POST /v1/access-requests/r1/approve'] = { body: { ok: true } };
     fireEvent.click(within(how).getByLabelText('Met in person'));
     fireEvent.click(

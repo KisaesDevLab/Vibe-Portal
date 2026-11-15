@@ -77,24 +77,35 @@ function SidePicker(props: {
   /** Changed to give the file chooser a fresh start. */
   pick: number;
   onFile: (f: File | null) => void;
+  /** False where the request may go on without this picture (the back, taken once already). */
+  required?: boolean;
 }): JSX.Element {
   const [camera, setCamera] = useState(false);
+  // A picture from the camera empties the file chooser, so it does not still name another.
+  const [taken, setTaken] = useState(0);
+
   const name = props.side === 'back' ? 'idBack' : 'idPhoto';
   return (
     <div style={{ display: 'grid', gap: 4 }}>
       <label htmlFor={`${name}-file`}>{props.label}</label>
       {hasTouchCamera() && (
-        <Button type="button" variant="secondary" onClick={() => setCamera(true)}>
+        <Button
+          id={`${name}-camera`}
+          type="button"
+          variant="secondary"
+          aria-label={`${props.file ? 'Take it again' : 'Use the camera'}: ${props.label}`}
+          onClick={() => setCamera(true)}
+        >
           {props.file ? 'Take it again' : 'Use the camera'}
         </Button>
       )}
       <input
-        key={props.pick}
+        key={`${props.pick}-${taken}`}
         id={`${name}-file`}
         type="file"
         name={name}
         accept={PICTURE_ACCEPT}
-        aria-required="true"
+        aria-required={props.required === false ? undefined : 'true'}
         aria-describedby={props.hint ? `${name}-hint` : undefined}
         onChange={(e) => props.onFile(e.target.files?.[0] ?? null)}
       />
@@ -112,16 +123,21 @@ function SidePicker(props: {
         <CameraCapture
           single
           title={props.label}
-          onClose={() => setCamera(false)}
-          onCapture={(blob, meta) =>
+          onClose={() => {
+            setCamera(false);
+            // Back to where the person was (WCAG 2.4.3).
+            document.getElementById(`${name}-camera`)?.focus();
+          }}
+          onCapture={(blob, meta) => {
+            setTaken((n) => n + 1);
             props.onFile(
               blob instanceof File
                 ? blob
                 : new File([blob], meta.filename ?? `id-${props.side}.jpg`, {
                     type: blob.type || 'image/jpeg',
                   }),
-            )
-          }
+            );
+          }}
         />
       )}
     </div>
@@ -390,6 +406,8 @@ export function RequestAccess(): JSX.Element {
                 side="back"
                 label="Back of your ID"
                 file={back}
+                // Taken once already: the request may go on without another.
+                required={!step.retake}
                 pick={backPick}
                 onFile={setBack}
               />
@@ -501,7 +519,7 @@ export function RequestAccess(): JSX.Element {
           <>
             <SidePicker
               side="front"
-              label="Front of your ID (driver&rsquo;s license or state ID)"
+              label="Front of your ID (driver&rsquo;s license or state ID; a passport&rsquo;s photo page)"
               hint="Only the firm sees your ID, to check who you are."
               file={photo}
               pick={pick}
@@ -533,7 +551,13 @@ export function RequestAccess(): JSX.Element {
         )}
         {error && <p role="alert">{error}</p>}
         {!busy && missing.length > 0 && (
-          <p style={{ margin: 0, fontSize: 13 }}>To send it, add {missing.join(' and ')}.</p>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            To send it, add{' '}
+            {missing.length > 2
+              ? `${missing.slice(0, -1).join(', ')} and ${missing.at(-1)}`
+              : missing.join(' and ')}
+            .
+          </p>
         )}
         <Button type="submit" disabled={busy || missing.length > 0}>
           {busy ? 'Sending…' : 'Send request'}

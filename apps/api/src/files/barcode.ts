@@ -72,11 +72,7 @@ interface Answer {
   ok: boolean;
   text?: string | null;
   message?: string;
-  /** The most memory the reader's process held, in MB. */
-  peakMb?: number;
 }
-/** The last reader's peak memory in MB (for the Log, and for measuring). */
-export let lastPeakMb = 0;
 
 export function readBarcodeOffThread(bytes: Buffer, kind: 'jpeg' | 'png'): Promise<string | null> {
   return new Promise((resolve, reject) => {
@@ -101,7 +97,6 @@ export function readBarcodeOffThread(bytes: Buffer, kind: 'jpeg' | 'png'): Promi
       finish(() => reject(new Error('barcode reading timed out')));
     }, TIMEOUT_MS);
     child.once('message', (msg: Answer) => {
-      lastPeakMb = msg.peakMb ?? 0;
       finish(() =>
         msg.ok ? resolve(msg.text ?? null) : reject(new Error(msg.message ?? 'barcode failed')),
       );

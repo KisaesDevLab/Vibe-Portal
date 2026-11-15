@@ -55,6 +55,10 @@ export function staffSay(err: unknown): string {
     cannot_turn_off_yourself: 'You cannot turn off your own account.',
     cannot_change_yourself: 'You cannot change your own access; ask another admin.',
     admins_only: 'Only an admin can do that.',
+    // Addendum 01, layer B: approving an access request.
+    check_required: 'Say how you checked who this is before approving.',
+    check_note_required: 'Say who you spoke to, or how you know this person.',
+    check_invalid: 'That way of checking cannot be recorded here. Choose another.',
     invalid_url: 'The URL must start with https:// or http://.',
     invalid_message: 'Enter a message (300 characters at most).',
     invalid_button: 'The button text is 40 characters at most.',

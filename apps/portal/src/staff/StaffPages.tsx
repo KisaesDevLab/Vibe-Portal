@@ -1671,7 +1671,7 @@ type CheckMethod = 'callback' | 'in_person' | 'other';
 const CHECKS: { method: CheckMethod; label: string; note: string | null }[] = [
   { method: 'callback', label: 'Called the number in our records', note: 'Who you spoke to' },
   { method: 'in_person', label: 'Met in person', note: null },
-  { method: 'other', label: 'Known to me, other', note: 'How you know this person' },
+  { method: 'other', label: 'I know this person another way', note: 'How you know this person' },
 ];
 
 /** The photo ID of an access request (P67): the picture, or a link to the PDF. With front and
@@ -1812,6 +1812,18 @@ function Requests(): JSX.Element {
   // An approval the portal refused: when that was because a check is now required (an admin
   // turned it on since this page was read), the question opens for it.
   const [refused, setRefused] = useState<string | null>(null);
+  // Focus follows the question (WCAG 2.4.3): to its first choice when it opens, and back to
+  // the request's Approve when it is cancelled.
+  useEffect(() => {
+    if (asking) {
+      document.querySelector<HTMLInputElement>(`input[name="check-${asking}"]`)?.focus();
+    }
+  }, [asking]);
+  const closeQuestion = (id: string): void => {
+    setAsking(null);
+    // After the button is enabled again by the render.
+    setTimeout(() => document.getElementById(`approve-${id}`)?.focus(), 0);
+  };
   useEffect(() => {
     if (mustCheck && refused) {
       setCheck({ method: '', note: '' });
@@ -1839,7 +1851,7 @@ function Requests(): JSX.Element {
         People who asked for access and confirmed their email or phone. Only the confirmed contact
         is used.
       </p>
-      <Problem text={error} />
+      <Problem text={asking ? '' : error} />
       {recordNote && <p role="status">{recordNote}</p>}
       <Status load={reqs} what="the requests" />
       <Status load={clients} what="the clients" />
@@ -1957,6 +1969,7 @@ function Requests(): JSX.Element {
               />
               <Button
                 disabled={busy || p.clients.length === 0 || asking === r.id}
+                id={`approve-${r.id}`}
                 aria-label={`Approve ${r.name}`}
                 onClick={() => {
                   setRecordNote('');
@@ -2028,10 +2041,12 @@ function Requests(): JSX.Element {
                   >
                     Approve
                   </Button>
-                  <Button variant="secondary" disabled={busy} onClick={() => setAsking(null)}>
+                  <Button variant="secondary" disabled={busy} onClick={() => closeQuestion(r.id)}>
                     Cancel
                   </Button>
                 </div>
+                {/* What went wrong with this approval, beside its buttons. */}
+                <Problem text={error} />
               </fieldset>
             )}
           </div>
@@ -3124,6 +3139,7 @@ function Settings(): JSX.Element {
               <span>ID with a request</span>
               <select
                 name="requestIdMode"
+                aria-describedby="requestIdMode-help"
                 value={form.requestIdMode ?? 'photo'}
                 onChange={(e) =>
                   setForm({
@@ -3136,19 +3152,20 @@ function Settings(): JSX.Element {
                 <option value="photo">A picture of a photo ID</option>
                 <option value="scan">Front and back, barcode read</option>
               </select>
-              <span style={{ fontSize: 13 }}>
-                <strong>Front and back</strong>: the portal reads the barcode on the back of a US or
-                Canadian license or ID and shows staff the name, date of birth, address and expiry,
-                with a flag when the ID has expired, the name differs or the barcode cannot be read.
-                It catches a wrong or old ID; it does not prove the ID is genuine.{' '}
-                <strong>None</strong>: only the email or mobile number is confirmed. An identity
-                check by Stripe is not offered yet.
-              </span>
             </label>
+            <span id="requestIdMode-help" style={{ fontSize: 13 }}>
+              <strong>Front and back</strong>: the portal reads the barcode on the back of a US or
+              Canadian license or ID and shows staff the name, date of birth, address and expiry,
+              with a flag when the ID has expired, the name differs, the barcode cannot be read, or
+              the person says the ID has no barcode. It catches a wrong or old ID; it does not prove
+              the ID is genuine. <strong>None</strong>: only the email or mobile number is
+              confirmed.
+            </span>
             <label style={{ display: 'grid', gap: 4 }}>
               <span>Check before approving</span>
               <select
                 name="requestCheck"
+                aria-describedby="requestCheck-help"
                 value={form.requestCheck ?? 'off'}
                 onChange={(e) =>
                   setForm({
@@ -3160,14 +3177,14 @@ function Settings(): JSX.Element {
                 <option value="off">Off</option>
                 <option value="required">Required</option>
               </select>
-              <span style={{ fontSize: 13 }}>
-                <strong>Required</strong>: Approve works only once staff say how they checked who is
-                asking (called the number in your records, met in person, or known to them), or Vibe
-                Files finds the request matches the client record. It is printed in the approval
-                PDF. Update Vibe Files first: an older Vibe Files cannot approve requests while this
-                is required.
-              </span>
             </label>
+            <span id="requestCheck-help" style={{ fontSize: 13 }}>
+              <strong>Required</strong>: Approve works only once staff say how they checked who is
+              asking (called the number in your records, met in person, or known to them), or Vibe
+              Files finds the request matches the client record. It is printed in the approval PDF.
+              Update Vibe Files first: an older Vibe Files cannot approve requests while this is
+              required.
+            </span>
             <Problem text={errorAt('requests')} />
             <Button type="submit" disabled={busy || form.shareDownloadLimit === ''}>
               {busyAt === 'requests' ? 'Saving…' : 'Save'}

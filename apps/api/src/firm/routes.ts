@@ -749,7 +749,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         });
       }
       // P67: the request and its photo ID, as a PDF for Vibe Files' Portal inbox (first client).
-      // When it cannot be made, the hourly purge tries again while the photo ID is kept.
+      // When it cannot be made, the hourly purge tries again, for 90 days after the approval.
       const recorded = await fileRequestRecord(ctx, {
         requestId: id,
         identityId: done.identityId,
