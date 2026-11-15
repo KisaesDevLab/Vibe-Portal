@@ -150,6 +150,16 @@ describe('the firm chooses what a request carries (P88)', () => {
   it('no ID: the request confirms without one, and its record is still filed', async () => {
     await setFirm({ requestIdMode: 'none' });
     const id = await ask();
+    // A picture sent all the same is refused, and nothing is stored.
+    for (const side of ['front', 'back']) {
+      const sent = await request(w.app)
+        .post(`/api/portal/access-requests/${id}/id-photo?side=${side}`)
+        .set('Content-Type', 'application/octet-stream')
+        .send(ID_PNG);
+      expect([sent.status, sent.body.error]).toEqual([400, 'id_not_asked']);
+    }
+    const [bare] = await w.t.db.select().from(schema.accessRequest);
+    expect([bare?.idBlobKey, bare?.idBackBlobKey]).toEqual([null, null]);
     await confirm(id).expect(200);
     expect((await listed())['idPhoto']).toBeNull();
     const ok = await w
@@ -184,6 +194,9 @@ describe('the firm chooses what a request carries (P88)', () => {
     const id = await ask();
     expect((await confirm(id)).body.error).toBe('id_required');
     await sendId(w, id);
+    // A back nobody asked for is not kept.
+    const back = await sendBack(id);
+    expect([back.status, back.body.error]).toEqual([400, 'id_not_asked']);
     await confirm(id).expect(200);
     const r = await listed();
     expect([r['idBack'], r['idScan'], r['idFlags']]).toEqual([null, null, []]);
@@ -414,6 +427,29 @@ describe('check before approving (layer B)', () => {
     expect(approved?.check).toBe(
       "Called the number in the firm's records; spoke to Alexander, on his office line",
     );
+
+    // A staff member limited to this client sees the approval in its History, not how it was
+    // checked: access requests are for staff who see every client.
+    const made = await boss
+      .post('/api/staff/v1/staff')
+      .send({ email: 'lee@example-cpa.test', name: 'Lee', clientIds: [CLIENT] })
+      .expect(201);
+    const token = /#t=([\w-]+)/.exec(made.body.setupLink as string)?.[1] ?? '';
+    const lee = request.agent(w.app);
+    const set = await lee
+      .post('/api/staff/auth/setup')
+      .send({ token, password: 'another long password' })
+      .expect(200);
+    await lee
+      .post('/api/staff/auth/setup/confirm')
+      .send({ token, code: totpCode(set.body.secret as string, w.ctx.now()) })
+      .expect(200);
+    const seen = await lee.get(`/api/staff/v1/clients/${CLIENT}/history`).expect(200);
+    const theirs = (seen.body.events as { kind: string; check?: string | null }[]).find(
+      (e) => e.kind === 'approve',
+    );
+    expect(theirs).toBeTruthy();
+    expect(theirs?.check).toBeNull();
   });
 
   it('met in person needs no note', async () => {
@@ -437,6 +473,9 @@ describe('the barcode itself', () => {
     expect(JSON.stringify(scan)).not.toContain(LICENCE_NUMBER);
     // A picture with no barcode: nothing, not an error.
     expect(await readBarcodeOffThread(ID_PNG, 'png')).toBeNull();
+    // The reader's process is given none of the server's settings.
+    const worker = readFileSync(new URL('../files/barcode.ts', import.meta.url), 'utf8');
+    expect(worker).toContain('env: READER_ENV');
   }, 60_000);
 
   it('parses US and Canadian dates, older name layouts, and nothing else', () => {

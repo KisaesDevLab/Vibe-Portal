@@ -36,6 +36,13 @@ export const readBarcodeQueued: BarcodeReader = async (bytes, kind) => {
   }
 };
 
+/** What node needs to start on Linux and Windows; nothing of the portal's own. */
+const READER_ENV: NodeJS.ProcessEnv = Object.fromEntries(
+  ['PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP', 'TMPDIR']
+    .map((k) => [k, process.env[k]] as const)
+    .filter(([, v]) => v !== undefined),
+);
+
 interface Answer {
   ok: boolean;
   text?: string | null;
@@ -51,6 +58,9 @@ export function readBarcodeOffThread(bytes: Buffer, kind: 'jpeg' | 'png'): Promi
     // Plain node (no tsx loader): the reader is a .cjs file.
     const child = fork(fileURLToPath(new URL('./barcode-worker.cjs', import.meta.url)), [], {
       execArgv: [],
+      // It reads pictures from strangers: it is given none of the server's settings (the
+      // database address, keys), only what node needs to start.
+      env: READER_ENV,
       serialization: 'advanced',
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     });

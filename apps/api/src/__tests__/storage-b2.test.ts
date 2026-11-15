@@ -263,6 +263,7 @@ describe('moving stored files (P51)', () => {
     const id = made.body.requestId as string;
     await sendId(w, id);
     // Addendum 01, layer A: the back is a stored file too, moved and kept by the sweep.
+    await w.t.db.update(schema.firm).set({ requestIdMode: 'scan' });
     await request(w.app)
       .post(`/api/portal/access-requests/${id}/id-photo?side=back`)
       .set('Content-Type', 'application/octet-stream')

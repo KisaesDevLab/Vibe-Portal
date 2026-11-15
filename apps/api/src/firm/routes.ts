@@ -29,7 +29,7 @@ import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
 import { hit, LIMITS } from '../lib/rate-limit';
 import { randomToken, sha256 } from '../lib/secrets';
-import { inScope, mustSee, requireAllClients } from '../staff/scope';
+import { inScope, limitedTo, mustSee, requireAllClients } from '../staff/scope';
 import { storageSummary } from '../files/storage';
 import { VERSION } from '../version';
 import { setAccess, withdrawInvites } from './access';
@@ -300,6 +300,9 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           ),
         ),
         q,
+        // How an approval was checked is for those who decide requests: staff who see every
+        // client, and Vibe Files.
+        { check: limitedTo(req) === null },
       );
       res.json({ events });
     }),

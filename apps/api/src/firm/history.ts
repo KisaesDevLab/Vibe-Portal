@@ -57,6 +57,9 @@ export async function historyRows(
   ctx: Ctx,
   where: SQL | undefined,
   q: z.infer<typeof HistoryQuery>,
+  /** `check: false` leaves out how an approval was checked: the note may name people, and
+   *  access requests are for staff who see every client (P48). */
+  opts: { check: boolean } = { check: true },
 ): Promise<HistoryRow[]> {
   const person = alias(schema.portalIdentity, 'person');
   const actorPerson = alias(schema.portalIdentity, 'actor_person');
@@ -112,7 +115,7 @@ export async function historyRows(
       file: e.file ?? e.upload ?? null,
       recipient: typeof d['to'] === 'string' ? d['to'] : null,
       client: e.client ?? null,
-      check: e.kind === 'approve' ? checkOf(d['check']) : null,
+      check: opts.check && e.kind === 'approve' ? checkOf(d['check']) : null,
     };
   });
 }

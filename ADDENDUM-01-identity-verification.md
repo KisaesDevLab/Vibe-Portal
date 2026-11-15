@@ -291,6 +291,23 @@ Two firm settings, on **Settings › Access requests** (admins):
 - New answers: `check_required`, `check_invalid`, `check_note_required`.
 - The check is in the approval's History entry, in the words the PDF uses.
 
+### After the security review (2026-11-14)
+
+The review found nothing to report. Three of the points it set aside were tightened all the
+same (owner: "Fix all"):
+
+- A picture the firm does not ask for is refused and not kept (`id_not_asked`): any picture
+  with **None**, and the back unless the setting is front and back. The request page then
+  goes on without that side.
+- How an approval was checked shows in a client's History only to staff who see every client
+  and to Vibe Files. A staff member limited to that client sees the approval, not the check.
+- The barcode reader's process is given none of the server's environment (the database
+  address, keys), only what node needs to start.
+
+Left as designed: a barcode can be forged, which only layer C answers; **Met in person** needs
+no note (section 4, B2); the reader's memory is bounded by the 25 MP limit and one picture at
+a time.
+
 ### Layer C, when it is built
 
 - The SMTP password is not sealed: it is an environment variable. The pattern for a sealed

@@ -48,6 +48,7 @@ export function say(err: unknown): string {
     account_off: 'This account is turned off. Contact your accountant.',
     id_required: 'Add a photo of your ID first.',
     id_back_required: 'Add a picture of the back of your ID first, or say it has no barcode.',
+    id_not_asked: 'The firm does not ask for that picture. Go on without it.',
     check_required: 'Say how you checked who this is before approving.',
     check_note_required: 'Say who you spoke to, or how you know this person.',
     check_invalid: 'That way of checking cannot be recorded here. Choose another.',

@@ -181,6 +181,13 @@ export function accessRequestsRouter(
           ),
         );
       if (!request) throw new HttpError(404, 'not_found');
+      // Only what the firm asks for is kept (P88): no ID at all with "none", and the back
+      // only with "front and back". A picture of an ID nobody asked for is not held.
+      const [firm] = await ctx.db.select({ mode: schema.firm.requestIdMode }).from(schema.firm);
+      const mode = firm?.mode ?? 'photo';
+      if (mode === 'none' || (side.data === 'back' && mode !== 'scan')) {
+        throw new HttpError(400, 'id_not_asked');
+      }
       const stored = await storeIdPhoto(ctx, request.id, req, side.data, convertHeic, readBarcode);
       res.status(201).json({
         ok: true,

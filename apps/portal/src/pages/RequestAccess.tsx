@@ -161,7 +161,15 @@ export function RequestAccess(): JSX.Element {
   // The portal asked for the back though this page did not know to (the firm's setting could
   // not be read, or changed since the page opened): it is asked for from then on.
   const [wantsBack, setWantsBack] = useState(false);
-  const scan = mode === 'scan' || wantsBack;
+  // The portal said it does not ask for a side (the firm's setting changed since the page
+  // opened): that side is no longer needed.
+  const [notAsked, setNotAsked] = useState({ front: false, back: false });
+  const refusedSide = (err: unknown, side: Side): boolean => {
+    if (!(err instanceof ApiError) || err.code !== 'id_not_asked') return false;
+    setNotAsked((n) => ({ ...n, [side]: true }));
+    return true;
+  };
+  const scan = (mode === 'scan' || wantsBack) && !notAsked.back;
   const hasContact = Boolean(form.email.trim() || form.phone.trim());
   // What is still missing before the request can be sent.
   const missing = [
@@ -195,7 +203,7 @@ export function RequestAccess(): JSX.Element {
       } catch (err) {
         // Chosen again on the next step when the file itself was refused.
         if (refusedFile(err)) forget();
-        setError(say(err));
+        if (!refusedSide(err, 'front')) setError(say(err));
       }
       if (scan && back && !noBarcode) {
         try {
@@ -204,7 +212,7 @@ export function RequestAccess(): JSX.Element {
           if (retake) forgetBack();
         } catch (err) {
           if (refusedFile(err)) forgetBack();
-          setError(say(err));
+          if (!refusedSide(err, 'back')) setError(say(err));
         }
       }
       setStep({ at: 'confirm', id: r.requestId, sentTo: r.sentTo, idSent, backSent, retake });
@@ -264,7 +272,7 @@ export function RequestAccess(): JSX.Element {
       setStep({ ...step, idSent: true });
     } catch (err) {
       if (refusedFile(err)) forget();
-      setError(say(err));
+      if (!refusedSide(err, 'front')) setError(say(err));
     } finally {
       setBusy(false);
     }
@@ -282,7 +290,7 @@ export function RequestAccess(): JSX.Element {
       if (!readable && !step.backSent && !step.retake) forgetBack();
     } catch (err) {
       if (refusedFile(err)) forgetBack();
-      setError(say(err));
+      if (!refusedSide(err, 'back')) setError(say(err));
     } finally {
       setBusy(false);
     }
@@ -316,7 +324,7 @@ export function RequestAccess(): JSX.Element {
   }
 
   if (step.at === 'confirm') {
-    const needsFront = mode !== 'none' && !step.idSent;
+    const needsFront = mode !== 'none' && !step.idSent && !notAsked.front;
     const needsBack = scan && !step.backSent && !noBarcode;
     return (
       <FirmAuthLayout brand="Client portal" title="Confirm it is you">
