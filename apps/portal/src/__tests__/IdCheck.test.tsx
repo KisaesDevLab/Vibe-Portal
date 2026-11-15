@@ -166,6 +166,68 @@ describe('request page (P88, layer A)', () => {
     await screen.findByRole('heading', { name: 'Request sent' });
   });
 
+  it('asks for the front when the portal does, though the firm asked for none when the page opened', async () => {
+    const routes: Record<string, Reply> = {
+      '/branding': branding('none'),
+      '/access-requests': made,
+      '/access-requests/r1/id-photo': { status: 201, body: { ok: true } },
+      '/access-requests/r1/confirm': { status: 400, body: { error: 'id_required' } },
+    };
+    const calls = serve(routes);
+    at('/request-access');
+    await waitFor(() => expect(screen.queryByLabelText(/Photo of your ID/)).toBeNull());
+    fillRequest();
+    fireEvent.click(sendButton());
+    await screen.findByText(/sent a 6-digit code/);
+    fireEvent.change(screen.getByLabelText('Code'), { target: { value: '654321' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await screen.findByText('Add a photo of your ID first.');
+    // A way to add it, and nothing confirmed until it is sent.
+    const front = picture('front.jpg');
+    fireEvent.change(screen.getByLabelText(/Photo of your ID/), { target: { files: [front] } });
+    expect((screen.getByRole('button', { name: 'Confirm' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    routes['/access-requests/r1/confirm'] = { body: { ok: true } };
+    fireEvent.click(screen.getByRole('button', { name: 'Send photo ID' }));
+    await waitFor(() => expect(calls.some((c) => c.path.endsWith('/id-photo'))).toBe(true));
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Confirm' }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await screen.findByRole('heading', { name: 'Request sent' });
+  });
+
+  it('no barcode can be said at the code, when the back is asked for only then', async () => {
+    const routes: Record<string, Reply> = {
+      '/branding': branding('photo'),
+      '/access-requests': made,
+      '/access-requests/r1/id-photo': { status: 201, body: { ok: true } },
+      '/access-requests/r1/confirm': { status: 400, body: { error: 'id_back_required' } },
+    };
+    const calls = serve(routes);
+    at('/request-access');
+    const one = await screen.findByLabelText(/Photo of your ID/);
+    fillRequest();
+    fireEvent.change(one, { target: { files: [picture('passport.jpg')] } });
+    fireEvent.click(sendButton());
+    await screen.findByText(/sent a 6-digit code/);
+    fireEvent.change(screen.getByLabelText('Code'), { target: { value: '654321' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await screen.findByText(/Add a picture of the back of your ID first/);
+    // A passport has no back to send: said here, and the request goes on.
+    routes['/access-requests/r1/confirm'] = { body: { ok: true } };
+    fireEvent.click(screen.getByLabelText(/My ID has no barcode/));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await screen.findByRole('heading', { name: 'Request sent' });
+    expect(calls.filter((c) => c.path.endsWith('/confirm')).at(-1)?.body).toEqual({
+      code: '654321',
+      noBarcode: true,
+    });
+  });
+
   it('an ID with no barcode goes front only, and the portal is told', async () => {
     const calls = serve({
       '/branding': branding('scan'),
@@ -291,6 +353,36 @@ describe('staff page (layers A and B)', () => {
         clientIds: [CLIENT.id],
         roleLabel: '',
         check: { method: 'callback', note: 'Jane, at home' },
+      }),
+    );
+  });
+
+  it('a check required since the page was read: the refusal opens the question', async () => {
+    const routes: Record<string, Reply> = {
+      '/auth/me': ME,
+      '/v1/clients': { body: { clients: [CLIENT] } },
+      '/v1/access-requests': { body: { requestCheck: 'off', requests: [REQUEST] } },
+      'POST /v1/access-requests/r1/approve': { status: 400, body: { error: 'check_required' } },
+    };
+    const calls = serve(routes);
+    at('/staff/requests');
+    const box = (await screen.findByText('Jane Smith')).parentElement as HTMLElement;
+    await within(box).findByRole('option', { name: /Smith, John/ });
+    fireEvent.change(within(box).getByLabelText('Client for Jane Smith'), {
+      target: { value: CLIENT.id },
+    });
+    // An admin has turned the check on meanwhile.
+    routes['/v1/access-requests'] = { body: { requestCheck: 'required', requests: [REQUEST] } };
+    fireEvent.click(screen.getByRole('button', { name: 'Approve Jane Smith' }));
+    const how = await screen.findByRole('group', { name: 'How did you check Jane Smith?' });
+    routes['POST /v1/access-requests/r1/approve'] = { body: { ok: true } };
+    fireEvent.click(within(how).getByLabelText('Met in person'));
+    fireEvent.click(
+      within(how).getByRole('button', { name: 'Approve Jane Smith with this check' }),
+    );
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path.endsWith('/approve')).at(-1)?.body).toMatchObject({
+        check: { method: 'in_person', note: '' },
       }),
     );
   });

@@ -12,7 +12,7 @@ import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFString } from 'pdf-lib'
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { readBarcodeOffThread } from '../files/barcode';
+import { readBarcodeOffThread, readInTurn } from '../files/barcode';
 import { aamvaDate, nameDiffers, parseAamva, scanFlags } from '../portal/aamva';
 import { purgeIdPhotos } from '../portal/access-id';
 import { createSetupLink } from '../staff/auth';
@@ -349,6 +349,47 @@ describe('front and back, barcode read (layer A)', () => {
   });
 });
 
+describe('the firm changes what it asks for while a request is being made', () => {
+  it('lowered to one picture: the back and what it said are not kept', async () => {
+    await setFirm({ requestIdMode: 'scan' });
+    const id = await ask();
+    await sendId(w, id);
+    await sendBack(id).expect(201);
+    await setFirm({ requestIdMode: 'photo' });
+    await confirm(id).expect(200);
+    const r = await listed();
+    expect(r['idPhoto']).not.toBeNull();
+    expect([r['idBack'], r['idScan'], r['idFlags']]).toEqual([null, null, []]);
+    await w.firm('get', `/access-requests/${id}/id-photo?side=back`).expect(404);
+    await w.firm('get', `/access-requests/${id}/id-photo`).expect(200);
+  });
+
+  it('lowered to none: neither picture is kept', async () => {
+    await setFirm({ requestIdMode: 'scan' });
+    const id = await ask();
+    await sendId(w, id);
+    await sendBack(id).expect(201);
+    await setFirm({ requestIdMode: 'none' });
+    await confirm(id).expect(200);
+    const r = await listed();
+    expect([r['idPhoto'], r['idBack'], r['idScan'], r['idFlags']]).toEqual([null, null, null, []]);
+    const [row] = await w.t.db.select().from(schema.accessRequest);
+    expect([row?.idBlobKey, row?.idBackBlobKey]).toEqual([null, null]);
+    await w.firm('get', `/access-requests/${id}/id-photo`).expect(404);
+  });
+
+  it('raised: the front, then the back, are asked for at the code', async () => {
+    await setFirm({ requestIdMode: 'none' });
+    const id = await ask();
+    await setFirm({ requestIdMode: 'scan' });
+    expect((await confirm(id)).body.error).toBe('id_required');
+    await sendId(w, id);
+    expect((await confirm(id)).body.error).toBe('id_back_required');
+    await confirm(id, { noBarcode: true }).expect(200);
+    expect((await listed())['idFlags']).toEqual(['no_barcode']);
+  });
+});
+
 describe('check before approving (layer B)', () => {
   async function waiting(): Promise<string> {
     const id = await ask();
@@ -477,6 +518,34 @@ describe('the barcode itself', () => {
     const worker = readFileSync(new URL('../files/barcode.ts', import.meta.url), 'utf8');
     expect(worker).toContain('env: READER_ENV');
   }, 60_000);
+
+  it('a picture is read in its turn, or kept unread when the turn does not come in time', async () => {
+    const order: string[] = [];
+    let free!: () => void;
+    const held = new Promise<void>((r) => (free = r));
+    const first = readInTurn(async () => {
+      order.push('first starts');
+      await held;
+      order.push('first ends');
+      return 'one';
+    });
+    // Waits its turn: starts only once the first has ended.
+    const second = readInTurn(async () => {
+      order.push('second starts');
+      return 'two';
+    });
+    // Gives up after 20 ms: answered null, and never read.
+    const third = readInTurn(async () => {
+      order.push('third starts');
+      return 'three';
+    }, 20);
+    expect(await third).toBeNull();
+    free();
+    expect([await first, await second]).toEqual(['one', 'two']);
+    expect(order).toEqual(['first starts', 'first ends', 'second starts']);
+    // The line moves on past the one that gave up.
+    expect(await readInTurn(async () => 'four')).toBe('four');
+  });
 
   it('parses US and Canadian dates, older name layouts, and nothing else', () => {
     expect(aamvaDate('01061990', false)).toBe('1990-01-06');

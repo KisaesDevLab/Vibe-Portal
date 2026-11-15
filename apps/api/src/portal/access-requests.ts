@@ -26,7 +26,7 @@ import { sha256, sixDigitCode } from '../lib/secrets';
 import { BREAKGLASS_EMAIL } from '../staff/sso';
 import type { BarcodeReader } from '../files/barcode';
 import type { HeicConverter } from './uploads';
-import { storeIdPhoto } from './access-id';
+import { dropUnasked, storeIdPhoto } from './access-id';
 
 export const CONFIRM_MINUTES = 15;
 
@@ -245,6 +245,8 @@ export function accessRequestsRouter(
         })
         .where(and(eq(schema.accessRequest.id, id), isNull(schema.accessRequest.confirmedAt)))
         .returning({ name: schema.accessRequest.name, clientAs: schema.accessRequest.clientAs });
+      // Pictures sent while the firm asked for more than it does now are not kept.
+      if (confirmed) await dropUnasked(ctx, id, mode);
       // P59: the request is now on the staff page; tell the staff an admin ticked (once).
       if (confirmed) await tellStaff(ctx, confirmed);
       await record(

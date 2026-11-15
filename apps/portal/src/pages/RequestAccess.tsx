@@ -161,6 +161,7 @@ export function RequestAccess(): JSX.Element {
   // The portal asked for the back though this page did not know to (the firm's setting could
   // not be read, or changed since the page opened): it is asked for from then on.
   const [wantsBack, setWantsBack] = useState(false);
+  const [wantsFront, setWantsFront] = useState(false);
   // The portal said it does not ask for a side (the firm's setting changed since the page
   // opened): that side is no longer needed.
   const [notAsked, setNotAsked] = useState({ front: false, back: false });
@@ -249,6 +250,7 @@ export function RequestAccess(): JSX.Element {
       // The portal no longer has the photo ID: ask for it again.
       if (err instanceof ApiError && err.code === 'id_required') {
         forget();
+        setWantsFront(true);
         setStep({ ...step, idSent: false });
       }
       // The firm asks for the back as well (its setting changed, or the back was lost).
@@ -324,7 +326,7 @@ export function RequestAccess(): JSX.Element {
   }
 
   if (step.at === 'confirm') {
-    const needsFront = mode !== 'none' && !step.idSent && !notAsked.front;
+    const needsFront = (mode !== 'none' || wantsFront) && !step.idSent && !notAsked.front;
     const needsBack = scan && !step.backSent && !noBarcode;
     return (
       <FirmAuthLayout brand="Client portal" title="Confirm it is you">
@@ -360,6 +362,20 @@ export function RequestAccess(): JSX.Element {
                 {scan ? 'Send the front' : 'Send photo ID'}
               </Button>
             </div>
+          )}
+          {scan && !step.backSent && (
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                name="noBarcode"
+                checked={noBarcode}
+                onChange={(e) => setNoBarcode(e.target.checked)}
+              />
+              <span>
+                My ID has no barcode (a passport, or an ID from outside the United States and
+                Canada)
+              </span>
+            </label>
           )}
           {scan && (needsBack || step.retake) && (
             <div style={{ display: 'grid', gap: 8 }}>

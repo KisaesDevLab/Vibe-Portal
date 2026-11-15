@@ -39,7 +39,11 @@ const OPTIONS = {
 function toGray(rgba, width, height) {
   const out = new Uint8Array(width * height);
   for (let i = 0, p = 0; i < out.length; i += 1, p += 4) {
-    out[i] = (rgba[p] * 77 + rgba[p + 1] * 150 + rgba[p + 2] * 29) >> 8;
+    const gray = (rgba[p] * 77 + rgba[p + 1] * 150 + rgba[p + 2] * 29) >> 8;
+    // A see-through pixel is shown on white, as a picture viewer shows it: an exported PNG's
+    // clear background is black underneath, and would hide a black barcode.
+    const alpha = rgba[p + 3];
+    out[i] = alpha === 255 ? gray : (gray * alpha + 255 * (255 - alpha)) / 255;
   }
   return { data: out, width, height };
 }

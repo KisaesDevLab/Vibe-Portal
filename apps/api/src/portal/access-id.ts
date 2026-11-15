@@ -244,6 +244,41 @@ export async function storeIdPhoto(
   };
 }
 
+/**
+ * Removes what the firm does not ask for (P88) from a request just confirmed: pictures sent
+ * while it asked for more (its setting was lowered in between). With "none", both sides; with
+ * one picture, the back and what its barcode said.
+ */
+export async function dropUnasked(
+  ctx: Ctx,
+  requestId: string,
+  mode: 'none' | 'photo' | 'scan',
+): Promise<void> {
+  if (mode === 'scan') return;
+  const [r] = await ctx.db
+    .select({
+      front: schema.accessRequest.idBlobKey,
+      back: schema.accessRequest.idBackBlobKey,
+    })
+    .from(schema.accessRequest)
+    .where(eq(schema.accessRequest.id, requestId));
+  if (!r || (!r.back && !(mode === 'none' && r.front))) return;
+  await ctx.db
+    .update(schema.accessRequest)
+    .set({
+      idBackBlobKey: null,
+      idBackDekWrapped: null,
+      idBackContentType: null,
+      idBackSize: null,
+      idScan: null,
+      idFlags: null,
+      ...(mode === 'none' ? { idBlobKey: null, idDekWrapped: null, idRemovedAt: ctx.now() } : {}),
+    })
+    .where(eq(schema.accessRequest.id, requestId));
+  if (r.back) await ctx.blobs.remove(r.back);
+  if (mode === 'none' && r.front) await ctx.blobs.remove(r.front);
+}
+
 /** The photo ID's bytes and type, or null when there is none (never sent, or removed). */
 export async function readIdPhoto(
   ctx: Ctx,

@@ -1795,6 +1795,16 @@ function Requests(): JSX.Element {
   // P88: with the firm's "Check before approving", Approve first asks how the person was checked.
   const mustCheck = reqs.data?.requestCheck === 'required';
   const [asking, setAsking] = useState<string | null>(null);
+  // An approval the portal refused: when that was because a check is now required (an admin
+  // turned it on since this page was read), the question opens for it.
+  const [refused, setRefused] = useState<string | null>(null);
+  useEffect(() => {
+    if (mustCheck && refused) {
+      setCheck({ method: '', note: '' });
+      setAsking(refused);
+      setRefused(null);
+    }
+  }, [mustCheck, refused]);
   const [check, setCheck] = useState<{ method: CheckMethod | ''; note: string }>({
     method: '',
     note: '',
@@ -1833,6 +1843,11 @@ function Requests(): JSX.Element {
             },
           }).then((res) => {
             if (res) setAsking(null);
+            // Refused with no check given: the list is read again, in case one is now asked.
+            else if (!how) {
+              setRefused(r.id);
+              reqs.reload();
+            }
             // P67: the PDF for Vibe Files could not be made yet (the Log says why).
             if (res && (res as { recorded?: boolean }).recorded === false) {
               setRecordNote(

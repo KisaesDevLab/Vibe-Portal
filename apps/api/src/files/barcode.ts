@@ -17,24 +17,49 @@ export const BARCODE_MAX_PIXELS = 25_000_000;
 const BUDGET_MS = 20_000;
 const TIMEOUT_MS = 45_000;
 
+/** A picture waits this long at most for its turn; past that it is kept unread (and flagged),
+ *  so the person's page is answered before a proxy gives up on it. */
+const QUEUE_WAIT_MS = 25_000;
+/** An exit is taken as "no answer" only this long after it: the answer may arrive just behind. */
+const EXIT_GRACE_MS = 500;
+
 /** One at a time: each holds a decoded photo. The rest wait their turn. */
-let busy = false;
-const waiting: (() => void)[] = [];
+let last: Promise<void> = Promise.resolve();
 
 export type BarcodeReader = (bytes: Buffer, kind: 'jpeg' | 'png') => Promise<string | null>;
 
 /** The text of the PDF417 barcode in a JPEG or PNG, or null when none could be read. */
-export const readBarcodeQueued: BarcodeReader = async (bytes, kind) => {
-  if (busy) await new Promise<void>((go) => waiting.push(go));
-  else busy = true;
-  try {
-    return await readBarcodeOffThread(bytes, kind);
-  } finally {
-    const next = waiting.shift();
-    if (next) next();
-    else busy = false;
+export const readBarcodeQueued: BarcodeReader = async (bytes, kind) =>
+  readInTurn(() => readBarcodeOffThread(bytes, kind));
+
+/** Runs `read` after those before it, or answers null when its turn does not come in time. */
+export async function readInTurn(
+  read: () => Promise<string | null>,
+  waitMs = QUEUE_WAIT_MS,
+): Promise<string | null> {
+  const before = last;
+  let done!: () => void;
+  // Whoever comes next waits for this one too.
+  last = before.then(() => new Promise<void>((r) => (done = r)));
+  let timer: NodeJS.Timeout | undefined;
+  const inTime = await Promise.race([
+    before.then(() => true),
+    new Promise<boolean>((r) => {
+      timer = setTimeout(() => r(false), waitMs);
+    }),
+  ]);
+  clearTimeout(timer);
+  if (!inTime) {
+    // Not read: its place in the line is given up when it comes.
+    void before.then(() => done());
+    return null;
   }
-};
+  try {
+    return await read();
+  } finally {
+    done();
+  }
+}
 
 /** What node needs to start on Linux and Windows; nothing of the portal's own. */
 const READER_ENV: NodeJS.ProcessEnv = Object.fromEntries(
@@ -82,10 +107,17 @@ export function readBarcodeOffThread(bytes: Buffer, kind: 'jpeg' | 'png'): Promi
       );
     });
     child.once('error', (err) => finish(() => reject(err)));
-    // A reader that dies without an answer must settle at once, not after the timeout.
-    child.once('exit', (code, signal) =>
-      finish(() => reject(new Error(`barcode reader exited (${code ?? signal}) without result`))),
-    );
+    // A reader that dies without an answer must settle soon, not after the timeout. Not at
+    // once: its exit can be seen a moment before the answer it sent.
+    child.once('exit', (code, signal) => {
+      setTimeout(
+        () =>
+          finish(() =>
+            reject(new Error(`barcode reader exited (${code ?? signal}) without result`)),
+          ),
+        EXIT_GRACE_MS,
+      );
+    });
     child.send({
       bytes: new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
       kind,

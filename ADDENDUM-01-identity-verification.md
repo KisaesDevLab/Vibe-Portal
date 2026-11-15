@@ -308,6 +308,34 @@ Left as designed: a barcode can be forged, which only layer C answers; **Met in 
 no note (section 4, B2); the reader's memory is bounded by the 25 MP limit and one picture at
 a time.
 
+### After the code review (2026-11-14)
+
+Two reviews (this repo, and the Vibe Files branch) found nothing serious. What they did find
+was fixed (owner: "Fix all"):
+
+- **The firm changes its setting while a request is being made.**
+  - Raised: the request page now shows the picker for the front, as it did for the back, and
+    **My ID has no barcode** can be ticked at the code.
+  - Lowered: pictures already sent that the firm no longer asks for are removed when the
+    request is confirmed (the back and its fields with one picture; both with none).
+  - **Check before approving** turned on while the staff page is open: the refused Approve
+    reads the requests again and opens **How did you check?**.
+- **The reader.**
+  - A PNG's see-through pixels are read as white, not black.
+  - A picture waits at most 25 seconds for its turn; past that it is kept unread and flagged.
+  - The reader's exit is taken as "no answer" only half a second after it, since the answer
+    can arrive just behind. Seen 0 times in 200 on Windows; not tried on Linux.
+- **Vibe Files.**
+  - A client's row is found by its ID as written; without regard to case only when one
+    client alone answers to it.
+  - The client list is read again on Save and by **Read the client list again**; a list that
+    cannot be read says so.
+  - **How did you check?** stays open with its note when the portal refuses the approval.
+  - Read from a client list: a phone number's extension, several numbers or addresses in a
+    cell, `Name <address>`, a month by name, a spreadsheet's day number, and a day over 12
+    written first. A day-first list whose days are 12 or less still reads month first: such
+    a row shows as "differs", never as a wrong match.
+
 ### Layer C, when it is built
 
 - The SMTP password is not sealed: it is an environment variable. The pattern for a sealed
