@@ -17,7 +17,8 @@
 // sides of a photo ID on the request page. As a modal dialog it takes the focus when it opens,
 // keeps Tab inside, and closes on Escape (WCAG 2.1.2, 2.4.3); the opener puts focus back.
 // `computer` is for a desktop's webcam: no "Phone camera" or "Take a photo" (they would only
-// open a file chooser there), and errors worded for a computer.
+// open a file chooser there), errors worded for a computer, and Try again on the error screen.
+// When no picture arrives in time the camera is let go, not left running behind the message.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -63,6 +64,9 @@ export function CameraCapture({
   // The newest onClose, for the key listener below (it is added once).
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  // Read where an error is worded, so a change of it never restarts a running camera.
+  const computerRef = useRef(computer);
+  computerRef.current = computer;
   useEffect(() => {
     dialogRef.current?.focus();
     const onKey = (e: KeyboardEvent): void => {
@@ -98,8 +102,10 @@ export function CameraCapture({
   const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [phase, setPhase] = useState<Phase>(() => (hasCameraApi() ? 'starting' : 'error'));
   const [error, setError] = useState<CameraErrorCopy | null>(() =>
-    hasCameraApi() ? null : describeCameraError(null),
+    hasCameraApi() ? null : describeCameraError(null, computer),
   );
+  // Counts Try again: each one asks for the camera afresh.
+  const [attempt, setAttempt] = useState(0);
   const [count, setCount] = useState(0);
   const [flash, setFlash] = useState(false);
 
@@ -111,10 +117,12 @@ export function CameraCapture({
   const failStarting = useCallback(
     (err: unknown) => {
       if (!aliveRef.current || readyRef.current) return;
-      setError(describeCameraError(err, computer));
+      // The camera is let go: it must not stay on behind a message that it could not be opened.
+      stopStream();
+      setError(describeCameraError(err, computerRef.current));
       setPhase('error');
     },
-    [computer],
+    [stopStream],
   );
 
   const attach = useCallback(
@@ -170,7 +178,7 @@ export function CameraCapture({
         }
       } catch (err) {
         if (!cancelled) {
-          setError(describeCameraError(err, computer));
+          setError(describeCameraError(err, computerRef.current));
           setPhase('error');
         }
       }
@@ -183,7 +191,14 @@ export function CameraCapture({
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
       stopStream();
     };
-  }, [attach, stopStream, computer]);
+  }, [attach, stopStream, attempt]);
+
+  function tryAgain(): void {
+    setError(null);
+    setPhase('starting');
+    setAttempt((n) => n + 1);
+    dialogRef.current?.focus();
+  }
 
   function onVideoReady(): void {
     const v = videoRef.current;
@@ -275,7 +290,7 @@ export function CameraCapture({
         flexDirection: 'column',
       }}
     >
-      {nativeInput}
+      {!computer && nativeInput}
       <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
         {phase === 'error' && error ? (
           <div
@@ -295,6 +310,21 @@ export function CameraCapture({
           >
             <strong style={{ fontSize: 17 }}>{error.title}</strong>
             <span style={{ fontSize: 14, lineHeight: 1.5, color: '#ccc' }}>{error.detail}</span>
+            {computer && hasCameraApi() && (
+              <button
+                type="button"
+                onClick={tryAgain}
+                style={{
+                  ...secondaryButton,
+                  background: '#fff',
+                  color: '#000',
+                  border: 'none',
+                  fontWeight: 600,
+                }}
+              >
+                Try again
+              </button>
+            )}
             {!computer && (
               <button
                 type="button"

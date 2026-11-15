@@ -507,6 +507,22 @@ describe('request page: a webcam on a computer', () => {
 
   it('on a phone the wording and the phone-camera buttons stay', async () => {
     withCamera(() => Promise.reject(Object.assign(new Error('none'), { name: 'NotFoundError' })));
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36',
+    );
+    serve({ '/branding': branding('photo') });
+    at('/request-access');
+    fireEvent.click(
+      await screen.findByRole('button', { name: /^Use the camera: Photo of your ID/ }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('No usable camera found')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /Take a photo/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /Phone camera/ })).toBeTruthy();
+  });
+
+  it('a touch-screen computer is a computer, whatever its pointer', async () => {
+    withCamera(() => new Promise(() => undefined));
     vi.stubGlobal('matchMedia', (query: string) => ({
       matches: query.includes('pointer: coarse'),
       media: query,
@@ -517,13 +533,60 @@ describe('request page: a webcam on a computer', () => {
     }));
     serve({ '/branding': branding('photo') });
     at('/request-access');
-    fireEvent.click(
-      await screen.findByRole('button', { name: /^Use the camera: Photo of your ID/ }),
+    expect(await screen.findByRole('button', { name: /^Use your webcam/ })).toBeTruthy();
+  });
+
+  it('a file that was chosen is not called a picture taken', async () => {
+    withCamera(() => new Promise(() => undefined));
+    serve({ '/branding': branding('photo') });
+    at('/request-access');
+    const input = await screen.findByLabelText(/Photo of your ID/, { selector: 'input' });
+    fireEvent.change(input, { target: { files: [picture('license.jpg')] } });
+    await screen.findByText('Ready to send: license.jpg');
+    expect(screen.getByRole('button', { name: /^Use your webcam/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Take it again/ })).toBeNull();
+  });
+
+  it('the webcam is not spoken of where it is not offered', async () => {
+    serve({ '/branding': branding('scan') });
+    at('/request-access');
+    await screen.findByLabelText('Back of your ID');
+    expect(screen.queryByText(/better than a webcam/)).toBeNull();
+  });
+
+  it('a blocked camera can be allowed and tried again in the same dialog', async () => {
+    const ask = vi.fn(() =>
+      Promise.reject(Object.assign(new Error('no'), { name: 'NotAllowedError' })),
     );
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: ask, enumerateDevices: vi.fn(async () => []) },
+    });
+    serve({ '/branding': branding('photo') });
+    at('/request-access');
+    fireEvent.click(await screen.findByRole('button', { name: /^Use your webcam/ }));
     const dialog = await screen.findByRole('dialog');
-    expect(await within(dialog).findByText('No usable camera found')).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: /Take a photo/ })).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: /Phone camera/ })).toBeTruthy();
+    expect(await within(dialog).findByText('Camera access is blocked')).toBeTruthy();
+    const before = ask.mock.calls.length;
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(ask.mock.calls.length).toBe(before + 1));
+    expect(await within(dialog).findByText('Camera access is blocked')).toBeTruthy();
+  });
+
+  it('the camera stays open when what the firm asks for arrives late', async () => {
+    withCamera(() => new Promise(() => undefined));
+    let answer: (r: Response) => void = () => undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>((r) => (answer = r))),
+    );
+    reloadBranding();
+    at('/request-access');
+    fireEvent.click(await screen.findByRole('button', { name: /^Use your webcam/ }));
+    await screen.findByRole('dialog');
+    answer(new Response(JSON.stringify(branding('scan').body), { status: 200 }));
+    await screen.findByLabelText('Back of your ID');
+    expect(screen.getByRole('dialog')).toBeTruthy();
   });
 
   it('with no webcam plugged in, says so and sends the person back to choose a file', async () => {

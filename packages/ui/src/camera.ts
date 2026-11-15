@@ -14,6 +14,8 @@
 //
 // Changed here (Vibe Portal): `describeCameraError(err, true)` words the error for a computer's
 // webcam, where there is no camera app to open and the page's own file chooser is the way on.
+// The error's name is sorted into a kind once; the phone's and the computer's words are two
+// tables over the kinds. The phone's words are as they were.
 
 /** Accept list for a native "take a photo" input. JPEG/PNG only: the
  *  intake worker embeds pages into a PDF with pdf-lib, which reads only
@@ -95,75 +97,86 @@ export interface CameraErrorCopy {
   detail: string;
 }
 
-/** The same, for a computer's webcam: no camera app to fall back on, so a file is chosen. */
-function describeWebcamError(name: string): CameraErrorCopy {
-  switch (name) {
+type CameraFault = 'blocked' | 'missing' | 'unfit' | 'busy' | 'other';
+
+/** What a getUserMedia rejection means, by its name. */
+function cameraFault(err: unknown): CameraFault {
+  switch ((err as { name?: string } | null)?.name ?? '') {
     case 'NotAllowedError':
     case 'PermissionDeniedError':
     case 'SecurityError':
-      return {
-        title: 'Camera access is blocked',
-        detail:
-          'Allow the camera for this site (the icon beside the address at the top of the browser) and try again. Or close this and choose a file instead.',
-      };
+      return 'blocked';
     case 'NotFoundError':
     case 'DevicesNotFoundError':
+      return 'missing';
     case 'OverconstrainedError':
-      return {
-        title: 'No webcam found',
-        detail:
-          'This computer has no camera the browser can use. Close this and choose a file instead.',
-      };
+      return 'unfit';
     case 'NotReadableError':
     case 'TrackStartError':
     case 'AbortError':
-      return {
-        title: 'The camera is busy',
-        detail:
-          'Another program (a video call, for example) may be using it. Close that and try again. Or close this and choose a file instead.',
-      };
+      return 'busy';
     default:
-      return {
-        title: "This browser can't open the camera",
-        detail: 'Close this and choose a file instead.',
-      };
+      return 'other';
   }
 }
+
+const NO_PHONE_CAMERA: CameraErrorCopy = {
+  title: 'No usable camera found',
+  detail: 'Use "Take a photo" below to open your phone\'s camera app, or upload a file.',
+};
+
+/** On a phone: the camera app is the way on. */
+const PHONE_COPY: Record<CameraFault, CameraErrorCopy> = {
+  blocked: {
+    title: 'Camera access is blocked',
+    detail:
+      'Allow the camera for this site (tap the lock icon in the address bar → Permissions → Camera), or use "Take a photo" below to open your phone\'s camera app instead.',
+  },
+  missing: NO_PHONE_CAMERA,
+  unfit: NO_PHONE_CAMERA,
+  busy: {
+    title: 'The camera is busy',
+    detail:
+      'Another app may be using it. Close other camera apps and try again, or use "Take a photo" below.',
+  },
+  other: {
+    title: "This browser can't open the camera",
+    detail:
+      'Some in-app browsers (email and social apps) block it. Use "Take a photo" below to open your phone\'s camera app, or open this page in Chrome or Safari.',
+  },
+};
+
+/** On a computer: no camera app to fall back on, so the dialog offers Try again and the page's
+ *  file chooser is the way on. */
+const COMPUTER_COPY: Record<CameraFault, CameraErrorCopy> = {
+  blocked: {
+    title: 'Camera access is blocked',
+    detail:
+      'Allow the camera for this site (the icon beside the address at the top of the browser), then choose Try again. Or close this and choose a file instead.',
+  },
+  missing: {
+    title: 'No webcam found',
+    detail:
+      'This computer has no camera the browser can use. Close this and choose a file instead.',
+  },
+  unfit: {
+    title: "The camera can't be used",
+    detail:
+      'The browser could not get a picture from this camera. Close this and choose a file instead.',
+  },
+  busy: {
+    title: 'The camera is busy',
+    detail:
+      'Another program (a video call, for example) may be using it. Close that program, then choose Try again. Or close this and choose a file instead.',
+  },
+  other: {
+    title: "This browser can't open the camera",
+    detail: 'Close this and choose a file instead.',
+  },
+};
 
 /** Turn a getUserMedia rejection into something a client can act on. `computer`: a webcam,
  *  not a phone. */
 export function describeCameraError(err: unknown, computer = false): CameraErrorCopy {
-  const name = (err as { name?: string } | null)?.name ?? '';
-  if (computer) return describeWebcamError(name);
-  switch (name) {
-    case 'NotAllowedError':
-    case 'PermissionDeniedError':
-    case 'SecurityError':
-      return {
-        title: 'Camera access is blocked',
-        detail:
-          'Allow the camera for this site (tap the lock icon in the address bar → Permissions → Camera), or use "Take a photo" below to open your phone\'s camera app instead.',
-      };
-    case 'NotFoundError':
-    case 'DevicesNotFoundError':
-    case 'OverconstrainedError':
-      return {
-        title: 'No usable camera found',
-        detail: 'Use "Take a photo" below to open your phone\'s camera app, or upload a file.',
-      };
-    case 'NotReadableError':
-    case 'TrackStartError':
-    case 'AbortError':
-      return {
-        title: 'The camera is busy',
-        detail:
-          'Another app may be using it. Close other camera apps and try again, or use "Take a photo" below.',
-      };
-    default:
-      return {
-        title: "This browser can't open the camera",
-        detail:
-          'Some in-app browsers (email and social apps) block it. Use "Take a photo" below to open your phone\'s camera app, or open this page in Chrome or Safari.',
-      };
-  }
+  return (computer ? COMPUTER_COPY : PHONE_COPY)[cameraFault(err)];
 }

@@ -357,7 +357,7 @@ was fixed (owner: "Fix all"):
   2026-11-14 for front and back). The owner released on 2026-11-14 all the same. Front and
   back is off until an admin chooses it: try a real licence before choosing it for clients.
 
-### A webcam on a computer (after 0.3.13, 2026-11-15)
+### A webcam on a computer (0.3.14, 2026-11-15)
 
 - The request page offers **Use your webcam** on a computer whose browser can use a camera,
   beside the file chooser, for one picture of the ID as well as for front and back. Before,
@@ -367,6 +367,17 @@ was fixed (owner: "Fix all"):
   On a computer it no longer offers the phone's camera app.
 - Tried in a real browser (Edge, with its stand-in camera): the button, the dialog, one
   picture at 2560×1440, and the page showing it ready to send.
+- After a code review:
+  - A phone or tablet is told by its system (Android, iOS, iPadOS), not by its pointer: a
+    touch-screen Windows PC is a computer, and a tablet with a mouse is still a tablet.
+  - A blocked or busy camera can be put right and tried again in the same dialog.
+  - A camera that gives no picture in 6 seconds is let go, not left on behind the message.
+  - The button says **Take it again** only after the camera took the picture, not after a
+    file was chosen.
+  - The word about a phone reading the barcode better shows only where the webcam is
+    offered, and also where the back is taken again.
+  - The front has one picker in both settings, so the camera stays open when what the firm
+    asks for arrives after the page is drawn.
 - **Not measured: how well a real webcam's picture reads.** Most give 1280×720 or 1920×1080
   and many cannot focus on a card held close. The page says a phone usually reads the
   barcode better. A back that cannot be read is still sent, with its flag.

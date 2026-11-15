@@ -62,11 +62,24 @@ const refusedFile = (err: unknown): boolean =>
   err instanceof ApiError &&
   ['id_type', 'image_too_large', 'photo_unreadable', 'too_large'].includes(err.code);
 
-/** A phone or tablet: the camera is offered first. On a desktop, a file is chosen. */
-const hasTouchCamera = (): boolean =>
-  typeof window !== 'undefined' &&
-  typeof window.matchMedia === 'function' &&
-  window.matchMedia('(pointer: coarse)').matches;
+/** A phone or tablet (Android, iOS, iPadOS), where a file chooser can open the camera app. A
+ *  touch-screen Windows PC cannot, so it counts as a computer, and a tablet with a mouse is
+ *  still a tablet: the pointer does not decide it. */
+const hasCameraApp = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent;
+  // iPadOS calls itself a Mac; a Mac has no touch screen.
+  return (
+    /Android|iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+  );
+};
+
+const BACK_HINT = 'Flat and in good light, with the whole barcode in the picture.';
+/** Said only where the webcam is offered. */
+const webcamNote = (): string =>
+  !hasCameraApp() && hasCameraApi()
+    ? 'A phone usually reads the barcode better than a webcam.'
+    : '';
 
 /** One picture of the ID (or one side of it): the camera on a phone, the webcam on a computer
  *  whose browser has one to offer, or a file. */
@@ -86,13 +99,20 @@ function SidePicker(props: {
   const [camera, setCamera] = useState(false);
   // A picture from the camera empties the file chooser, so it does not still name another.
   const [taken, setTaken] = useState(0);
+  // The picture the camera took, to tell it from a file that was chosen.
+  const [shot, setShot] = useState<File | null>(null);
 
   const name = props.side === 'back' ? 'idBack' : 'idPhoto';
   // A phone or tablet opens its camera. A computer is offered its webcam where the browser can
   // use a camera at all; whether one is plugged in is only known once it is asked for.
-  const phone = hasTouchCamera();
+  const phone = hasCameraApp();
   const offerCamera = phone || hasCameraApi();
-  const cameraWords = props.file ? 'Take it again' : phone ? 'Use the camera' : 'Use your webcam';
+  const cameraWords =
+    props.file && props.file === shot
+      ? 'Take it again'
+      : phone
+        ? 'Use the camera'
+        : 'Use your webcam';
   return (
     <div style={{ display: 'grid', gap: 4 }}>
       <label htmlFor={`${name}-file`}>{props.label}</label>
@@ -139,13 +159,14 @@ function SidePicker(props: {
           }}
           onCapture={(blob, meta) => {
             setTaken((n) => n + 1);
-            props.onFile(
+            const picture =
               blob instanceof File
                 ? blob
                 : new File([blob], meta.filename ?? `id-${props.side}.jpg`, {
                     type: blob.type || 'image/jpeg',
-                  }),
-            );
+                  });
+            setShot(picture);
+            props.onFile(picture);
           }}
         />
       )}
@@ -414,6 +435,12 @@ export function RequestAccess(): JSX.Element {
                 side="back"
                 label="Back of your ID"
                 file={back}
+                // The retake's own words are above it.
+                hint={
+                  step.retake
+                    ? webcamNote() || undefined
+                    : [BACK_HINT, webcamNote()].filter(Boolean).join(' ')
+                }
                 // Taken once already: the request may go on without another.
                 required={!step.retake}
                 pick={backPick}
@@ -507,12 +534,22 @@ export function RequestAccess(): JSX.Element {
           value={form.note}
           onChange={set('note')}
         />
-        {mode === 'photo' && (
+        {/* One picker for the front in both modes, in one place: what the firm asks for arrives
+            after the page is drawn, and must not close a camera that is already open. */}
+        {(mode === 'photo' || scan) && (
           <SidePicker
             side="front"
-            label="Photo of your ID (driver&rsquo;s license, state ID or passport)"
-            hint="A photo from your phone or webcam, or a scan. Only the firm sees it, to check who you are."
-            accept={ID_ACCEPT}
+            label={
+              scan
+                ? 'Front of your ID (driver\u2019s license or state ID; a passport\u2019s photo page)'
+                : 'Photo of your ID (driver\u2019s license, state ID or passport)'
+            }
+            hint={
+              scan
+                ? 'Only the firm sees your ID, to check who you are.'
+                : 'A photo from your phone or webcam, or a scan. Only the firm sees it, to check who you are.'
+            }
+            accept={scan ? undefined : ID_ACCEPT}
             file={photo}
             pick={pick}
             onFile={setPhoto}
@@ -520,23 +557,11 @@ export function RequestAccess(): JSX.Element {
         )}
         {scan && (
           <>
-            <SidePicker
-              side="front"
-              label="Front of your ID (driver&rsquo;s license or state ID; a passport&rsquo;s photo page)"
-              hint="Only the firm sees your ID, to check who you are."
-              file={photo}
-              pick={pick}
-              onFile={setPhoto}
-            />
             {!noBarcode && (
               <SidePicker
                 side="back"
                 label="Back of your ID"
-                hint={
-                  hasTouchCamera()
-                    ? 'Flat and in good light, with the whole barcode in the picture.'
-                    : 'Flat and in good light, with the whole barcode in the picture. A phone usually reads the barcode better than a webcam.'
-                }
+                hint={[BACK_HINT, webcamNote()].filter(Boolean).join(' ')}
                 file={back}
                 pick={backPick}
                 onFile={setBack}

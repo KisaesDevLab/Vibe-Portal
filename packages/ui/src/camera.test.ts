@@ -97,5 +97,13 @@ describe('describeCameraError', () => {
       expect(copy.detail).not.toMatch(/phone|tap|Take a photo/);
     }
     expect(describeCameraError({ name: 'NotFoundError' }, true).title).toBe('No webcam found');
+    // A camera that is there but cannot meet what was asked is not "no webcam".
+    expect(describeCameraError({ name: 'OverconstrainedError' }, true).title).toMatch(
+      /can't be used/,
+    );
+    expect(describeCameraError({ name: 'OverconstrainedError' }).title).toMatch(/No usable camera/);
+    // What can be put right says how to go again.
+    expect(describeCameraError({ name: 'NotAllowedError' }, true).detail).toMatch(/Try again/);
+    expect(describeCameraError({ name: 'NotReadableError' }, true).detail).toMatch(/Try again/);
   });
 });
