@@ -154,12 +154,14 @@ staff page:
 2. Tick any other files of this client to send with it (up to 20).
 3. Enter the **recipient's email**, and their name and organization if you like (the recipient
    sees them on the page, and they go in the watermark).
-4. **Access**: **View only** shows PDFs and pictures (PNG, JPEG) on the page with no download
-   button; it cannot stop a screenshot. **View and download** is needed for any other kind of
-   file.
-5. **Link works for** 7, 30 or 90 days.
-6. **Watermark PDFs** prints the recipient's name, organization and the day they opened it across
-   every page. It works for PDFs up to 30 MB that are not locked with a password.
+4. **Access** starts as **View and download**, which any kind of file needs. **View only**
+   shows PDFs and pictures (PNG, JPEG) on the page with no download button; it cannot stop a
+   screenshot.
+5. **Link works for** 7 days to start with; choose 14, 30 or 90 if it should last longer.
+6. **Watermark PDFs** starts ticked. It prints the recipient's name, organization and the day
+   they opened it across every page. A PDF that cannot be watermarked (locked with a password,
+   damaged, or over 30 MB) is sent as it is, and the page tells you which when the link is
+   sent. Untick the box to send every PDF as it is.
 7. Add a message for the email if you like, and press **Send secure link**.
 
 What the recipient gets:

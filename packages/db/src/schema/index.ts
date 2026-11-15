@@ -439,6 +439,10 @@ export const fileShareItem = pgTable(
       .references(() => files.id),
     /** Downloads of this file through this link, against the link's limit (P58). */
     downloads: integer('downloads').notNull().default(0),
+    /** P89: the stored content this watermarked link sends as it is (a PDF that could not be
+     *  watermarked when the link was made). Other content of the file is watermarked or not
+     *  sent, as ever. */
+    unmarkedBlobKey: text('unmarked_blob_key'),
   },
   (t) => [primaryKey({ columns: [t.shareId, t.fileId] })],
 );

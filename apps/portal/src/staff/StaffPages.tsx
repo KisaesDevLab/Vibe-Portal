@@ -35,6 +35,7 @@ import {
   useIsNarrow,
   ThemeToggle,
 } from '@vibe/ui';
+import { SECURE_LINK_DEFAULTS } from '@vibe-portal/types';
 
 import { FirmLogo, reloadBranding } from '../branding';
 import { Select } from '../components/Field';
@@ -1330,10 +1331,11 @@ function SendSecurely({
   const { act, busy, error } = useAct(() => undefined);
   const [picked, setPicked] = useState<Set<string>>(new Set([first]));
   const [to, setTo] = useState({ email: '', name: '', organization: '', message: '' });
-  // Owner 2026-11-12: a new link starts as view and download, 7 days, watermarked.
-  const [download, setDownload] = useState(true);
-  const [watermark, setWatermark] = useState(true);
-  const [days, setDays] = useState(7);
+  // Owner 2026-11-12: a new link starts as view and download, 7 days, watermarked. The API
+  // takes the same for whatever a caller leaves out.
+  const [download, setDownload] = useState<boolean>(SECURE_LINK_DEFAULTS.canDownload);
+  const [watermark, setWatermark] = useState<boolean>(SECURE_LINK_DEFAULTS.watermark);
+  const [days, setDays] = useState<number>(SECURE_LINK_DEFAULTS.days);
   const toggle = (fileId: string, on: boolean): void => {
     const next = new Set(picked);
     if (on) next.add(fileId);
@@ -1354,11 +1356,17 @@ function SendSecurely({
         canDownload: download,
         watermark,
         days,
+        // P89: a PDF that cannot be watermarked goes as it is, and is named below.
+        ...(watermark ? { unmarkedOk: true } : {}),
       },
     });
     if (made) {
+      const unmarked = (made as { unmarked?: string[] }).unmarked ?? [];
       onSent(
-        `Secure link sent to ${email}. It expires in ${days} days and can be revoked anytime.`,
+        `Secure link sent to ${email}. It expires in ${days} days and can be revoked anytime.` +
+          (unmarked.length > 0
+            ? ` Sent without the watermark, because ${unmarked.length === 1 ? 'it' : 'they'} cannot be watermarked (locked with a password, damaged, or over 30 MB): ${unmarked.join(', ')}.`
+            : ''),
       );
     }
   };
@@ -1432,6 +1440,12 @@ function SendSecurely({
           />
           <span>Watermark PDFs with the recipient&apos;s name and the date</span>
         </label>
+        {watermark && (
+          <span style={{ fontSize: 13 }}>
+            A PDF that cannot be watermarked (locked with a password, damaged, or over 30 MB) is
+            sent as it is. You are told which when the link is sent.
+          </span>
+        )}
         <label style={{ display: 'grid', gap: 4 }}>
           <span>Message in the email (optional)</span>
           <textarea

@@ -244,7 +244,7 @@ Each phase ends with its tests green and a ship gate.
 - [x] Secure links to someone outside the client (P49), as Time & Billing's secure share: staff
   pick files already on the portal and a recipient; the recipient opens `/shared` from the email,
   proves the mailbox with a 6-digit code, and views (or also downloads) for 30 minutes at a time
-  until the link expires or is revoked. View only, optional PDF watermark, lockout after 15 wrong
+  until the link expires or is revoked. It starts as view and download, 7 days, watermarked (staff may choose view only, no watermark, up to 90 days; P89), lockout after 15 wrong
   codes, all of it in `events`
 - **Gate:** a request approved on the page shows the client as active in Vibe Files' Share window;
   a file removed on the page shows as not on the portal in Vibe Files

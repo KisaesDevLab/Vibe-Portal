@@ -45,6 +45,19 @@ const ContentQuery = z.object({ mode: z.enum(['view', 'download']).default('down
 
 type Share = typeof schema.fileShare.$inferSelect;
 
+/**
+ * Whether the link's watermark applies to a file's content as it is now. P89: not to the
+ * content staff sent knowing it could not be marked (`unmarked` names it); once Vibe Files
+ * replaces that content, the watermark applies again.
+ */
+function marks(
+  s: Pick<Share, 'watermark'>,
+  unmarked: string | null,
+  blobKey: string | null,
+): boolean {
+  return s.watermark && !(unmarked !== null && unmarked === blobKey);
+}
+
 /** Why a link no longer works, or null when it does. Also asked before staff send one again
  *  (P66), so a dead link is never sent. */
 export async function whyUnusable(
@@ -157,6 +170,7 @@ export function sharedRouter(ctx: Ctx): Router {
         contentType: schema.files.contentType,
         blobKey: schema.files.blobKey,
         downloads: schema.fileShareItem.downloads,
+        unmarked: schema.fileShareItem.unmarkedBlobKey,
       })
       .from(schema.fileShareItem)
       .innerJoin(schema.files, eq(schema.files.id, schema.fileShareItem.fileId))
@@ -196,9 +210,16 @@ export function sharedRouter(ctx: Ctx): Router {
         // False when the file has since changed into something this link does not allow
         // (Vibe Files replaced its content): listed, but it does not open.
         // Or a marked link's PDF found not to be markable (a locked or damaged new version).
+        // P89: a PDF the link sends as it is (it could not be marked when the link was made)
+        // is under no watermark rule, for that content.
         available:
-          wontFit(s, f) === null &&
-          !(s.watermark && previewOf(f.contentType) === 'pdf' && cannotMark(f.blobKey)),
+          wontFit({ canDownload: s.canDownload, watermark: marks(s, f.unmarked, f.blobKey) }, f) ===
+            null &&
+          !(
+            marks(s, f.unmarked, f.blobKey) &&
+            previewOf(f.contentType) === 'pdf' &&
+            cannotMark(f.blobKey)
+          ),
       })),
     };
   };
@@ -421,7 +442,7 @@ export function sharedRouter(ctx: Ctx): Router {
       if (!fileId.success) throw new HttpError(404, 'not_found');
       const { mode } = ContentQuery.parse(req.query);
       const [row] = await ctx.db
-        .select({ f: schema.files })
+        .select({ f: schema.files, unmarked: schema.fileShareItem.unmarkedBlobKey })
         .from(schema.fileShareItem)
         .innerJoin(schema.files, eq(schema.files.id, schema.fileShareItem.fileId))
         .where(
@@ -434,8 +455,12 @@ export function sharedRouter(ctx: Ctx): Router {
         );
       const f = row?.f;
       if (!f || !f.blobKey || !f.dekWrapped) throw new HttpError(404, 'not_found');
+      // P89: this content goes as it is when the link was made knowing it cannot be marked.
+      const mark = marks(s, row.unmarked, f.blobKey);
       // The file may have changed since the link was made: the link's rules hold for it as it is.
-      if (wontFit(s, f)) throw new HttpError(409, 'not_available');
+      if (wontFit({ canDownload: s.canDownload, watermark: mark }, f)) {
+        throw new HttpError(409, 'not_available');
+      }
 
       const preview = previewOf(f.contentType);
       const inline = mode === 'view' && preview !== null;
@@ -469,7 +494,7 @@ export function sharedRouter(ctx: Ctx): Router {
       };
       const inlineType = inline ? f.contentType : null;
 
-      if (s.watermark && preview === 'pdf') {
+      if (mark && preview === 'pdf') {
         // Marked or not sent: an unmarked copy never goes out in place of a marked one. The
         // marked copy is made once a day (in a worker) and kept; see files/marks.ts.
         const source = { id: f.id, blobKey, dekWrapped, size: f.size };

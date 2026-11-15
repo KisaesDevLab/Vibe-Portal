@@ -89,3 +89,10 @@ export const EVENT_KINDS = [
   'preview_view',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
+
+/**
+ * A secure link from staff as it starts (owner 2026-11-12): view and download, watermarked,
+ * 7 days. The Send securely form starts with these, and the API uses them for whatever a
+ * caller leaves out, so the two cannot drift apart.
+ */
+export const SECURE_LINK_DEFAULTS = { canDownload: true, watermark: true, days: 7 } as const;

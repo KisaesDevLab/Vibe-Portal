@@ -94,7 +94,17 @@ async function send(
 ): Promise<Sent> {
   const res = await staff
     .post('/api/staff/v1/shares')
-    .send({ clientId: CLIENT, fileIds, email: LENDER, ...more });
+    // View only, unmarked, 30 days unless the test says otherwise: what these tests were
+    // written against. (What a caller gets when it leaves them out is tested on its own.)
+    .send({
+      clientId: CLIENT,
+      fileIds,
+      email: LENDER,
+      canDownload: false,
+      watermark: false,
+      days: 30,
+      ...more,
+    });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   return linkOf(more.email ?? LENDER);
 }

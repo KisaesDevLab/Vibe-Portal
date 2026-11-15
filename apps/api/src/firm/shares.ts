@@ -18,6 +18,7 @@ import express, { type Request, type Router } from 'express';
 import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
+import { SECURE_LINK_DEFAULTS } from '@vibe-portal/types';
 
 import { firmName, type Ctx } from '../context';
 import { dropMarksOfShare } from '../files/marks';
@@ -50,9 +51,14 @@ const CreateSchema = z.object({
   name: z.string().trim().max(120).default(''),
   organization: z.string().trim().max(120).default(''),
   message: z.string().trim().max(1000).default(''),
-  canDownload: z.boolean().default(false),
-  watermark: z.boolean().default(false),
-  days: z.number().int().min(1).max(SHARE_MAX_DAYS).default(30),
+  // Left out: as the Send securely form starts (owner 2026-11-12).
+  canDownload: z.boolean().default(SECURE_LINK_DEFAULTS.canDownload),
+  watermark: z.boolean().default(SECURE_LINK_DEFAULTS.watermark),
+  days: z.number().int().min(1).max(SHARE_MAX_DAYS).default(SECURE_LINK_DEFAULTS.days),
+  /** P89: with the watermark, a PDF that cannot be watermarked goes as it is (and the answer
+   *  names it) instead of the link being refused. The staff page sends this; Vibe Files does
+   *  not, and is refused as before. */
+  unmarkedOk: z.boolean().default(false),
 });
 const ListQuery = z.object({ clientId: Uuid });
 
@@ -89,6 +95,7 @@ export function wontFit(
   s: Pick<ShareRow, 'canDownload' | 'watermark'>,
   f: { contentType: string; size: number },
 ): 'view_only_needs_preview' | 'too_large_to_watermark' | null {
+  // (P89: a caller passes `watermark: false` for a file the link sends as it is.)
   const preview = previewOf(f.contentType);
   // "View only" means the page shows it: a file the page cannot show could only be saved.
   if (!s.canDownload && preview === null) return 'view_only_needs_preview';
@@ -117,7 +124,12 @@ export interface ShareInput {
   canDownload: boolean;
   watermark: boolean;
   days: number;
+  /** P89: send a PDF that cannot be watermarked as it is. Never for a client's own link. */
+  unmarkedOk?: boolean;
 }
+
+/** PDFs checked at once before a watermarked link is made: each is read whole. */
+const CHECK_AT_ONCE = 3;
 
 /**
  * Makes a secure link to `client`'s files and emails it: every file checked, at most a few live
@@ -134,7 +146,7 @@ export async function createOutsideShare(
     limit: { max: number; windowSeconds: number };
     from?: { identityId: string; name: string };
   },
-): Promise<{ shareId: string; expiresAt: Date }> {
+): Promise<{ shareId: string; expiresAt: Date; unmarked: string[] }> {
   const { client, input, actor } = o;
   const email = normalizeEmail(input.email);
   if (!email) throw new HttpError(400, 'invalid_email');
@@ -157,28 +169,41 @@ export async function createOutsideShare(
   if (files.length !== ids.length || files.some((f) => !f.blobKey || !f.dekWrapped)) {
     throw new HttpError(400, 'file_not_found');
   }
+  // P89: files that go as they are in a watermarked link (their ids), when that is allowed.
+  const unmarked = new Set<string>();
   for (const f of files) {
     const why = wontFit(input, f);
-    if (why) throw new HttpError(400, why);
+    if (why === 'too_large_to_watermark' && input.unmarkedOk) unmarked.add(f.id);
+    else if (why) throw new HttpError(400, why);
   }
 
   // A PDF that cannot be marked (locked with a password, damaged) is found out now, by the
   // staff member, not later by the recipient. Only read here, in a worker: marking waits
-  // until the recipient opens it.
+  // until the recipient opens it. A few at a time: each is read whole.
   if (input.watermark) {
-    for (const f of files) {
-      if (previewOf(f.contentType) !== 'pdf') continue;
-      const plain = await readPlain(ctx, {
-        id: f.id,
-        blobKey: f.blobKey as string,
-        dekWrapped: f.dekWrapped as Buffer,
-      });
-      try {
-        await checkPdf(plain);
-      } catch {
-        throw new HttpError(400, 'cannot_watermark');
+    const pdfs = files.filter((f) => previewOf(f.contentType) === 'pdf' && !unmarked.has(f.id));
+    let next = 0;
+    let refused = false;
+    const worker = async (): Promise<void> => {
+      while (next < pdfs.length && !refused) {
+        const f = pdfs[next++] as (typeof pdfs)[number];
+        try {
+          const plain = await readPlain(ctx, {
+            id: f.id,
+            blobKey: f.blobKey as string,
+            dekWrapped: f.dekWrapped as Buffer,
+          });
+          await checkPdf(plain);
+        } catch (err) {
+          // A file that cannot be read at all is not a matter of the watermark.
+          if (err instanceof HttpError) throw err;
+          if (input.unmarkedOk) unmarked.add(f.id);
+          else refused = true;
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(CHECK_AT_ONCE, pdfs.length) }, worker));
+    if (refused) throw new HttpError(400, 'cannot_watermark');
   }
 
   const now = ctx.now();
@@ -231,7 +256,14 @@ export async function createOutsideShare(
       createdAt: now,
       expiresAt,
     });
-    await tx.insert(schema.fileShareItem).values(files.map((f) => ({ shareId: id, fileId: f.id })));
+    await tx.insert(schema.fileShareItem).values(
+      files.map((f) => ({
+        shareId: id,
+        fileId: f.id,
+        // As it is, for this content only: a later version is watermarked or not sent.
+        unmarkedBlobKey: unmarked.has(f.id) ? f.blobKey : null,
+      })),
+    );
     return true;
   });
   if (!made) {
@@ -267,10 +299,16 @@ export async function createOutsideShare(
       days: input.days,
       canDownload: input.canDownload,
       watermark: input.watermark,
+      ...(unmarked.size > 0 ? { unmarked: unmarked.size } : {}),
       ...(o.from ? { byClient: true } : {}),
     },
   });
-  return { shareId: id, expiresAt };
+  return {
+    shareId: id,
+    expiresAt,
+    // By name, for the staff member: these went without the watermark.
+    unmarked: files.filter((f) => unmarked.has(f.id)).map((f) => f.name),
+  };
 }
 
 /** The email that carries a secure link: when it is made, and when staff send it again. */

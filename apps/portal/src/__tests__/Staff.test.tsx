@@ -1406,6 +1406,8 @@ describe('staff page', () => {
       canDownload: true,
       watermark: true,
       days: 7,
+      // P89: a PDF that cannot be watermarked goes as it is.
+      unmarkedOk: true,
     });
     // The form closes, and the list is read again.
     expect(screen.queryByLabelText('Recipient email')).toBeNull();
@@ -1421,6 +1423,72 @@ describe('staff page', () => {
     );
     await waitFor(() =>
       expect(calls.some((c) => c.method === 'DELETE' && c.path === '/v1/shares/s1')).toBe(true),
+    );
+  });
+
+  it('client page: the access, the days and the watermark of a secure link can be changed', async () => {
+    const id = CLIENT.id;
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [USER], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: { body: { files: [portalFile('f2', 'W-2.pdf')] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      'POST /v1/shares': { status: 201, body: { shareId: 's2', expiresAt: '2026-12-09T15:00Z' } },
+    });
+    at(`/staff/clients/${id}`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Send W-2.pdf securely' }));
+    fireEvent.change(screen.getByLabelText('Recipient email'), {
+      target: { value: 'lee@title-co.test' },
+    });
+    // View only: said to be no bar to a screenshot; the note goes when download is allowed.
+    expect(screen.queryByText(/It cannot stop a\s+screenshot/)).toBeNull();
+    fireEvent.change(screen.getByLabelText('Access'), { target: { value: 'view' } });
+    expect(screen.getByText(/It cannot stop a\s+screenshot/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Link works for'), { target: { value: '30' } });
+    // Without the watermark, nothing is said about PDFs that cannot be marked.
+    expect(screen.getByText(/A PDF that cannot be watermarked/)).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(/^Watermark PDFs/));
+    expect(screen.queryByText(/A PDF that cannot be watermarked/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Send secure link' }));
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Secure link sent to lee@title-co.test. It expires in 30 days and can be revoked anytime.',
+    );
+    // The days as a number, and no word about unmarkable PDFs when nothing is marked.
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/v1/shares')?.body).toEqual({
+      clientId: id,
+      fileIds: ['f2'],
+      email: 'lee@title-co.test',
+      name: '',
+      organization: '',
+      message: '',
+      canDownload: false,
+      watermark: false,
+      days: 30,
+    });
+  });
+
+  it('client page: staff are told which PDFs went without the watermark (P89)', async () => {
+    const id = CLIENT.id;
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [USER], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: { body: { files: [portalFile('f2', 'W-2.pdf')] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      'POST /v1/shares': {
+        status: 201,
+        body: { shareId: 's2', expiresAt: '2026-11-17T15:00Z', unmarked: ['W-2.pdf'] },
+      },
+    });
+    at(`/staff/clients/${id}`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Send W-2.pdf securely' }));
+    fireEvent.change(screen.getByLabelText('Recipient email'), {
+      target: { value: 'lee@title-co.test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send secure link' }));
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'Secure link sent to lee@title-co.test. It expires in 7 days and can be revoked anytime. ' +
+        'Sent without the watermark, because it cannot be watermarked (locked with a password, ' +
+        'damaged, or over 30 MB): W-2.pdf.',
     );
   });
 

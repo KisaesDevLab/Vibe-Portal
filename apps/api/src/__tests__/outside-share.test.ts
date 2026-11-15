@@ -82,7 +82,17 @@ interface Sent {
 async function send(staff: Agent, fileIds: string[], more: object = {}): Promise<Sent> {
   const res = await staff
     .post('/api/staff/v1/shares')
-    .send({ clientId: CLIENT, fileIds, email: LENDER, ...more });
+    // View only, unmarked, 30 days unless the test says otherwise: what these tests were
+    // written against. (What a caller gets when it leaves them out is tested on its own.)
+    .send({
+      clientId: CLIENT,
+      fileIds,
+      email: LENDER,
+      canDownload: false,
+      watermark: false,
+      days: 30,
+      ...more,
+    });
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   return linkOf((more as { email?: string }).email ?? LENDER);
 }
@@ -201,6 +211,7 @@ describe('a secure link to someone outside (P49)', () => {
       organization: 'First Bank',
       message: 'For the loan file.\nThanks',
       canDownload: true,
+      watermark: false,
       days: 7,
     });
     expect(made.status, JSON.stringify(made.body)).toBe(201);
@@ -735,7 +746,7 @@ describe('what staff may send (P49)', () => {
       [{ ...base, days: 1.5 }, 400, 'invalid'],
       [{ ...base, clientId: randomUUID() }, 404, 'client_not_found'],
       // View only is for what the page can show.
-      [{ ...base, fileIds: [mine, docx] }, 400, 'view_only_needs_preview'],
+      [{ ...base, fileIds: [mine, docx], canDownload: false }, 400, 'view_only_needs_preview'],
     ];
     for (const [send, status, error] of tries) {
       const res = await boss.post('/api/staff/v1/shares').send(send);
@@ -942,6 +953,104 @@ describe('the watermark (P49)', () => {
       (e) => e.kind === 'outside_view',
     );
     expect(views).toHaveLength(1);
+  });
+});
+
+describe('what a link is when nothing is said, and PDFs that cannot be marked (P89)', () => {
+  it('a caller that leaves them out gets view and download, watermarked, 7 days', async () => {
+    const boss = await admin();
+    const fileId = await onPortal(CLIENT, 'a.pdf', await realPdf());
+    const made = await boss
+      .post('/api/staff/v1/shares')
+      .send({ clientId: CLIENT, fileIds: [fileId], email: LENDER });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    // Seven days from the test's clock (2026-11-09 15:00 UTC).
+    expect(made.body.expiresAt).toBe('2026-11-16T15:00:00.000Z');
+    expect(made.body.unmarked).toEqual([]);
+    const [row] = await w.t.db.select().from(schema.fileShare);
+    expect([row?.canDownload, row?.watermark]).toEqual([true, true]);
+  });
+
+  it('with the staff page: a PDF that cannot be marked goes as it is, and staff are told which', async () => {
+    const boss = await admin();
+    const lockedBytes = Buffer.from('%PDF d1');
+    const locked = await onPortal(CLIENT, 'locked.pdf', lockedBytes);
+    const original = await realPdf();
+    const good = await onPortal(CLIENT, 'good.pdf', original);
+    const body = { clientId: CLIENT, fileIds: [locked, good], email: LENDER, watermark: true };
+    // Not asked for (Vibe Files, or any caller that does not say so): refused, as before.
+    const no = await boss.post('/api/staff/v1/shares').send(body);
+    expect([no.status, no.body]).toEqual([400, { error: 'cannot_watermark' }]);
+
+    const made = await boss.post('/api/staff/v1/shares').send({ ...body, unmarkedOk: true });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body.unmarked).toEqual(['locked.pdf']);
+    const sent = (await w.t.db.select().from(schema.events)).find(
+      (e) => e.kind === 'outside_share',
+    );
+    expect((sent?.detail as { unmarked?: number }).unmarked).toBe(1);
+
+    const s = linkOf(LENDER);
+    const pat = await unlock(s);
+    const page = await pat.post(`${s.path}/open`).send({ key: s.key }).expect(200);
+    expect(
+      (page.body.files as { name: string; available: boolean }[]).map((f) => [f.name, f.available]),
+    ).toEqual([
+      ['good.pdf', true],
+      ['locked.pdf', true],
+    ]);
+    const bytes = (res: request.Response, done: (e: Error | null, b: unknown) => void): void => {
+      const parts: Buffer[] = [];
+      res.on('data', (c: Buffer) => parts.push(c));
+      res.on('end', () => done(null, Buffer.concat(parts)));
+    };
+    // The one that cannot be marked arrives as it is; the other is marked.
+    const asIs = await pat
+      .get(`${s.path}/files/${locked}/content?mode=download`)
+      .buffer(true)
+      .parse(bytes)
+      .expect(200);
+    expect(Buffer.compare(asIs.body as Buffer, lockedBytes)).toBe(0);
+    const marked = await pat
+      .get(`${s.path}/files/${good}/content?mode=download`)
+      .buffer(true)
+      .parse(bytes)
+      .expect(200);
+    expect(Buffer.compare(marked.body as Buffer, original)).not.toBe(0);
+
+    // Only that content goes unmarked: once Vibe Files replaces it, the watermark applies.
+    const [other] = await w.t.db.select().from(schema.files).where(eq(schema.files.id, good));
+    await w.t.db
+      .update(schema.files)
+      .set({
+        blobKey: other?.blobKey ?? null,
+        dekWrapped: other?.dekWrapped ?? null,
+        size: original.length,
+      })
+      .where(eq(schema.files.id, locked));
+    const now = await pat
+      .get(`${s.path}/files/${locked}/content?mode=download`)
+      .buffer(true)
+      .parse(bytes)
+      .expect(200);
+    expect(Buffer.compare(now.body as Buffer, original)).not.toBe(0);
+    expect((await PDFDocument.load(now.body as Buffer)).getPageCount()).toBe(2);
+  });
+
+  it('several PDFs are checked together, and one bad one still refuses the link', async () => {
+    const boss = await admin();
+    const ids: string[] = [];
+    for (let i = 0; i < 7; i++) ids.push(await onPortal(CLIENT, `p${i}.pdf`, await realPdf(1)));
+    await send(boss, ids, { watermark: true });
+    const bad = await onPortal(CLIENT, 'bad.pdf', Buffer.from('%PDF d1'));
+    const res = await boss.post('/api/staff/v1/shares').send({
+      clientId: CLIENT,
+      fileIds: [...ids, bad],
+      email: 'x@first-bank.test',
+      watermark: true,
+    });
+    expect([res.status, res.body]).toEqual([400, { error: 'cannot_watermark' }]);
+    expect(await w.t.db.select().from(schema.fileShare)).toHaveLength(1);
   });
 });
 
