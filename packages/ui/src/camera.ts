@@ -11,6 +11,9 @@
 // LinkedIn) have no getUserMedia at all. The fixes: ask for a real
 // resolution + continuous focus, prefer the main rear lens, and always
 // offer the phone's native camera app via <input capture> as a fallback.
+//
+// Changed here (Vibe Portal): `describeCameraError(err, true)` words the error for a computer's
+// webcam, where there is no camera app to open and the page's own file chooser is the way on.
 
 /** Accept list for a native "take a photo" input. JPEG/PNG only: the
  *  intake worker embeds pages into a PDF with pdf-lib, which reads only
@@ -92,9 +95,46 @@ export interface CameraErrorCopy {
   detail: string;
 }
 
-/** Turn a getUserMedia rejection into something a client can act on. */
-export function describeCameraError(err: unknown): CameraErrorCopy {
+/** The same, for a computer's webcam: no camera app to fall back on, so a file is chosen. */
+function describeWebcamError(name: string): CameraErrorCopy {
+  switch (name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+    case 'SecurityError':
+      return {
+        title: 'Camera access is blocked',
+        detail:
+          'Allow the camera for this site (the icon beside the address at the top of the browser) and try again. Or close this and choose a file instead.',
+      };
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+    case 'OverconstrainedError':
+      return {
+        title: 'No webcam found',
+        detail:
+          'This computer has no camera the browser can use. Close this and choose a file instead.',
+      };
+    case 'NotReadableError':
+    case 'TrackStartError':
+    case 'AbortError':
+      return {
+        title: 'The camera is busy',
+        detail:
+          'Another program (a video call, for example) may be using it. Close that and try again. Or close this and choose a file instead.',
+      };
+    default:
+      return {
+        title: "This browser can't open the camera",
+        detail: 'Close this and choose a file instead.',
+      };
+  }
+}
+
+/** Turn a getUserMedia rejection into something a client can act on. `computer`: a webcam,
+ *  not a phone. */
+export function describeCameraError(err: unknown, computer = false): CameraErrorCopy {
   const name = (err as { name?: string } | null)?.name ?? '';
+  if (computer) return describeWebcamError(name);
   switch (name) {
     case 'NotAllowedError':
     case 'PermissionDeniedError':

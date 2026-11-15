@@ -124,9 +124,11 @@ On the staff page, **Settings**:
 - **Access requests**: what someone who asks for access must send, and what staff must do
   before approving. People you invite are not asked for any of this.
   - **ID with a request**: **None**, **A picture of a photo ID** (what a firm has until it
-    changes this), or **Front and back, barcode read**. With front and back, the person
-    photographs both sides (on a phone, with its camera), and the portal reads the barcode on
-    the back of a US or Canadian license or ID. Staff see the name, date of birth, address
+    changes this; a file, or a picture taken there with the phone's camera or the computer's
+    webcam), or **Front and back, barcode read**. With front and back, the person
+    photographs both sides (with a phone's camera, or a computer's webcam; a phone usually
+    reads the barcode better), and the portal reads the barcode on the back of a US or
+    Canadian license or ID. Staff see the name, date of birth, address
     and expiry beside both pictures, with a flag when the ID has expired, the name differs from
     the request's, the barcode could not be read, or the person said the ID has no barcode (a
     passport or an ID from another country: front only). It catches a wrong or old ID. It does

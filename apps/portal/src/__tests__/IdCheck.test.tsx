@@ -464,3 +464,59 @@ describe('staff page (layers A and B)', () => {
     );
   });
 });
+
+describe('request page: a webcam on a computer', () => {
+  /** A browser that can use a camera; asking for it ends as `outcome` says. */
+  function withCamera(outcome: () => Promise<unknown>): void {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn(outcome), enumerateDevices: vi.fn(async () => []) },
+    });
+  }
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'mediaDevices');
+  });
+
+  it('is not offered where the browser has no camera to use', async () => {
+    serve({ '/branding': branding('photo') });
+    at('/request-access');
+    await screen.findByLabelText(/Photo of your ID/, { selector: 'input' });
+    expect(screen.queryByRole('button', { name: /webcam|camera/i })).toBeNull();
+  });
+
+  it('is offered with one picture of the ID, and a PDF can still be chosen', async () => {
+    withCamera(() => new Promise(() => undefined));
+    serve({ '/branding': branding('photo') });
+    at('/request-access');
+    const input = (await screen.findByLabelText(/Photo of your ID/, {
+      selector: 'input',
+    })) as HTMLInputElement;
+    expect(input.accept).toContain('application/pdf');
+    expect(screen.getByRole('button', { name: /^Use your webcam: Photo of your ID/ })).toBeTruthy();
+  });
+
+  it('is offered for each side, with a word that a phone reads the barcode better', async () => {
+    withCamera(() => new Promise(() => undefined));
+    serve({ '/branding': branding('scan') });
+    at('/request-access');
+    await screen.findByLabelText(/Front of your ID/, { selector: 'input' });
+    expect(screen.getByRole('button', { name: /^Use your webcam: Front of your ID/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use your webcam: Back of your ID' })).toBeTruthy();
+    expect(screen.getByText(/A phone usually reads the barcode better than a webcam/)).toBeTruthy();
+  });
+
+  it('with no webcam plugged in, says so and sends the person back to choose a file', async () => {
+    withCamera(() => Promise.reject(Object.assign(new Error('none'), { name: 'NotFoundError' })));
+    serve({ '/branding': branding('photo') });
+    at('/request-access');
+    fireEvent.click(await screen.findByRole('button', { name: /^Use your webcam/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('No webcam found')).toBeTruthy();
+    expect(within(dialog).getByText(/Close this and choose a file instead/)).toBeTruthy();
+    // Nothing about a phone's camera app: on a computer it would only open a file chooser.
+    expect(within(dialog).queryByRole('button', { name: /Take a photo|Phone camera/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByLabelText(/Photo of your ID/, { selector: 'input' })).toBeTruthy();
+  });
+});

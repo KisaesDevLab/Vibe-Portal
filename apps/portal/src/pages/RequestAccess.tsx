@@ -10,7 +10,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { Button, CameraCapture, Input } from '@vibe/ui';
+import { Button, CameraCapture, Input, hasCameraApi } from '@vibe/ui';
 
 import { FirmAuthLayout, useBranding } from '../branding';
 import { api, ApiError, say } from '../api';
@@ -68,11 +68,14 @@ const hasTouchCamera = (): boolean =>
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(pointer: coarse)').matches;
 
-/** One side of the ID, with front and back: the camera on a phone, or a file. */
+/** One picture of the ID (or one side of it): the camera on a phone, the webcam on a computer
+ *  whose browser has one to offer, or a file. */
 function SidePicker(props: {
   side: Side;
   label: string;
   hint?: string;
+  /** What the file chooser offers. Pictures only, unless a PDF may be sent. */
+  accept?: string;
   file: File | null;
   /** Changed to give the file chooser a fresh start. */
   pick: number;
@@ -85,18 +88,23 @@ function SidePicker(props: {
   const [taken, setTaken] = useState(0);
 
   const name = props.side === 'back' ? 'idBack' : 'idPhoto';
+  // A phone or tablet opens its camera. A computer is offered its webcam where the browser can
+  // use a camera at all; whether one is plugged in is only known once it is asked for.
+  const phone = hasTouchCamera();
+  const offerCamera = phone || hasCameraApi();
+  const cameraWords = props.file ? 'Take it again' : phone ? 'Use the camera' : 'Use your webcam';
   return (
     <div style={{ display: 'grid', gap: 4 }}>
       <label htmlFor={`${name}-file`}>{props.label}</label>
-      {hasTouchCamera() && (
+      {offerCamera && (
         <Button
           id={`${name}-camera`}
           type="button"
           variant="secondary"
-          aria-label={`${props.file ? 'Take it again' : 'Use the camera'}: ${props.label}`}
+          aria-label={`${cameraWords}: ${props.label}`}
           onClick={() => setCamera(true)}
         >
-          {props.file ? 'Take it again' : 'Use the camera'}
+          {cameraWords}
         </Button>
       )}
       <input
@@ -104,7 +112,7 @@ function SidePicker(props: {
         id={`${name}-file`}
         type="file"
         name={name}
-        accept={PICTURE_ACCEPT}
+        accept={props.accept ?? PICTURE_ACCEPT}
         aria-required={props.required === false ? undefined : 'true'}
         aria-describedby={props.hint ? `${name}-hint` : undefined}
         onChange={(e) => props.onFile(e.target.files?.[0] ?? null)}
@@ -122,6 +130,7 @@ function SidePicker(props: {
       {camera && (
         <CameraCapture
           single
+          computer={!phone}
           title={props.label}
           onClose={() => {
             setCamera(false);
@@ -359,15 +368,14 @@ export function RequestAccess(): JSX.Element {
                   onFile={setPhoto}
                 />
               ) : (
-                <label style={{ display: 'grid', gap: 4 }}>
-                  <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
-                  <input
-                    key={pick}
-                    type="file"
-                    accept={ID_ACCEPT}
-                    onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-                  />
-                </label>
+                <SidePicker
+                  side="front"
+                  label="Photo of your ID (driver&rsquo;s license, state ID or passport)"
+                  accept={ID_ACCEPT}
+                  file={photo}
+                  pick={pick}
+                  onFile={setPhoto}
+                />
               )}
               <Button
                 type="button"
@@ -500,20 +508,15 @@ export function RequestAccess(): JSX.Element {
           onChange={set('note')}
         />
         {mode === 'photo' && (
-          <label style={{ display: 'grid', gap: 4 }}>
-            <span>Photo of your ID (driver&rsquo;s license, state ID or passport)</span>
-            <input
-              key={pick}
-              type="file"
-              name="idPhoto"
-              accept={ID_ACCEPT}
-              aria-required="true"
-              onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
-            />
-            <span style={{ fontSize: 13 }}>
-              A photo from your phone or a scan. Only the firm sees it, to check who you are.
-            </span>
-          </label>
+          <SidePicker
+            side="front"
+            label="Photo of your ID (driver&rsquo;s license, state ID or passport)"
+            hint="A photo from your phone or webcam, or a scan. Only the firm sees it, to check who you are."
+            accept={ID_ACCEPT}
+            file={photo}
+            pick={pick}
+            onFile={setPhoto}
+          />
         )}
         {scan && (
           <>
@@ -529,7 +532,11 @@ export function RequestAccess(): JSX.Element {
               <SidePicker
                 side="back"
                 label="Back of your ID"
-                hint="Flat and in good light, with the whole barcode in the picture."
+                hint={
+                  hasTouchCamera()
+                    ? 'Flat and in good light, with the whole barcode in the picture.'
+                    : 'Flat and in good light, with the whole barcode in the picture. A phone usually reads the barcode better than a webcam.'
+                }
                 file={back}
                 pick={backPick}
                 onFile={setBack}

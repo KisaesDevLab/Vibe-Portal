@@ -16,6 +16,8 @@
 // Changed here (Vibe Portal, Addendum 01): `single` takes one picture and closes, for the two
 // sides of a photo ID on the request page. As a modal dialog it takes the focus when it opens,
 // keeps Tab inside, and closes on Escape (WCAG 2.1.2, 2.4.3); the opener puts focus back.
+// `computer` is for a desktop's webcam: no "Phone camera" or "Take a photo" (they would only
+// open a file chooser there), and errors worded for a computer.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -37,6 +39,8 @@ export interface CameraCaptureProps {
   title?: string;
   /** One picture, then the dialog closes (no page count, one file from the phone's camera). */
   single?: boolean;
+  /** A computer's webcam, not a phone: nothing here offers the phone's camera app. */
+  computer?: boolean;
 }
 
 type Phase = 'starting' | 'ready' | 'error';
@@ -52,6 +56,7 @@ export function CameraCapture({
   onClose,
   title = 'Scan a document',
   single = false,
+  computer = false,
 }: CameraCaptureProps): JSX.Element {
   const videoRef = useRef<HTMLVideoElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -103,11 +108,14 @@ export function CameraCapture({
     streamRef.current = null;
   }, []);
 
-  const failStarting = useCallback((err: unknown) => {
-    if (!aliveRef.current || readyRef.current) return;
-    setError(describeCameraError(err));
-    setPhase('error');
-  }, []);
+  const failStarting = useCallback(
+    (err: unknown) => {
+      if (!aliveRef.current || readyRef.current) return;
+      setError(describeCameraError(err, computer));
+      setPhase('error');
+    },
+    [computer],
+  );
 
   const attach = useCallback(
     async (stream: MediaStream): Promise<void> => {
@@ -162,7 +170,7 @@ export function CameraCapture({
         }
       } catch (err) {
         if (!cancelled) {
-          setError(describeCameraError(err));
+          setError(describeCameraError(err, computer));
           setPhase('error');
         }
       }
@@ -175,7 +183,7 @@ export function CameraCapture({
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
       stopStream();
     };
-  }, [attach, stopStream]);
+  }, [attach, stopStream, computer]);
 
   function onVideoReady(): void {
     const v = videoRef.current;
@@ -287,19 +295,21 @@ export function CameraCapture({
           >
             <strong style={{ fontSize: 17 }}>{error.title}</strong>
             <span style={{ fontSize: 14, lineHeight: 1.5, color: '#ccc' }}>{error.detail}</span>
-            <button
-              type="button"
-              onClick={() => nativeInputRef.current?.click()}
-              style={{
-                ...secondaryButton,
-                background: '#fff',
-                color: '#000',
-                border: 'none',
-                fontWeight: 600,
-              }}
-            >
-              📷 Take a photo
-            </button>
+            {!computer && (
+              <button
+                type="button"
+                onClick={() => nativeInputRef.current?.click()}
+                style={{
+                  ...secondaryButton,
+                  background: '#fff',
+                  color: '#000',
+                  border: 'none',
+                  fontWeight: 600,
+                }}
+              >
+                📷 Take a photo
+              </button>
+            )}
           </div>
         ) : (
           <>
@@ -377,14 +387,19 @@ export function CameraCapture({
             }}
           />
         )}
-        <button
-          type="button"
-          onClick={() => nativeInputRef.current?.click()}
-          style={{ ...secondaryButton, fontSize: 13, padding: '8px 10px' }}
-          title="Use your phone's camera app instead"
-        >
-          📷 Phone camera
-        </button>
+        {computer ? (
+          // Keeps the shutter in the middle.
+          <span style={{ width: 64 }} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => nativeInputRef.current?.click()}
+            style={{ ...secondaryButton, fontSize: 13, padding: '8px 10px' }}
+            title="Use your phone's camera app instead"
+          >
+            📷 Phone camera
+          </button>
+        )}
       </div>
     </div>
   );

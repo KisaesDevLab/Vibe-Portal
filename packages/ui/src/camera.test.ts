@@ -90,4 +90,12 @@ describe('describeCameraError', () => {
     expect(describeCameraError(new TypeError('x')).title).toMatch(/can't open/);
     expect(describeCameraError(null).detail).toMatch(/Take a photo/);
   });
+  it('on a computer, sends the person to choose a file, not to a phone', () => {
+    for (const name of ['NotAllowedError', 'NotFoundError', 'NotReadableError', 'Other']) {
+      const copy = describeCameraError({ name }, true);
+      expect(copy.detail).toMatch(/choose a file instead/);
+      expect(copy.detail).not.toMatch(/phone|tap|Take a photo/);
+    }
+    expect(describeCameraError({ name: 'NotFoundError' }, true).title).toBe('No webcam found');
+  });
 });
