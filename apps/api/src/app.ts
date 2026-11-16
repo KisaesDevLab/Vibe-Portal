@@ -8,6 +8,7 @@ import type { HealthResponse } from '@vibe-portal/types';
 import { clientAuthRouter } from './auth/client-auth';
 import type { Ctx } from './context';
 import { clientLinkRouter } from './portal/client-link';
+import { CABINET_FIRM_PATH } from './firm/cabinet';
 import { firmRouter, staffApi } from './firm/routes';
 
 import { requireStaff, staffAuthRouter } from './staff/auth';
@@ -67,7 +68,14 @@ export function createApp(deps: AppDeps): Express {
     // P76: a CSV of client links, one row per client.
     app.use('/api/staff/v1/client-links/import', express.json({ limit: '3mb' }));
     // JSON bodies only; file uploads (application/octet-stream) are streamed by their route.
-    app.use('/api', express.json({ limit: '64kb' }));
+    // P90: a client's list of documents in Vibe Files' B2 bucket is large, and is read by its
+    // own router once the firm key is known: nobody without the key has the portal read one.
+    const smallJson = express.json({ limit: '64kb' });
+    app.use('/api', (req, res, next) => {
+      const path = req.originalUrl.split('?')[0]?.toLowerCase() ?? '';
+      if (path === CABINET_FIRM_PATH || path.startsWith(`${CABINET_FIRM_PATH}/`)) next();
+      else smallJson(req, res, next);
+    });
     // Cookie-signed client calls must be JSON (no cross-site form posts). The firm API is
     // authorised by a bearer key, which a cross-site form cannot send.
     app.use('/api/portal', requireJson);

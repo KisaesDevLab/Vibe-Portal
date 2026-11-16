@@ -45,6 +45,9 @@ const LEAVE_OUT = new Set([
   'rate_limit',
   'file_share_code',
   'file_share_grant',
+  // P90: the lists of documents in Vibe Files' B2 bucket can be hundreds of thousands of rows,
+  // and Vibe Files sends them again (a restore forgets what it had, below).
+  'cabinet_file',
 ]);
 
 export interface SnapshotHeader {
@@ -302,6 +305,12 @@ export async function restoreSnapshot(
       }
       counts[t] = lines.length;
     }
+    // P90: the lists of documents in B2 are not in a snapshot. What each client remembers of
+    // its list goes too, so Vibe Files finds nothing here and sends every list again.
+    await tx.execute(
+      sql`UPDATE clients SET cabinet_rev = NULL, cabinet_head_rev = NULL, cabinet_hash = NULL,
+            cabinet_listed_at = NULL, cabinet_by = NULL, cabinet_count = 0`,
+    );
     // The database is older than the files written since this snapshot: the sweep for leftover
     // files holds off for a week (storage.ts).
     const hold = new Date(Date.now() + 7 * 24 * 3_600_000).toISOString();

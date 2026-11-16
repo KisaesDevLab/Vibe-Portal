@@ -193,7 +193,29 @@ export const clients = pgTable('clients', {
   active: boolean('active').notNull().default(true),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
+  // P90: the list of the client's documents in Vibe Files' B2 bucket, as last sent.
+  cabinetRev: bigint('cabinet_rev', { mode: 'number' }),
+  cabinetHeadRev: bigint('cabinet_head_rev', { mode: 'number' }),
+  cabinetHash: text('cabinet_hash'),
+  cabinetListedAt: ts('cabinet_listed_at'),
+  cabinetBy: text('cabinet_by'),
+  cabinetCount: integer('cabinet_count').notNull().default(0),
 });
+
+/** P90: a document Vibe Files sent to its B2 bucket: its place, size and tax year, no content. */
+export const cabinetFile = pgTable(
+  'cabinet_file',
+  {
+    clientId: uuid('client_id')
+      .notNull()
+      .references(() => clients.id, { onDelete: 'cascade' }),
+    docId: text('doc_id').notNull(),
+    path: text('path').notNull(),
+    size: bigint('size', { mode: 'number' }).notNull(),
+    taxYear: smallint('tax_year'),
+  },
+  (t) => [primaryKey({ columns: [t.clientId, t.docId] })],
+);
 
 /** P76: a client's link from another service, shown at the top of its portal. */
 export const clientLink = pgTable('client_link', {

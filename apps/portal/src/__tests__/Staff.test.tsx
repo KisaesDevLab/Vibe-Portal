@@ -33,6 +33,10 @@ function serve(routes: Record<string, Reply>): Calls {
         // P76: a client's portal link, and the list of them, unless a test says otherwise.
         (/^\/v1\/clients\/[^/?]+\/link$/.test(path) ? { body: { link: null } } : undefined) ??
         (path === '/v1/client-links' ? { body: { links: [] } } : undefined) ??
+        // P90: a client's documents in Vibe Files' B2 bucket: no list, unless a test says so.
+        (/^\/v1\/clients\/[^/?]+\/cabinet-files$/.test(path)
+          ? { body: { listedAt: null, files: [] } }
+          : undefined) ??
         // P74: the uploads page's list of uploads fetched and not filed.
         (path === '/v1/uploads/unfiled'
           ? { body: { state: 'unfiled', keepDays: 30, capDays: 180, uploads: [] } }
@@ -89,6 +93,9 @@ const CLIENT = {
   users: 1,
   files: 1,
   waiting: 2,
+  cabinetFiles: 0,
+  cabinetListed: false,
+  cabinetListedAt: null,
 };
 const USER = {
   identityId: '22222222-2222-4222-8222-222222222222',
@@ -404,6 +411,130 @@ describe('staff page', () => {
     expect(within(tags).getByRole('link', { name: 'Smith Farms LLC' }).getAttribute('href')).toBe(
       '/staff/clients/c2',
     );
+  });
+
+  it('lists a client’s documents in B2, finds among them, and says which are on the portal (P90)', async () => {
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}`]: {
+        body: {
+          ...CLIENT,
+          cabinetFiles: 3,
+          cabinetListed: true,
+          cabinetListedAt: '2026-11-15T10:00:00Z',
+        },
+      },
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      // The first document in B2 is shared on the portal.
+      [`/v1/files?clientId=${CLIENT.id}`]: {
+        body: {
+          files: [
+            {
+              fileId: 'f1',
+              vfDocumentId: 'd1',
+              name: '1040.pdf',
+              size: 2048,
+              taxYear: 2025,
+              sharedAt: '2026-11-01T10:00:00Z',
+              sharedBy: 'PC1\\kurt',
+              contentUpdatedAt: null,
+              users: [],
+            },
+          ],
+        },
+      },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+      [`/v1/clients/${CLIENT.id}/cabinet-files`]: {
+        body: {
+          listedAt: '2026-11-15T10:00:00Z',
+          files: [
+            {
+              docId: 'd1',
+              path: 'Income Tax/2025/1040.pdf',
+              size: 2048,
+              taxYear: 2025,
+              fileId: 'f1',
+            },
+            {
+              docId: 'd2',
+              path: 'Income Tax/2025/W-2.pdf',
+              size: 100,
+              taxYear: 2025,
+              fileId: null,
+            },
+            { docId: 'd3', path: 'EIN letter.pdf', size: 5, taxYear: null, fileId: null },
+          ],
+        },
+      },
+      'DELETE /v1/files/f1': { body: { ok: true } },
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    at(`/staff/clients/${CLIENT.id}`);
+    const card = (
+      await screen.findByRole('heading', { name: 'Documents in B2 (from Vibe Files)' })
+    ).closest('header')?.parentElement as HTMLElement;
+    expect(await within(card).findByText(/3 documents in B2, 1 on the portal/)).toBeTruthy();
+    expect(await screen.findByText(/3 documents in B2$/)).toBeTruthy();
+    const cells = (name: string): (string | null)[] =>
+      within(within(card).getByText(name).closest('tr') as HTMLElement)
+        .getAllByRole('cell')
+        .map((c) => c.textContent);
+    expect(cells('1040.pdf').slice(0, 3)).toEqual(['1040.pdf', 'Income Tax/2025', '2025']);
+    expect(cells('1040.pdf')[4]).toBe('Yes');
+    expect(cells('W-2.pdf')[4]).toBe('');
+    // A document at the top of the client's folder has no folder and no year.
+    expect(cells('EIN letter.pdf').slice(1, 3)).toEqual(['', '']);
+    // Nothing here opens a document: the portal has the names only.
+    expect(within(card).queryByRole('link')).toBeNull();
+
+    fireEvent.change(within(card).getByLabelText('Find a document in B2'), {
+      target: { value: 'w-2' },
+    });
+    await waitFor(() => expect(within(card).queryByText('1040.pdf')).toBeNull());
+    expect(within(card).getByText('W-2.pdf')).toBeTruthy();
+
+    // The list is read once: a file removed from the portal does not read it again.
+    const reads = (): number =>
+      calls.filter((c) => c.path === `/v1/clients/${CLIENT.id}/cabinet-files`).length;
+    expect(reads()).toBe(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove 1040.pdf' }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'DELETE' && c.path === '/v1/files/f1')).toBe(true),
+    );
+    expect(reads()).toBe(1);
+  });
+
+  it('reads no list for a client Vibe Files has sent none for, or that has nothing in B2 (P90)', async () => {
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    expect(
+      await screen.findByText(/Vibe Files has listed no documents in B2 for this client/),
+    ).toBeTruthy();
+    // The setting, as Vibe Files names it.
+    expect(
+      screen.getByText('Admin › Portal › Show the documents in B2 on the portal’s staff page'),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText('Find a document in B2')).toBeNull();
+    expect(calls.some((c) => c.path.endsWith('/cabinet-files'))).toBe(false);
+    cleanup();
+
+    const listed = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}`]: {
+        body: { ...CLIENT, cabinetListed: true, cabinetListedAt: '2026-11-15T10:00:00Z' },
+      },
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    expect(await screen.findByText('None of this client’s documents are in B2.')).toBeTruthy();
+    expect(listed.some((c) => c.path.endsWith('/cabinet-files'))).toBe(false);
   });
 
   it('approves an access request for several clients, and one can be taken off (P61)', async () => {

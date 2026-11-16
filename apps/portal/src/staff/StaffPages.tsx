@@ -9,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -43,11 +44,13 @@ import { Reveal } from '../components/Reveal';
 import { AuthSettingsPage } from '@kisaesdevlab/vibe-auth/react';
 import { usePages, useUrlSearch, useUrlState } from '../paging';
 import { ApiError } from '../api';
+import { sizeText } from '../pages/Files';
 import { ClientLinksImport, ClientPortalLink } from './ClientLinks';
 import {
   staffApi,
   staffSay,
   when,
+  type CabinetList,
   type ClientRow,
   type Invitation,
   type OutsideShare,
@@ -457,8 +460,8 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
   return (
     <Card title="Clients">
       <p>
-        Clients appear here once Vibe Files has shared a file or invited someone for them. Files are
-        shared from Vibe Files.
+        Clients appear here once Vibe Files has shared a file or invited someone for them, or has
+        listed their documents in B2. Files are shared from Vibe Files.
       </p>
       {limited && <p>You see the clients an admin chose for you.</p>}
       <div style={{ marginBottom: 12 }}>
@@ -480,7 +483,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
               : 'No clients on the portal yet.'}
         </p>
       )}
-      <Table head={['Client', 'ID', 'People', 'Files', 'Uploads waiting', 'Portal link']}>
+      <Table head={['Client', 'ID', 'People', 'Files', 'In B2', 'Uploads waiting', 'Portal link']}>
         {slice.map((c) => (
           <tr key={c.id}>
             <td style={td}>
@@ -492,6 +495,7 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
             <td style={td}>{c.clientCode}</td>
             <td style={td}>{c.users}</td>
             <td style={td}>{c.files}</td>
+            <td style={td}>{c.cabinetFiles || ''}</td>
             <td style={td}>{c.waiting}</td>
             <td style={td}>{linked.has(c.id) ? 'Yes' : ''}</td>
           </tr>
@@ -720,6 +724,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
         }}
       />
       <ClientUploads load={uploads} />
+      <ClientCabinetFiles clientId={id} head={head.data} shared={files.data?.files} />
       {sentNote && <p role="status">{sentNote}</p>}
       {sending && files.data && (
         <Reveal>
@@ -837,6 +842,7 @@ const DID: Record<string, string> = {
   client_link_set: 'Portal link set',
   client_link_removed: 'Portal link removed',
   preview_view: 'Opened a file in the portal preview',
+  cabinet_lists_cleared: 'Lists of documents in B2 cleared',
 };
 
 /** What happened on one client (P65), or what one person did and had done (P66), newest first. */
@@ -948,6 +954,7 @@ function ClientHead({ load }: { load: Load<ClientRow> }): JSX.Element {
         {c.clientCode ? `Client ${c.clientCode} · ` : ''}
         {n(c.users, 'person', 'people')} with access · {n(c.files, 'file', 'files')} on the portal ·{' '}
         {n(c.waiting, 'upload', 'uploads')} waiting for Vibe Files
+        {c.cabinetFiles > 0 && ` · ${n(c.cabinetFiles, 'document', 'documents')} in B2`}
         {!c.active && ' · switched off in Vibe Files: nobody can sign in for this client'}
       </p>
     </div>
@@ -1311,6 +1318,123 @@ function ClientUploads({ load }: { load: Load<{ uploads: UploadRow[] }> }): JSX.
         </Table>
       )}
     </Card>
+  );
+}
+
+/**
+ * P90: the client's documents in Vibe Files' B2 bucket, as Vibe Files last listed them: where
+ * each is in the client's folder, its tax year and size, and whether it is on the portal. Names
+ * only: the portal holds no content of them, so none opens from here. The list is read only
+ * when the client has documents in it; which of them are on the portal comes from the client's
+ * files already on the page (`shared`), so nothing is read again when a file is removed.
+ */
+function ClientCabinetFiles({
+  clientId,
+  head,
+  shared,
+}: {
+  clientId: string;
+  head: ClientRow | null;
+  shared: SharedFile[] | undefined;
+}): JSX.Element | null {
+  if (!head) return null;
+  return (
+    <Card title="Documents in B2 (from Vibe Files)">
+      {!head.cabinetListed && (
+        <p>
+          Vibe Files has listed no documents in B2 for this client. Either none of its documents are
+          in B2, or Vibe Files is not sending lists: that needs{' '}
+          <strong>Admin › Portal › Show the documents in B2 on the portal’s staff page</strong>{' '}
+          ticked in Vibe Files, and Vibe Files open on the computer B2 sync runs on.
+        </p>
+      )}
+      {head.cabinetListed && head.cabinetFiles === 0 && (
+        <p>None of this client’s documents are in B2.</p>
+      )}
+      {head.cabinetListed && head.cabinetFiles > 0 && (
+        <CabinetFileList clientId={clientId} shared={shared} />
+      )}
+    </Card>
+  );
+}
+
+function CabinetFileList({
+  clientId,
+  shared,
+}: {
+  clientId: string;
+  shared: SharedFile[] | undefined;
+}): JSX.Element {
+  const load = useLoad<CabinetList>(`/v1/clients/${clientId}/cabinet-files`);
+  const [typed, q, setTyped] = useUrlSearch('bq');
+  const all = load.data?.files;
+  const rows = useMemo(() => {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return all ?? [];
+    return (all ?? []).filter((f) => {
+      const text = `${f.path} ${f.taxYear ?? ''}`.toLowerCase();
+      return words.every((w) => text.includes(w));
+    });
+  }, [all, q]);
+  // From the client's files on the page; until they are read, as the list itself says.
+  const onPortal = useMemo(
+    () =>
+      new Set(
+        shared
+          ? shared.map((f) => f.vfDocumentId)
+          : (all ?? []).filter((f) => f.fileId).map((f) => f.docId),
+      ),
+    [shared, all],
+  );
+  const { slice, pager } = usePages(rows, q, undefined, 'bpage');
+  const count = all?.length ?? 0;
+  const here = useMemo(
+    () => (all ?? []).filter((f) => onPortal.has(f.docId)).length,
+    [all, onPortal],
+  );
+  return (
+    <>
+      <Status load={load} what="the documents in B2" />
+      {load.data && (
+        <>
+          <p>
+            {`${count} ${count === 1 ? 'document' : 'documents'} in B2, ${here} on the portal. `}
+            Only the names are here: share a document from Vibe Files to put it on the portal.{' '}
+            {load.data.listedAt && (
+              <small style={{ color: tokens.color.textMuted }}>
+                List last changed {when(load.data.listedAt)}.
+              </small>
+            )}
+          </p>
+          <Input
+            label="Find a document in B2"
+            name="bq"
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+          />
+          {rows.length === 0 && <p>No document matches.</p>}
+          {rows.length > 0 && (
+            <Table head={['Document', 'Folder', 'Tax year', 'Size', 'On the portal']}>
+              {slice.map((f) => {
+                const cut = f.path.lastIndexOf('/');
+                return (
+                  <tr key={f.docId}>
+                    <td style={{ ...td, overflowWrap: 'anywhere' }}>{f.path.slice(cut + 1)}</td>
+                    <td style={{ ...td, overflowWrap: 'anywhere' }}>
+                      {cut < 0 ? '' : f.path.slice(0, cut)}
+                    </td>
+                    <td style={td}>{f.taxYear ?? ''}</td>
+                    <td style={td}>{sizeText(f.size)}</td>
+                    <td style={td}>{onPortal.has(f.docId) ? 'Yes' : ''}</td>
+                  </tr>
+                );
+              })}
+            </Table>
+          )}
+          {pager}
+        </>
+      )}
+    </>
   );
 }
 

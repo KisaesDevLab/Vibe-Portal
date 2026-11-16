@@ -137,7 +137,8 @@ sudo docker exec vibe-files-portal node_modules/.bin/tsx src/scripts/test-email.
 sudo docker exec vibe-files-portal node_modules/.bin/tsx src/scripts/staff-setup.ts reset them@yourfirm.com
 ```
 
-More detail (backups, secure links to people outside a client, B2 storage):
+More detail (backups, secure links to people outside a client, B2 storage, seeing the documents
+Vibe Files has in B2):
 [docs/firm-setup.md](docs/firm-setup.md).
 
 ## For developers

@@ -87,6 +87,8 @@ export const EVENT_KINDS = [
   'client_link_removed',
   // P77: staff opened a file in the preview of a client's portal.
   'preview_view',
+  // P90: Vibe Files stopped sending the list of documents in its B2 bucket; the lists are gone.
+  'cabinet_lists_cleared',
 ] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 

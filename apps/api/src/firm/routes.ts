@@ -7,6 +7,7 @@
 //   GET    /api/firm/v1/clients/:id                        one client, with its counts (P54)
 //   PUT    /api/firm/v1/clients/:id                        { clientCode, displayName, active? }
 //   GET    /api/firm/v1/clients/:id/users
+//   GET    /api/firm/v1/clients/:id/cabinet-files           its documents in Vibe Files' B2 bucket (P90)
 //   POST   /api/firm/v1/clients/:id/invites                { email?, phone?, name, roleLabel? }
 //   DELETE /api/firm/v1/clients/:id/invites/:invitationId
 //   PATCH  /api/firm/v1/clients/:id/users/:identityId      { active }
@@ -33,6 +34,7 @@ import { inScope, limitedTo, mustSee, requireAllClients } from '../staff/scope';
 import { storageSummary } from '../files/storage';
 import { VERSION } from '../version';
 import { setAccess, withdrawInvites } from './access';
+import { cabinetFilesOf, firmCabinetRouter } from './cabinet';
 import { firmFilesRouter } from './files';
 import { historyRows, HistoryQuery } from './history';
 import { staffPeopleRouter } from './people';
@@ -110,6 +112,11 @@ const clientColumns = {
   users: sql<number>`(SELECT count(*) FROM client_access a WHERE a.client_id = clients.id AND a.active)`,
   files: sql<number>`(SELECT count(*) FROM files f WHERE f.client_id = clients.id AND f.removed_at IS NULL)`,
   waiting: sql<number>`(SELECT count(*) FROM uploads u WHERE u.client_id = clients.id AND u.fetched_at IS NULL AND u.removed_at IS NULL)`,
+  // P90: its documents in Vibe Files' B2 bucket, as last listed: how many (kept with the
+  // client: not counted at every reading of the client list), whether there is a list, and when.
+  cabinetFiles: schema.clients.cabinetCount,
+  cabinetListed: sql<boolean>`(clients.cabinet_hash IS NOT NULL)`,
+  cabinetListedAt: schema.clients.cabinetListedAt,
 };
 
 export function firmRouter(ctx: Ctx): Router {
@@ -134,6 +141,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
   // Secure links to people outside the client (P49), from the staff page and (P68) from Vibe
   // Files' Send secure link… with the firm key.
   r.use('/shares', firmSharesRouter(ctx, staff));
+  // P90: the list of documents Vibe Files sent to its B2 bucket, written by Vibe Files alone.
+  r.use('/cabinet', firmCabinetRouter(ctx, staff));
   // P48: a staff member limited to some clients reaches only those; any other answers as if it
   // were not on the portal. Access requests are not about one client yet, so they are for staff
   // who see every client. (Vibe Files, with the firm key, sees everything.)
@@ -192,6 +201,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           users: Number(c.users),
           files: Number(c.files),
           waiting: Number(c.waiting),
+          cabinetFiles: Number(c.cabinetFiles),
         })),
       });
     }),
@@ -212,9 +222,13 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         users: Number(c.users),
         files: Number(c.files),
         waiting: Number(c.waiting),
+        cabinetFiles: Number(c.cabinetFiles),
       });
     }),
   );
+
+  // P90: the client's documents in Vibe Files' B2 bucket (names, no content).
+  r.get('/clients/:id/cabinet-files', cabinetFilesOf(ctx));
 
   r.put(
     '/clients/:id',

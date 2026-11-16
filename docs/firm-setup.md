@@ -219,6 +219,48 @@ code. Resend also opens a link that was **Locked**. Also:
 - **History** shows each link sent and revoked, each code sent, and every view and download with
   the recipient's email.
 
+## Seeing the documents Vibe Files has in B2 (optional)
+
+Vibe Files can keep documents in your firm's own B2 bucket (its **Sync** tab). The portal cannot
+read that bucket: Vibe Files encrypts it with your sync passphrase, which the appliance never
+has. Vibe Files can send the portal a list instead, so staff see on the staff page which clients
+have documents in B2 and what they are. It needs Vibe Portal 0.3.15 and Vibe Files 0.1.38, or
+later.
+
+1. Update the portal first (`sudo vibe upgrade portal`), then Vibe Files on every PC.
+2. In Vibe Files › **Admin › Portal**, tick **Show the documents in B2 on the portal's staff
+   page** and press **Save**. Every PC follows the setting. The computer B2 sync runs on sends
+   the lists about every 10 minutes while Vibe Files is open there, and only the lists that
+   changed.
+3. On the staff page, **Clients** shows every client with documents in B2 (the **In B2** column),
+   whether or not anything was shared with them. A client's page has **Documents in B2 (from Vibe
+   Files)**: each document's name, folder, tax year and size, and whether it is on the portal.
+
+What to know:
+
+- **Names only.** The list holds no document. To put one on the portal, share it from Vibe Files
+  as before; the list then says **Yes** under **On the portal**.
+- **Only what is in B2.** Documents held back by Vibe Files' **Sync › What goes to B2** are not
+  listed. Change the rule, or push a document by hand, to list it.
+- **Staff only.** Clients' people see what was shared with them and nothing of this list. A staff
+  member limited to some clients sees those clients' lists only.
+- **Limits.** One client's list holds at most 20,000 documents, and a document's folder and name
+  together at most 500 characters. A client over either gets no new list (the portal shows the
+  last one sent, if any), and Vibe Files says which client, in Browse.
+- **Several PCs.** Where each PC runs B2 sync itself (a plain shared folder, not server or cloud
+  mode), each of them sends, and the portal keeps one list per client: the newest, and between
+  two made from the same state of the bucket, always the same one.
+- **Turning it off.** Untick the setting in Vibe Files and save: the lists leave the portal at
+  once (History says so). **Stop using the portal** removes them too, and so does changing the
+  portal address (from the portal used before). Clients the lists made stay, with nothing in
+  them, ready to invite.
+- **A new B2 bucket.** When B2 sync is set up again on a new bucket, Vibe Files removes the old
+  bucket's lists from the portal before it sends the new ones.
+- The file names are kept in the portal's database, like the names of shared files.
+- The lists are not in the hourly database copy sent to the portal's own bucket (see
+  **Backups**): after a restore from it they are empty until Vibe Files sends them again, about
+  10 minutes after Vibe Files is next open on the computer B2 sync runs on.
+
 ## Storing files in Backblaze B2 (optional)
 
 Shared files and client uploads are kept on the appliance unless you move them to a B2 bucket.
@@ -391,6 +433,7 @@ is in History as yours).
 | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Cloudflare 502 on the portal address                                         | **No TLS Verify** on the tunnel's public hostname (step 3)                                                                                                                              |
 | Clients get no email                                                         | `sudo vibe logs portal` for the SMTP error; the mailbox may need SMTP AUTH turned on (Office 365: Admin center › user › Mail › Manage email apps)                                       |
+| The staff page shows no documents in B2 for a client                         | In Vibe Files, **Admin › Portal**: is **Show the documents in B2 on the portal's staff page** ticked? Is Vibe Files (0.1.38 or later) open on the computer B2 sync runs on? Is B2 sync set up and unlocked there, and has it synced since? Lists go about every 10 minutes. A document held back by **What goes to B2** is not listed. Vibe Files says so in Browse when the portal is too old for the list |
 | Vibe Files' **Test** says the key is not accepted                            | The key was revoked or mistyped: make a new one on the staff page                                                                                                                       |
 | Uploads do not arrive                                                        | Is Vibe Files open on some PC? In Admin › Portal press **Fetch uploads now**; a problem shows in the bar at the top of Browse. The staff page's **Uploads** lists what is still waiting |
 | Staff locked out after wrong tries                                           | Wait 15 minutes. Lost phone: an admin sends **New setup link**, or `sudo vibe portal staff-reset <email>`                                                                               |

@@ -169,6 +169,25 @@ export interface ClientRow {
   users: number;
   files: number;
   waiting: number;
+  /** P90: its documents in Vibe Files' B2 bucket, as last listed: how many, whether Vibe
+   *  Files has sent a list at all, and when it last changed. */
+  cabinetFiles: number;
+  cabinetListed: boolean;
+  cabinetListedAt: string | null;
+}
+
+/** P90: a client's documents in Vibe Files' B2 bucket (names only). `listedAt` null: no list. */
+export interface CabinetList {
+  listedAt: string | null;
+  files: {
+    docId: string;
+    /** Below the client's folder, with the file name. */
+    path: string;
+    size: number;
+    taxYear: number | null;
+    /** The same document on the portal, when it is shared. */
+    fileId: string | null;
+  }[];
 }
 
 export interface PortalUser {
@@ -195,6 +214,8 @@ export interface Invitation {
 
 export interface SharedFile {
   fileId: string;
+  /** Vibe Files' id of the document (the same as in the list of documents in B2, P90). */
+  vfDocumentId: string;
   name: string;
   size: number;
   taxYear: number | null;
