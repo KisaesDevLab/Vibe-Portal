@@ -4052,7 +4052,7 @@ function Storage(): JSX.Element {
                 </span>
                 <span>
                   {d.vibeFiles
-                    ? `The portal can open the documents of Vibe Files’ cabinet ${d.vibeFiles.cabinetId}, in the bucket ${d.vibeFiles.bucket ?? ''}${d.vibeFiles.own ? ' (Vibe Files’ own, only read)' : ''}.`
+                    ? `The portal can open Vibe Files’ documents in the bucket ${d.vibeFiles.bucket ?? ''}${d.vibeFiles.own ? ' (Vibe Files’ own, only read)' : ''}.`
                     : 'Not set up: the portal has only the names Vibe Files sends it.'}
                 </span>
                 {(d.vibeFiles?.removedLately ?? 0) > 0 && (
