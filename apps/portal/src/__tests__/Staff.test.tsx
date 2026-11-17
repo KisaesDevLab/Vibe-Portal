@@ -1129,30 +1129,141 @@ describe('staff page', () => {
     expect(screen.queryByText(/of 120/)).toBeNull();
   });
 
-  it('History shows the newest events, and older ones on request (P57)', async () => {
+  it('History shows the newest events in words, and older ones on request (P57, P103)', async () => {
     const ev = (id: number, kind: string) => ({
       id,
       at: '2026-11-01T10:00:00Z',
       kind,
-      actorKind: 'staff',
-      actor: 'ann@firm.test',
-      clientId: null,
-      detail: {},
+      who: 'ann@firm.test',
+      person: null,
+      file: null,
+      recipient: null,
+      client: null,
+      check: null,
+      channel: null,
     });
     // A full page of 100, so there may be more.
     const page = Array.from({ length: 100 }, (_, i) => ev(200 - i, 'staff_sign_in'));
     const calls = serve({
       '/auth/me': ME,
-      '/v1/events?latest=1&limit=100': { body: { events: page } },
-      '/v1/events?latest=1&limit=100&before=101': { body: { events: [ev(7, 'settings_updated')] } },
+      '/v1/history?limit=100': { body: { events: page } },
+      '/v1/history?limit=100&before=101': { body: { events: [ev(7, 'settings_updated')] } },
     });
     at('/staff/history');
-    expect((await screen.findAllByText('staff sign in')).length).toBe(100);
+    expect((await screen.findAllByText('Staff signed in', { selector: 'td' })).length).toBe(100);
     fireEvent.click(screen.getByRole('button', { name: 'Show older' }));
-    expect(await screen.findByText('settings updated')).toBeTruthy();
-    expect(calls.some((c) => c.path === '/v1/events?latest=1&limit=100&before=101')).toBe(true);
+    expect(await screen.findByText('Settings changed', { selector: 'td' })).toBeTruthy();
+    expect(calls.some((c) => c.path === '/v1/history?limit=100&before=101')).toBe(true);
     // Fewer than a page came back: nothing older.
     expect(screen.queryByRole('button', { name: 'Show older' })).toBeNull();
+  });
+
+  it('History is narrowed by each column, shows the client and the file, and goes to CSV (P103)', async () => {
+    const row = {
+      id: 9,
+      at: '2026-11-01T10:00:00Z',
+      kind: 'file_notice',
+      who: 'the portal',
+      person: 'Mary Smith',
+      file: null,
+      recipient: null,
+      client: 'Smith, John',
+      check: null,
+      channel: 'email',
+    };
+    const shared = {
+      ...row,
+      id: 8,
+      kind: 'share',
+      who: 'Vibe Files (PC1\\ann)',
+      file: '=2025 "Return".pdf',
+      channel: null,
+      clientCode: '1001',
+    };
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/history?limit=100': { body: { events: [row, shared] } },
+      '/v1/history?limit=100&kind=share&client=smith': { body: { events: [shared] } },
+      '/v1/history?limit=500&kind=share&client=smith': { body: { events: [shared] } },
+    });
+    at('/staff/history');
+    // A notice sent, and how; the client and the file in columns of their own.
+    const told = (await screen.findByText('Told of new files', { selector: 'td' })).closest(
+      'tr',
+    ) as HTMLElement;
+    expect(
+      within(told)
+        .getAllByRole('cell')
+        .map((c) => c.textContent),
+    ).toEqual([
+      expect.any(String),
+      'Told of new files',
+      'the portal',
+      'Smith, John',
+      '',
+      'Mary Smith · by email',
+    ]);
+    // What, and the client: asked of the whole history, not of the rows on the page.
+    fireEvent.change(screen.getByLabelText('What'), { target: { value: 'share' } });
+    fireEvent.change(screen.getByLabelText('Client (name or ID)'), { target: { value: 'smith' } });
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === '/v1/history?limit=100&kind=share&client=smith')).toBe(
+        true,
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText('Told of new files', { selector: 'td' })).toBeNull(),
+    );
+
+    // CSV: the rows the filters leave, with a file name that could be a formula made text.
+    let csv = '';
+    const realBlob = globalThis.Blob;
+    vi.stubGlobal(
+      'Blob',
+      class extends realBlob {
+        constructor(parts: BlobPart[], opts?: BlobPropertyBag) {
+          super(parts, opts);
+          csv = parts.map(String).join('');
+        }
+      },
+    );
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(() => undefined);
+    fireEvent.click(screen.getByRole('button', { name: 'Download CSV' }));
+    expect(await screen.findByText('The file has 1 row.')).toBeTruthy();
+    expect(click).toHaveBeenCalled();
+    const lines = csv.replace('\uFEFF', '').trim().split('\r\n');
+    expect(lines[0]).toBe(
+      '"When (this computer’s time)","What","Who","Client","Client ID","File","About"',
+    );
+    expect(lines[1]).toContain('"Shared a file","Vibe Files (PC1\\ann)","Smith, John","1001"');
+    expect(lines[1]).toContain(`"'=2025 ""Return"".pdf"`);
+    expect(lines).toHaveLength(2);
+
+    // A day, too: asked for from its first moment to the first moment of the next.
+    fireEvent.change(screen.getByLabelText('From (day)'), { target: { value: '2026-11-01' } });
+    fireEvent.change(screen.getByLabelText('To (day)'), { target: { value: '2026-11-01' } });
+    await waitFor(() =>
+      expect(calls.some((c) => c.path.includes('&from=') && c.path.includes('&to='))).toBe(true),
+    );
+    // Cleared: everything again, the days with the rest (every box empty, nothing asked for
+    // but the plain list).
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(await screen.findByText('Told of new files', { selector: 'td' })).toBeTruthy();
+    expect((screen.getByLabelText('From (day)') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('To (day)') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('What') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByLabelText('Client (name or ID)') as HTMLInputElement).value).toBe('');
+    expect(calls[calls.length - 1]?.path).toBe('/v1/history?limit=100');
+    // What offers every message at once; an admin also has the Settings kinds.
+    const whats = Array.from((screen.getByLabelText('What') as HTMLSelectElement).options).map(
+      (o) => o.text,
+    );
+    expect(whats).toContain('Any message sent (email or text)');
+    expect(whats).toContain('Staff signed in');
   });
 
   it("a client's page shows its history in plain words (P65)", async () => {

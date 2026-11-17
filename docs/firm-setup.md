@@ -575,6 +575,35 @@ someone who already has an account, **People › (the person) › Add a client**
 once, without an invitation. An invitation to a different email than the one they sign in with
 makes a second, separate account.
 
+## History (the staff page)
+
+**History** lists everything that happened on the portal, newest first, in words: when, what,
+who did it, the client, the file, and what else it was about (the person, a secure link's
+recipient, how a message went out).
+
+- **Narrowing it (0.3.22).** Above the list there is a box for each column: **From** and
+  **To** (days, the To day included), **What** (one kind of entry, or **Any message sent**),
+  **Who**, **Client** (name or client ID), **File** and **About** (a person's name, a secure
+  link's recipient, or how something was sent: "by email"). What is typed is looked for
+  anywhere in that column, in the whole history, not only in the rows on the page. Several boxes together narrow further. **Clear
+  filters** shows everything again. The filters are kept in the page's address, so a
+  narrowed list can be bookmarked.
+- **Download CSV** saves the rows the filters leave (all of them, not only those on the page)
+  as a file a spreadsheet opens, with the times in your computer's time and each client's ID
+  in a column of its own. One file holds the newest 20,000 rows: narrow the dates for more.
+- **Messages sent (0.3.22).** When someone is told of new or updated files, History has **Told
+  of new files** for that person and client, with **by email**, **by text** or **by email and
+  text**. The other messages the firm sends say how they went too: an invitation (one whose
+  link was copied says **by a copied link**), an approved request, a client given to a person
+  (**by no notice** when they chose to hear nothing), a sign-in link staff sent, a new email
+  or number to confirm, a secure link and its codes, and the email to staff about an upload.
+  **What › Any message sent** lists them all. "By email" means the portal handed the message
+  to your mail server: one it could not hand over is on the **Log** page, and whether it
+  reached their inbox the portal cannot know. Entries from before 0.3.22 do not say how. The
+  codes and links a person asks for themselves when signing in are not listed.
+- A staff member limited to some clients sees those clients' entries only, and only admins
+  see what is done in Settings and which staff signed in.
+
 ## When something is wrong
 
 | What you see                                                                 | What to check                                                                                                                                                                           |

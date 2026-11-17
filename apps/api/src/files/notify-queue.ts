@@ -10,6 +10,7 @@ import { schema } from '@vibe-portal/db';
 
 import type { Executor } from '../auth/grant';
 import { firmName, type Ctx } from '../context';
+import { record } from '../lib/events';
 import { messageTo } from '../lib/notify';
 
 export const GATHER_MINUTES = 5;
@@ -81,7 +82,7 @@ export async function flush(ctx: Ctx): Promise<number> {
     // Count only files the person can still see.
     const fileIds = [...new Set(claimed.map((c) => c.fileId))];
     const live = await ctx.db
-      .select({ id: schema.files.id })
+      .select({ id: schema.files.id, clientId: schema.files.clientId })
       .from(schema.files)
       .innerJoin(schema.fileVisibility, eq(schema.fileVisibility.fileId, schema.files.id))
       .where(
@@ -112,9 +113,11 @@ export async function flush(ctx: Ctx): Promise<number> {
     if (to.length === 0) to.push(...[who.email, who.phone].filter((c): c is string => !!c));
     // Sent here, not in the background: a failure puts the notices back for the next run
     // (QA 2026-11-09), so a short SMTP or Twilio outage does not lose them.
+    let told = false;
     try {
       for (const t of to) await ctx.notifier.send(messageTo(t, subject, text));
       sent += 1;
+      told = true;
     } catch (err) {
       ctx.log.error({ err, identityId }, 'new-files notice failed; will retry');
       await ctx.db
@@ -126,6 +129,31 @@ export async function flush(ctx: Ctx): Promise<number> {
             claimed.map((c) => c.id),
           ),
         );
+    }
+    if (!told) continue;
+    try {
+      // P103 (owner 2026-11-17): History says when someone was told, and how. One entry for
+      // each client the files are of (a person may see several), so each client's History has
+      // its own. No address or number: History reaches staff limited to some clients.
+      const channel =
+        to.some((t) => t.includes('@')) && to.some((t) => !t.includes('@'))
+          ? 'email and text'
+          : to[0]?.includes('@')
+            ? 'email'
+            : 'text';
+      const byClient = new Map<string, number>();
+      for (const f of live) byClient.set(f.clientId, (byClient.get(f.clientId) ?? 0) + 1);
+      for (const [clientId, files] of byClient) {
+        await record(
+          ctx.db,
+          'file_notice',
+          { kind: 'system', name: 'portal' },
+          { clientId, identityId, detail: { channel, files } },
+        );
+      }
+    } catch (err) {
+      // The message went out: it is not sent again because History could not be written.
+      ctx.log.error({ err, identityId }, 'new-files notice sent, but not written to History');
     }
   }
   return sent;

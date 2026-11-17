@@ -35,8 +35,13 @@ describe('a client history (P65)', () => {
     expect([...ids].sort((a, b) => b - a)).toEqual(ids);
     // Every row is about Mary, never Bob (of the other client).
     expect(JSON.stringify(events)).not.toContain('bob@');
+    // P103: an invitation names who it is for and how it went out.
     expect(events.find((e) => e.kind === 'invite')).toEqual(
-      expect.objectContaining({ who: 'Vibe Files (THGR18C-XA003\\kurt)', person: null }),
+      expect.objectContaining({
+        who: 'Vibe Files (THGR18C-XA003\\kurt)',
+        person: 'm***@example.test',
+        channel: 'email',
+      }),
     );
     const accepted = events.find((e) => e.kind === 'invite_accepted');
     expect(accepted?.person ?? accepted?.who).toBe('mary@example.test');
