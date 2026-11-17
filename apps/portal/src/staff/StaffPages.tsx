@@ -2840,6 +2840,22 @@ interface InvitedRow {
   clientName: string;
 }
 
+/**
+ * The invitations by person: someone invited to several clients has one invitation for each,
+ * and is one person (owner 2026-11-17: "It created two people?"). The same person is the same
+ * contact the link goes to, as the portal takes it everywhere: the email, else the number.
+ */
+function invitedPeople(rows: InvitedRow[]): InvitedRow[][] {
+  const by = new Map<string, InvitedRow[]>();
+  for (const r of rows) {
+    const key = r.email ? `e:${r.email}` : `p:${r.phone ?? ''}`;
+    const list = by.get(key);
+    if (list) list.push(r);
+    else by.set(key, [r]);
+  }
+  return [...by.values()];
+}
+
 interface PersonRow {
   identityId: string;
   name: string;
@@ -2951,27 +2967,49 @@ function People(): JSX.Element {
             invitations, or to invite them to another client; files are chosen for them on the
             client’s page.
           </p>
-          <Table head={['Name', 'Email / phone', 'Client', 'Invitation']}>
-            {(load.data?.invited ?? []).map((i) => (
-              <tr key={i.invitationId}>
-                <td style={td}>
-                  <Link to={`/staff/people/invited/${i.invitationId}`}>
-                    {i.name || i.email || i.phone || 'Someone invited'}
-                  </Link>
-                </td>
-                <td style={{ ...td, overflowWrap: 'anywhere' }}>
-                  {[i.email, i.phone].filter(Boolean).join(', ')}
-                </td>
-                <td style={td}>
-                  <Link className="client-name" to={`/staff/clients/${i.clientId}`}>
-                    {i.clientName}
-                  </Link>
-                </td>
-                <td style={td}>
-                  {i.status === 'expired' ? 'expired' : `waiting until ${when(i.expiresAt)}`}
-                </td>
-              </tr>
-            ))}
+          <Table head={['Name', 'Email / phone', 'Clients', 'Invitation']}>
+            {invitedPeople(load.data?.invited ?? []).map((g) => {
+              const first = g[0];
+              if (!first) return null;
+              const waiting = g.filter((i) => i.status !== 'expired');
+              // The one that runs out first, of those still good.
+              const soonest = [...waiting].sort((x, y) =>
+                x.expiresAt.localeCompare(y.expiresAt),
+              )[0];
+              return (
+                <tr key={first.invitationId}>
+                  <td style={td}>
+                    <Link to={`/staff/people/invited/${first.invitationId}`}>
+                      {first.name || first.email || first.phone || 'Someone invited'}
+                    </Link>
+                  </td>
+                  <td style={{ ...td, overflowWrap: 'anywhere' }}>
+                    {[first.email, first.phone].filter(Boolean).join(', ')}
+                  </td>
+                  <td style={td}>
+                    <ClientTags
+                      label={`Clients ${first.name || first.email || first.phone || 'they'} is invited to`}
+                      tags={g.map((i) => ({
+                        id: i.invitationId,
+                        content: (
+                          <Link className="client-name" to={`/staff/clients/${i.clientId}`}>
+                            {i.clientName}
+                            {i.status === 'expired' ? ' (expired)' : ''}
+                          </Link>
+                        ),
+                      }))}
+                    />
+                  </td>
+                  <td style={td}>
+                    {soonest
+                      ? `waiting until ${when(soonest.expiresAt)}`
+                      : g.length === 1
+                        ? 'expired'
+                        : 'all expired'}
+                  </td>
+                </tr>
+              );
+            })}
           </Table>
         </section>
       )}

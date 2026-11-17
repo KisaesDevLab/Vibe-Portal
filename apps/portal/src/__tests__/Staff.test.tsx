@@ -1730,6 +1730,52 @@ describe('staff page', () => {
     expect(screen.queryByLabelText('Invitation link')).toBeNull();
   });
 
+  it('People: someone invited to two clients is one row, with both clients', async () => {
+    const row = {
+      invitationId: 'i1',
+      name: 'Ryan Seed',
+      email: 'ryan@example.test',
+      phone: '+15555550100',
+      expiresAt: '2026-11-24T13:34:00Z',
+      status: 'invited',
+      clientId: 'c1',
+      clientName: 'Seed LLC',
+    };
+    serve({
+      '/auth/me': ME,
+      '/v1/people/list?q=': {
+        body: {
+          people: [],
+          more: false,
+          invited: [
+            row,
+            {
+              ...row,
+              invitationId: 'i2',
+              clientId: 'c2',
+              clientName: 'Seed, Ryan',
+              expiresAt: '2026-11-24T14:52:00Z',
+            },
+            {
+              ...row,
+              invitationId: 'i3',
+              name: 'Dana Daniels',
+              email: 'dana@example.test',
+              clientId: 'c3',
+              clientName: 'Daniels LLC',
+            },
+          ],
+        },
+      },
+    });
+    at('/staff/people');
+    expect(await screen.findAllByRole('link', { name: 'Ryan Seed' })).toHaveLength(1);
+    const ryan = screen.getByRole('link', { name: 'Ryan Seed' }).closest('tr') as HTMLElement;
+    expect(within(ryan).getByRole('link', { name: 'Seed LLC' })).toBeTruthy();
+    expect(within(ryan).getByRole('link', { name: 'Seed, Ryan' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Dana Daniels' })).toBeTruthy();
+  });
+
   it('People: someone invited has a page to resend, delete and add a client (P100)', async () => {
     const id = CLIENT.id;
     const one = {
