@@ -1989,6 +1989,8 @@ describe('the preview of a client portal (P77)', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     at('/staff/settings');
     const box = await screen.findByLabelText('Vibe Files’ sync passphrase');
+    // It starts on a bucket of Vibe Files' own (the usual case); here it is the portal's.
+    fireEvent.click(screen.getByLabelText(/^In the bucket above/));
     const save = screen.getByRole('button', { name: 'Check and save the passphrase' });
     expect((save as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(box, { target: { value: 'correct horse battery staple' } });
@@ -2002,5 +2004,52 @@ describe('the preview of a client portal (P77)', () => {
       passphrase: 'correct horse battery staple',
     });
     expect((box as HTMLInputElement).value).toBe('');
+    cleanup();
+
+    // P94: no bucket for the portal's own files, and Vibe Files' bucket has Object Lock: it is
+    // given here, to be read only.
+    const none = { ...state, b2: { endpoint: '', bucket: '', keyId: '', hasKey: false } };
+    const sent = serve({
+      '/auth/me': ME,
+      '/v1/settings/storage': { body: none },
+      'PUT /v1/settings/storage/vibe-files': {
+        body: {
+          ...none,
+          vibeFiles: { cabinetId: 'cab-1', own: true, bucket: 'firm-vibe-files' },
+        },
+      },
+    });
+    at('/staff/settings');
+    fireEvent.change(await screen.findByLabelText('Vibe Files’ sync passphrase'), {
+      target: { value: 'correct horse battery staple' },
+    });
+    const go = screen.getByRole('button', { name: 'Check and save the passphrase' });
+    // The bucket is needed too.
+    expect((go as HTMLButtonElement).disabled).toBe(true);
+    const type = (label: string, value: string): void => {
+      fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    };
+    type(
+      'Vibe Files’ bucket: endpoint (e.g. s3.us-west-004.backblazeb2.com)',
+      's3.us-west-004.backblazeb2.com',
+    );
+    type('Vibe Files’ bucket: name', 'firm-vibe-files');
+    type('Vibe Files’ bucket: key ID', 'k2');
+    type('Vibe Files’ bucket: application key', 'secret');
+    fireEvent.click(go);
+    expect(
+      await screen.findByText(
+        'Saved. A client’s page now has Add to portal on its documents in B2.',
+      ),
+    ).toBeTruthy();
+    expect(sent.find((c) => c.method === 'PUT')?.body).toEqual({
+      passphrase: 'correct horse battery staple',
+      bucket: {
+        endpoint: 's3.us-west-004.backblazeb2.com',
+        bucket: 'firm-vibe-files',
+        keyId: 'k2',
+        appKey: 'secret',
+      },
+    });
   });
 });

@@ -31,6 +31,7 @@ import { B2Objects, type B2Settings } from './b2';
 import { NotFound, type Bucket, type ObjectStore } from './objects';
 import { snapshotIfDue } from './snapshot';
 import type { VfAccess } from './vf-bucket';
+import { followProblem } from './vf-follow';
 
 type FirmRow = typeof schema.firm.$inferSelect;
 type StorageMove = schema.StorageMove;
@@ -58,6 +59,17 @@ export function vfAccess(ctx: Ctx, f: FirmRow): VfAccess | null {
   return JSON.parse(
     Buffer.from(ctx.keyring.unwrap(new Uint8Array(f.vfSyncEnc))).toString('utf8'),
   ) as VfAccess;
+}
+
+/**
+ * Where Vibe Files' documents are read from (P91), with the keys that open them: Vibe Files'
+ * own bucket when one was given (P94), else the bucket the portal keeps its files in. Null
+ * when the passphrase was not entered, or there is no bucket to read.
+ */
+export function vfSource(ctx: Ctx, f: FirmRow): { access: VfAccess; bucket: Bucket } | null {
+  const access = vfAccess(ctx, f);
+  const s = access?.b2 ?? b2Settings(ctx, f);
+  return access && s ? { access, bucket: openB2(ctx, s) } : null;
 }
 
 export function openB2(ctx: Ctx, s: B2Settings): Bucket {
@@ -465,7 +477,24 @@ export async function storageState(ctx: Ctx) {
     move: f.storageMove,
     note: f.storageNote,
     /** P91: the cabinet of Vibe Files whose documents in this bucket the portal can open. */
-    vibeFiles: f.vfSyncEnc ? { cabinetId: vfAccess(ctx, f)?.cabinetId ?? '' } : null,
+    vibeFiles: vfState(ctx, f),
+  };
+}
+
+/** What Settings > Storage shows of Vibe Files' documents: never a key. */
+function vfState(ctx: Ctx, f: FirmRow) {
+  const access = vfAccess(ctx, f);
+  if (!access) return null;
+  return {
+    cabinetId: access.cabinetId,
+    /** A bucket of Vibe Files' own (P94), not the one the portal's files are in. */
+    own: access.b2 !== undefined,
+    endpoint: access.b2?.endpoint ?? f.b2Endpoint,
+    bucket: access.b2?.bucket ?? f.b2Bucket,
+    keyId: access.b2?.keyId ?? f.b2KeyId,
+    /** Why the bucket could not be read when the portal last looked for changed documents
+     *  (P94): a code, or null. */
+    problem: followProblem(),
   };
 }
 

@@ -1,0 +1,210 @@
+// SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
+//
+// P94 (owner 2026-11-17: "update by itself"): a file staff added from Vibe Files' part of the
+// B2 bucket (P91) follows the bucket. Every few minutes the portal reads the bucket's manifest
+// head; for each client whose segment changed since it last looked, it compares the client's
+// such files with the documents there, and replaces the portal's copy of one whose content (or
+// name) changed: it counts as new again for the people who see it, who are told as for any
+// update. A document deleted, or taken out of B2, in Vibe Files keeps its copy on the portal.
+// Only files added from B2 follow it: one shared from Vibe Files is Vibe Files' to replace.
+
+import { Readable } from 'node:stream';
+
+import { and, eq, isNull } from 'drizzle-orm';
+import { generateKey } from '@vibe/crypto';
+import { schema } from '@vibe-portal/db';
+
+import { uploadLimit, type Ctx } from '../context';
+import { FOLLOW_ACTOR } from '../firm/history';
+import type { Actor } from '../lib/events';
+import { replaceContent } from './replace';
+import { firmRow, vfSource } from './storage';
+import { cleanName, contentTypeOf } from './types';
+import { content, oneAtATime, readHead, readSegment, segmentKey, VfError } from './vf-bucket';
+
+/** How often the server looks (server.ts). */
+export const FOLLOW_EVERY_MS = 10 * 60_000;
+
+const ACTOR: Actor = { kind: 'system', name: FOLLOW_ACTOR };
+
+/** File id -> the client's segment it was last compared with: nothing is read again until the
+ *  client's segment changes. Forgotten at a restart, which only looks once more. */
+const compared = new Map<string, string>();
+/** File id -> the segment a fetch failed at, and how often: a document that does not open is
+ *  not fetched again and again (each try is a whole download). */
+const failures = new Map<string, { key: string; n: number }>();
+const TRIES = 3;
+let running = false;
+/** Why the bucket could not be read at the last look (a VfError's code, or 'unread'); null
+ *  when it could. Settings > Storage says so. */
+let problem: string | null = null;
+export function followProblem(): string | null {
+  return problem;
+}
+
+export interface Followed {
+  /** Files whose copy on the portal was replaced. */
+  updated: number;
+  /** Files that could not be compared or replaced this time (tried again at the next look). */
+  failed: number;
+}
+
+export async function followB2(ctx: Ctx): Promise<Followed> {
+  const out: Followed = { updated: 0, failed: 0 };
+  if (running) return out;
+  running = true;
+  try {
+    const src = vfSource(ctx, await firmRow(ctx));
+    if (!src) {
+      problem = null;
+      return out;
+    }
+    // Not a switched-off client's: its people see nothing of it, and are told nothing.
+    const files = await ctx.db
+      .select({
+        id: schema.files.id,
+        clientId: schema.files.clientId,
+        docId: schema.files.vfDocumentId,
+        sha256: schema.files.sha256,
+        name: schema.files.name,
+        blobKey: schema.files.blobKey,
+      })
+      .from(schema.files)
+      .innerJoin(schema.clients, eq(schema.clients.id, schema.files.clientId))
+      .where(
+        and(
+          eq(schema.files.fromB2, true),
+          isNull(schema.files.removedAt),
+          eq(schema.clients.active, true),
+        ),
+      );
+    const live = new Set(files.map((f) => f.id));
+    for (const id of compared.keys()) if (!live.has(id)) compared.delete(id);
+    for (const id of failures.keys()) if (!live.has(id)) failures.delete(id);
+    if (!files.length) {
+      problem = null;
+      return out;
+    }
+    let head;
+    try {
+      head = await readHead(src.bucket, src.access);
+      problem = null;
+    } catch (err) {
+      // The sync key changed, or the bucket cannot be reached: nothing follows until an admin
+      // looks (Settings > Storage shows it).
+      problem = err instanceof VfError ? err.code : 'unread';
+      throw err;
+    }
+    if (!head) return out;
+    const limit = await uploadLimit(ctx);
+    const byClient = new Map<string, typeof files>();
+    for (const f of files) {
+      const list = byClient.get(f.clientId);
+      if (list) list.push(f);
+      else byClient.set(f.clientId, [f]);
+    }
+    for (const [clientId, theirs] of byClient) {
+      try {
+        const key = segmentKey(head, clientId);
+        // The client is no longer in the bucket: its files stay as they are.
+        if (!key) continue;
+        const due = theirs.filter((f) => compared.get(f.id) !== key);
+        if (!due.length) continue;
+        const docs = await readSegment(src.bucket, src.access, key);
+        for (const f of due) {
+          const doc = docs.get(f.docId);
+          const name = doc ? cleanName(doc.name) : f.name;
+          // Gone from B2, the same as the portal's, or too large for it: nothing to do until
+          // the client's segment changes again.
+          if (!doc || (doc.sha256 === f.sha256 && name === f.name) || doc.size > limit) {
+            if (doc && doc.size > limit) {
+              ctx.log.warn(
+                { fileId: f.id },
+                'a changed document in B2 is too large for the portal',
+              );
+            }
+            compared.set(f.id, key);
+            continue;
+          }
+          // Renamed in the cabinet, the same content: the name alone follows. Nothing is
+          // fetched, and nobody is told of a new file.
+          if (doc.sha256 === f.sha256) {
+            await ctx.db
+              .update(schema.files)
+              .set({ name, contentType: contentTypeOf(name), updatedAt: ctx.now() })
+              .where(
+                and(
+                  eq(schema.files.id, f.id),
+                  isNull(schema.files.removedAt),
+                  eq(schema.files.fromB2, true),
+                  eq(schema.files.sha256, f.sha256),
+                ),
+              );
+            compared.set(f.id, key);
+            continue;
+          }
+          try {
+            const replaced = await oneAtATime(async () => {
+              const plain = await content(src.bucket, src.access, doc);
+              const dek = generateKey();
+              const put = await ctx.blobs.put(Readable.from([plain]), dek, limit);
+              if (put.sha256 !== doc.sha256) {
+                await ctx.blobs.remove(put.blobKey);
+                throw new VfError('vf_damaged', 'stored copy');
+              }
+              const stored = { ...put, dekWrapped: Buffer.from(ctx.keyring.wrap(dek)) };
+              // Only while the file is still as it was read above: replaced or removed
+              // meanwhile (by Vibe Files, by staff), the new copy is dropped.
+              const ok = await replaceContent(
+                ctx,
+                f,
+                stored,
+                name,
+                ACTOR,
+                { from: 'b2' },
+                { onlyIf: f.sha256 },
+              );
+              if (!ok) await ctx.blobs.remove(put.blobKey);
+              return ok;
+            });
+            if (replaced) out.updated += 1;
+            compared.set(f.id, key);
+            failures.delete(f.id);
+          } catch (err) {
+            out.failed += 1;
+            const was = failures.get(f.id);
+            const n = was?.key === key ? was.n + 1 : 1;
+            failures.set(f.id, { key, n });
+            // Given up on until the client's segment changes: Vibe Files pushing again.
+            if (n >= TRIES) compared.set(f.id, key);
+            // The code and the object's place in the bucket; never a file name.
+            ctx.log.warn(
+              {
+                fileId: f.id,
+                tries: n,
+                reason: err instanceof Error ? err.message : String(err),
+              },
+              'a file added from B2 could not be updated',
+            );
+          }
+        }
+      } catch (err) {
+        out.failed += 1;
+        ctx.log.warn(
+          { clientId, reason: err instanceof Error ? err.message : String(err) },
+          'a client\u2019s documents in B2 could not be read',
+        );
+      }
+    }
+    return out;
+  } finally {
+    running = false;
+  }
+}
+
+/** For tests: as after a restart. */
+export function forgetCompared(): void {
+  compared.clear();
+  failures.clear();
+  problem = null;
+}

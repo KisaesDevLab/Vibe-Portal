@@ -356,6 +356,9 @@ export const files = pgTable('files', {
   removedBy: text('removed_by'),
   taxYear: smallint('tax_year'),
   contentUpdatedAt: ts('content_updated_at'),
+  /** P94: added from Vibe Files' part of the B2 bucket (P91): replaced by the portal itself
+   *  when the bucket has a changed version (files/vf-follow.ts). */
+  fromB2: boolean('from_b2').notNull().default(false),
 });
 
 export const fileVisibility = pgTable(

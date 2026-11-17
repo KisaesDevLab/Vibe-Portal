@@ -8,6 +8,9 @@ import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
+/** The actor of what the portal does by itself from Vibe Files' bucket (files/vf-follow.ts). */
+export const FOLLOW_ACTOR = 'Vibe Files\u2019 B2';
+
 import type { Ctx } from '../context';
 import { checkWords } from '../portal/access-id';
 
@@ -101,7 +104,10 @@ export async function historyRows(
       e.actorKind === 'client'
         ? (named(e.actorName, e.actorEmail, e.actorPhone) ?? 'a client')
         : e.actorKind === 'system'
-          ? 'the portal'
+          ? // P94: what the portal did by itself from Vibe Files' bucket is said so.
+            e.actor === FOLLOW_ACTOR
+            ? e.actor
+            : 'the portal'
           : e.actorKind === 'firm_key'
             ? `Vibe Files (${e.actor})`
             : e.actor;
