@@ -33,7 +33,7 @@ import { randomToken, sha256 } from '../lib/secrets';
 import { inScope, limitedTo, mustSee, requireAllClients } from '../staff/scope';
 import { storageSummary } from '../files/storage';
 import { VERSION } from '../version';
-import { setAccess, withdrawInvites } from './access';
+import { dropChoices, setAccess, withdrawInvites } from './access';
 import { cabinetAdd, cabinetFilesOf, firmCabinetRouter } from './cabinet';
 import { firmFilesRouter } from './files';
 import { historyRows, HistoryQuery } from './history';
@@ -455,57 +455,69 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
 
       const actor = actorOf(req);
       const now = ctx.now();
-      // A new invitation replaces any earlier one to the same contact for this client (Resend).
+      // P98: the files chosen for a waiting invitation to this same contact go to the new one
+      // (Resend). Only the same contact's (the email, else the number the link goes to): an
+      // invitation to someone else who shares a number is withdrawn below as it always was,
+      // and its files are not handed on to this person. Files removed since are left out.
+      const chosen = await ctx.db
+        .select({
+          fileId: schema.invitationFile.fileId,
+          chosenAt: schema.invitationFile.chosenAt,
+          chosenBy: schema.invitationFile.chosenBy,
+        })
+        .from(schema.invitationFile)
+        .innerJoin(
+          schema.portalInvitation,
+          eq(schema.portalInvitation.id, schema.invitationFile.invitationId),
+        )
+        .innerJoin(schema.files, eq(schema.files.id, schema.invitationFile.fileId))
+        .where(
+          and(
+            eq(schema.portalInvitation.clientId, clientId),
+            isNull(schema.portalInvitation.acceptedAt),
+            isNull(schema.portalInvitation.revokedAt),
+            isNull(schema.files.removedAt),
+            email
+              ? eq(schema.portalInvitation.email, email)
+              : and(
+                  isNull(schema.portalInvitation.email),
+                  eq(schema.portalInvitation.phone, sendTo),
+                ),
+          ),
+        );
+      const seen = new Set<string>();
+      const kept = chosen.filter((k) => !seen.has(k.fileId) && seen.add(k.fileId));
+      // A new invitation replaces any earlier one to the same contact for this client (Resend);
+      // what was chosen for the ones withdrawn goes with them (firm/access.ts).
       const replaced = await withdrawInvites(ctx, clientId, [sendTo]);
 
       const token = randomToken();
       const expiresAt = new Date(now.getTime() + INVITE_DAYS * 86_400_000);
-      const [inv] = await ctx.db
-        .insert(schema.portalInvitation)
-        .values({
-          clientId,
-          email,
-          phone,
-          name: input.name,
-          roleLabel: input.roleLabel,
-          tokenHash: sha256(token),
-          invitedBy: actor.name,
-          expiresAt,
-        })
-        .returning({ id: schema.portalInvitation.id });
-      if (!inv) throw new Error('invitation insert returned nothing');
-      // P98: the files chosen for the invitation(s) it replaces go with it (Resend).
-      let filesWaiting = false;
-      if (replaced.length) {
-        const kept = await ctx.db
-          .select({
-            fileId: schema.invitationFile.fileId,
-            chosenAt: schema.invitationFile.chosenAt,
-            chosenBy: schema.invitationFile.chosenBy,
+      // The invitation and its files together, or neither.
+      const inv = await ctx.db.transaction(async (tx) => {
+        const [made] = await tx
+          .insert(schema.portalInvitation)
+          .values({
+            clientId,
+            email,
+            phone,
+            name: input.name,
+            roleLabel: input.roleLabel,
+            tokenHash: sha256(token),
+            invitedBy: actor.name,
+            expiresAt,
           })
-          .from(schema.invitationFile)
-          .where(
-            inArray(
-              schema.invitationFile.invitationId,
-              replaced.map((x) => x.id),
-            ),
-          );
-        const seen = new Set<string>();
-        const rows = kept.filter((k) => !seen.has(k.fileId) && seen.add(k.fileId));
-        filesWaiting = rows.length > 0;
-        if (rows.length) {
-          await ctx.db
+          .returning({ id: schema.portalInvitation.id });
+        if (!made) throw new Error('invitation insert returned nothing');
+        if (kept.length) {
+          await tx
             .insert(schema.invitationFile)
-            .values(rows.map((k) => ({ ...k, invitationId: inv.id })))
+            .values(kept.map((k) => ({ ...k, invitationId: made.id })))
             .onConflictDoNothing();
         }
-        await ctx.db.delete(schema.invitationFile).where(
-          inArray(
-            schema.invitationFile.invitationId,
-            replaced.map((x) => x.id),
-          ),
-        );
-      }
+        return made;
+      });
+      const filesWaiting = kept.length > 0;
       const firm = await firmName(ctx);
       const link = `${ctx.portalUrl}/invite#t=${token}`;
       deliver(
@@ -548,9 +560,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         .returning({ id: schema.portalInvitation.id });
       if (!rows.length) throw new HttpError(404, 'not_found');
       // P98: the files chosen for it are chosen for nobody now.
-      await ctx.db
-        .delete(schema.invitationFile)
-        .where(eq(schema.invitationFile.invitationId, invitationId));
+      await dropChoices(ctx, [invitationId]);
       await record(ctx.db, 'invite_revoked', actorOf(req), {
         clientId,
         detail: { invitationId },

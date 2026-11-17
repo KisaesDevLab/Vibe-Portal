@@ -212,21 +212,6 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       const file = await liveFile(req, id);
       const ids = Object.keys(users);
       const inviteIds = Object.keys(invites);
-      // Only invitations to this file's client that were neither accepted nor withdrawn.
-      const waiting = inviteIds.length
-        ? await ctx.db
-            .select({ id: schema.portalInvitation.id })
-            .from(schema.portalInvitation)
-            .where(
-              and(
-                eq(schema.portalInvitation.clientId, file.clientId),
-                inArray(schema.portalInvitation.id, inviteIds),
-                isNull(schema.portalInvitation.acceptedAt),
-                isNull(schema.portalInvitation.revokedAt),
-              ),
-            )
-        : [];
-      if (waiting.length !== inviteIds.length) throw new HttpError(400, 'not_an_invitation');
       // Only people with access to this file's client.
       const known = ids.length
         ? await ctx.db
@@ -256,6 +241,10 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       const was = new Map(current.map((c) => [c.identityId, c.visible]));
       const shown = ids.filter((i) => users[i] && !was.get(i));
       const hidden = ids.filter((i) => !users[i] && was.get(i));
+      // P98: the invitations a file was chosen for, or taken back from, by this call.
+      const chosenFor: string[] = [];
+      const takenFrom: string[] = [];
+      let staleInvites = 0;
       await ctx.db.transaction(async (tx) => {
         for (const identityId of [...shown, ...hidden]) {
           const visible = shown.includes(identityId);
@@ -271,22 +260,44 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
         await enqueue(tx, shown, id, 'shared', now);
         await drop(tx, id, hidden, now);
         // P98: kept with the invitation until it is accepted. Nobody is told: they have no
-        // account yet, and the invitation's own message is what brings them.
-        for (const invitationId of inviteIds) {
+        // account yet, and the invitation's own message is what brings them. Only invitations
+        // to this file's client that still wait, held while this runs (one accepted or
+        // withdrawn at this moment is not given a file nobody would ever see). One that no
+        // longer waits is passed over, not a failure of the whole: the rest still applies.
+        const waiting = inviteIds.length
+          ? await tx
+              .select({ id: schema.portalInvitation.id })
+              .from(schema.portalInvitation)
+              .where(
+                and(
+                  eq(schema.portalInvitation.clientId, file.clientId),
+                  inArray(schema.portalInvitation.id, inviteIds),
+                  isNull(schema.portalInvitation.acceptedAt),
+                  isNull(schema.portalInvitation.revokedAt),
+                ),
+              )
+              .for('update')
+          : [];
+        staleInvites = inviteIds.length - waiting.length;
+        for (const { id: invitationId } of waiting) {
           if (invites[invitationId]) {
-            await tx
+            const made = await tx
               .insert(schema.invitationFile)
               .values({ invitationId, fileId: id, chosenAt: now, chosenBy: actor.name })
-              .onConflictDoNothing();
+              .onConflictDoNothing()
+              .returning({ id: schema.invitationFile.invitationId });
+            if (made.length) chosenFor.push(invitationId);
           } else {
-            await tx
+            const gone = await tx
               .delete(schema.invitationFile)
               .where(
                 and(
                   eq(schema.invitationFile.invitationId, invitationId),
                   eq(schema.invitationFile.fileId, id),
                 ),
-              );
+              )
+              .returning({ id: schema.invitationFile.invitationId });
+            if (gone.length) takenFrom.push(invitationId);
           }
         }
       });
@@ -296,14 +307,22 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       for (const identityId of hidden) {
         await record(ctx.db, 'unshare', actor, { clientId: file.clientId, fileId: id, identityId });
       }
-      for (const invitationId of inviteIds) {
-        await record(ctx.db, invites[invitationId] ? 'share' : 'unshare', actor, {
+      // Only what changed, as for people; said to be for someone invited (no person yet).
+      for (const invitationId of chosenFor) {
+        await record(ctx.db, 'share', actor, {
           clientId: file.clientId,
           fileId: id,
-          detail: { invitationId },
+          detail: { invitationId, invited: true },
         });
       }
-      res.json({ ok: true, shown, hidden });
+      for (const invitationId of takenFrom) {
+        await record(ctx.db, 'unshare', actor, {
+          clientId: file.clientId,
+          fileId: id,
+          detail: { invitationId, invited: true },
+        });
+      }
+      res.json({ ok: true, shown, hidden, ...(staleInvites ? { staleInvites } : {}) });
     }),
   );
 

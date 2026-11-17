@@ -788,6 +788,8 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
           head.reload();
           // A file removed leaves the links that held it.
           links.reload();
+          // P98: someone invited may have accepted meanwhile, and is a person now.
+          people.reload();
         }}
         onSend={(fileIds) => {
           setSentNote('');
@@ -1086,8 +1088,10 @@ function ClientFiles({
   // An invitation's place among the choices (people are there by their own id).
   const inviteKey = (i: Invitation): string => `invite:${i.invitationId}`;
   // Everyone with access and everyone invited, until the staff member narrows it.
-  const chosen =
-    who ?? new Set([...activePeople.map((p) => p.identityId), ...invited.map(inviteKey)]);
+  const everyone = [...activePeople.map((p) => p.identityId), ...invited.map(inviteKey)];
+  // What was ticked, without anyone who is no longer there (an invitation accepted or deleted
+  // since: its tick must not go on being sent).
+  const chosen = who ? new Set(everyone.filter((k) => who.has(k))) : new Set(everyone);
   const years = [...new Set(all.map((f) => f.taxYear))].sort((a, b) => (b ?? 0) - (a ?? 0));
   // A year not among the files (an old link) is every year, so the list is never stuck empty.
   const year =
@@ -1193,7 +1197,11 @@ function ClientFiles({
           const name = i ? invitedLabel(i) : 'someone invited';
           return (
             <span key={invitationId} style={{ display: 'inline-flex', gap: 4, marginRight: 8 }}>
-              {name} (invited: sees it once they accept)
+              {name} (
+              {i?.status === 'expired'
+                ? 'invited, the invitation expired: resend it'
+                : 'invited: sees it once they accept'}
+              )
               <Button
                 size="sm"
                 variant="secondary"
@@ -1675,6 +1683,8 @@ function SendSecurely({
     else next.delete(fileId);
     setPicked(next);
   };
+  // The ticked files still on the portal (one removed meanwhile is not sent, nor counted).
+  const ticked = files.filter((f) => picked.has(f.fileId)).length;
   const send = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
     const email = to.email.trim();
@@ -1795,17 +1805,15 @@ function SendSecurely({
           </p>
         )}
         <Problem text={error} />
-        {picked.size > SECURE_LINK_MAX_FILES && (
+        {ticked > SECURE_LINK_MAX_FILES && (
           <p role="alert" style={{ margin: 0 }}>
-            {`One link holds at most ${SECURE_LINK_MAX_FILES} files; ${picked.size} are ticked. Untick some, or send a second link.`}
+            {`One link holds at most ${SECURE_LINK_MAX_FILES} files; ${ticked} are ticked. Untick some, or send a second link.`}
           </p>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
           <Button
             type="submit"
-            disabled={
-              busy || picked.size === 0 || picked.size > SECURE_LINK_MAX_FILES || !to.email.trim()
-            }
+            disabled={busy || ticked === 0 || ticked > SECURE_LINK_MAX_FILES || !to.email.trim()}
           >
             {busy ? 'Sending…' : 'Send secure link'}
           </Button>
@@ -2302,14 +2310,9 @@ function Requests(): JSX.Element {
                 label={`Find a client for ${r.name} (name or client ID)`}
                 name={`find-${r.id}`}
                 value={p.find ?? ''}
-                onChange={(e) => {
-                  const typed = e.target.value;
-                  const left = matching(typed);
-                  // Only one client left: it is the one meant, and the box is ready for the next.
-                  if (typed.trim() && left.length === 1 && left[0]) {
-                    set({ clients: [...p.clients, left[0].id], find: '' });
-                  } else set({ find: typed });
-                }}
+                // Typing only narrows the list: a client is added by choosing it there, never by
+                // the typing itself (a request approved for a client nobody chose).
+                onChange={(e) => set({ find: e.target.value })}
               />
               <label style={{ display: 'grid', gap: 4 }}>
                 <span>

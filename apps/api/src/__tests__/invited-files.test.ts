@@ -89,10 +89,26 @@ describe('files chosen for someone invited (P98)', () => {
       .send({ invites: { [inv]: false } })
       .expect(200);
     // Not an invitation to that file's client, or not an invitation at all.
+    // Passed over, not a failure of the whole call: nothing is chosen.
     const wrong = await staff
       .put(`/api/staff/v1/files/${theirs}/visibility`)
-      .send({ invites: { [inv]: true } });
-    expect([wrong.status, wrong.body]).toEqual([400, { error: 'not_an_invitation' }]);
+      .send({ invites: { [inv]: true } })
+      .expect(200);
+    expect(wrong.body.staleInvites).toBe(1);
+    expect((await filesOf(OTHER))[0]?.invites).toEqual([]);
+    // History has only what changed: chosen three times, taken back once.
+    const said = (await w.t.db.select().from(schema.events)).filter(
+      (e) => e.kind === 'share' || e.kind === 'unshare',
+    );
+    expect(said.map((e) => e.kind).sort()).toEqual(['share', 'share', 'share', 'unshare']);
+    // Chosen again for the one it is chosen for already: nothing new is said.
+    await staff
+      .put(`/api/staff/v1/files/${a}/visibility`)
+      .send({ invites: { [inv]: true } })
+      .expect(200);
+    expect(
+      (await w.t.db.select().from(schema.events)).filter((e) => e.kind === 'share'),
+    ).toHaveLength(3);
 
     let list = await filesOf(CLIENT);
     expect(Object.fromEntries(list.map((f) => [f.name, f.invites]))).toEqual({
@@ -135,10 +151,12 @@ describe('files chosen for someone invited (P98)', () => {
     list = await filesOf(CLIENT);
     expect(list.find((f) => f.name === 'Return.pdf')?.invites).toEqual([again]);
     // The old one takes no more files.
-    await staff
+    const old = await staff
       .put(`/api/staff/v1/files/${c}/visibility`)
       .send({ invites: { [inv]: true } })
-      .expect(400);
+      .expect(200);
+    expect(old.body.staleInvites).toBe(1);
+    expect(await w.t.db.select().from(schema.invitationFile)).toHaveLength(2);
 
     // A file removed meanwhile is not theirs.
     await staff.delete(`/api/staff/v1/files/${b}`).expect(200);
@@ -166,6 +184,45 @@ describe('files chosen for someone invited (P98)', () => {
     expect(after.invited).toEqual([]);
     expect(after.people).toHaveLength(1);
     expect(await w.t.db.select().from(schema.invitationFile)).toHaveLength(0);
+  });
+
+  it('a couple sharing a number: one\u2019s files are never handed to the other', async () => {
+    const w2 = await share(CLIENT, 'W-2.pdf');
+    // The wife by email, the couple's number beside it; a file is chosen for her.
+    const wife = (
+      await staff
+        .post(`/api/staff/v1/clients/${CLIENT}/invites`)
+        .send({ email: 'ann@example.test', phone: '+15555550100', name: 'Ann Smith' })
+        .expect(201)
+    ).body.invitationId as string;
+    await staff
+      .put(`/api/staff/v1/files/${w2}/visibility`)
+      .send({ invites: { [wife]: true } })
+      .expect(200);
+    // The husband by that number alone: her invitation is withdrawn (as it always was), and
+    // her file is not his; his message says nothing of files.
+    const husband = (
+      await staff
+        .post(`/api/staff/v1/clients/${CLIENT}/invites`)
+        .send({ phone: '+15555550100', name: 'Bob Smith' })
+        .expect(201)
+    ).body.invitationId as string;
+    expect(husband).not.toBe(wife);
+    expect((await filesOf(CLIENT))[0]?.invites).toEqual([]);
+    expect(w.notes.last('+15555550100').body).not.toContain('Files are waiting');
+    expect(await w.t.db.select().from(schema.invitationFile)).toHaveLength(0);
+  });
+
+  it('a resend says nothing of files when the only one chosen was removed', async () => {
+    const a = await share(CLIENT, 'Return.pdf');
+    const inv = await invite(CLIENT, 'joe@example.test', 'Joe Smith');
+    await staff
+      .put(`/api/staff/v1/files/${a}/visibility`)
+      .send({ invites: { [inv]: true } })
+      .expect(200);
+    await staff.delete(`/api/staff/v1/files/${a}`).expect(200);
+    await invite(CLIENT, 'joe@example.test', 'Joe Smith');
+    expect(w.notes.last('joe@example.test').body).not.toContain('Files are waiting');
   });
 
   it('a deleted invitation takes its choices with it', async () => {

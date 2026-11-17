@@ -20,7 +20,7 @@ export async function withdrawInvites(
   if (to && contacts.length === 0) return [];
   // Never every invitation on the portal.
   if (!clientId && !to) throw new Error('withdrawInvites: a client or contacts');
-  return ctx.db
+  const gone = await ctx.db
     .update(schema.portalInvitation)
     .set({ revokedAt: ctx.now() })
     .where(
@@ -47,6 +47,20 @@ export async function withdrawInvites(
       ),
     )
     .returning({ id: schema.portalInvitation.id });
+  // P98: the files chosen for an invitation go with it, however it was withdrawn.
+  await dropChoices(
+    ctx,
+    gone.map((g) => g.id),
+  );
+  return gone;
+}
+
+/** P98: forgets the files chosen for these invitations (withdrawn, or deleted by staff). */
+export async function dropChoices(ctx: Ctx, invitationIds: string[]): Promise<void> {
+  if (!invitationIds.length) return;
+  await ctx.db
+    .delete(schema.invitationFile)
+    .where(inArray(schema.invitationFile.invitationId, invitationIds));
 }
 
 /** The person's email and phone (either may be null). */
