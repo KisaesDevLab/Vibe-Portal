@@ -1578,6 +1578,48 @@ describe('staff page', () => {
     ],
   };
 
+  it('client page: the selected files go out together in one secure link (P97)', async () => {
+    const id = CLIENT.id;
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [USER], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: {
+        body: {
+          files: [
+            portalFile('f1', 'Return 2025.pdf'),
+            portalFile('f2', 'Return 2024.pdf'),
+            portalFile('f3', 'Return 2023.pdf'),
+          ],
+        },
+      },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      'POST /v1/shares': { status: 201, body: { shareId: 's2', expiresAt: '2026-11-17T15:00Z' } },
+    });
+    at(`/staff/clients/${id}`);
+    fireEvent.click(await screen.findByLabelText('Select Return 2025.pdf'));
+    fireEvent.click(screen.getByLabelText('Select Return 2023.pdf'));
+    expect(screen.getByText('2 files selected')).toBeTruthy();
+    // The bar's own button, beside each row's.
+    fireEvent.click(screen.getByRole('button', { name: 'Send securely…' }));
+    // The form opens with the selected files ticked, and the others to add.
+    expect((screen.getByLabelText('Return 2025.pdf') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Return 2023.pdf') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Return 2024.pdf') as HTMLInputElement).checked).toBe(false);
+    fireEvent.change(screen.getByLabelText('Recipient email'), {
+      target: { value: 'lee@first-bank.test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send secure link' }));
+    await waitFor(() =>
+      expect(
+        (
+          calls.find((c) => c.method === 'POST' && c.path === '/v1/shares')?.body as {
+            fileIds: string[];
+          }
+        ).fileIds.sort(),
+      ).toEqual(['f1', 'f3']),
+    );
+  });
+
   it('client page: sends files to someone outside by a secure link, and revokes one (P49)', async () => {
     const id = CLIENT.id;
     const calls = serve({

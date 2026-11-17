@@ -526,7 +526,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
     uploads.reload();
   };
   /** The file "Send securely" was pressed on, while its form is open. */
-  const [sending, setSending] = useState<string | null>(null);
+  const [sending, setSending] = useState<string[] | null>(null);
   const [sentNote, setSentNote] = useState('');
   const { act, actAt, busy, busyAt, error, errorAt, clearError } = useAct(reload);
   const [inv, setInv] = useState({ email: '', phone: '', name: '', roleLabel: '' });
@@ -788,9 +788,9 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
           // A file removed leaves the links that held it.
           links.reload();
         }}
-        onSend={(fileId) => {
+        onSend={(fileIds) => {
           setSentNote('');
-          setSending(fileId);
+          setSending(fileIds);
         }}
       />
       <ClientUploads load={uploads} />
@@ -808,7 +808,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
       {sending && files.data && (
         <Reveal>
           <SendSecurely
-            key={sending}
+            key={sending.join(',')}
             clientId={id}
             files={files.data.files}
             first={sending}
@@ -1061,7 +1061,8 @@ function ClientFiles({
   busy: boolean;
   act: (path: string, init: { method?: string; body?: unknown }) => Promise<unknown>;
   onChanged: () => void;
-  onSend: (fileId: string) => void;
+  /** Opens the secure-link form with these files ticked (P97: one, or the selected ones). */
+  onSend: (fileIds: string[]) => void;
 }): JSX.Element {
   const [typed, q, setQ] = useUrlSearch();
   const [yearRaw, setYear] = useUrlState('year', 'all');
@@ -1199,7 +1200,7 @@ function ClientFiles({
           disabled={off}
           aria-label={`Send ${f.name} securely`}
           style={{ marginRight: 6, marginBottom: 4 }}
-          onClick={() => onSend(f.fileId)}
+          onClick={() => onSend([f.fileId])}
         >
           <ShareIcon size={16} />
           Send securely…
@@ -1336,6 +1337,15 @@ function ClientFiles({
               }}
             >
               Remove from portal
+            </Button>
+            {/* P97: one secure link to someone outside the client, holding the selected files. */}
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={off}
+              onClick={() => onSend(all.filter((f) => picked.has(f.fileId)).map((f) => f.fileId))}
+            >
+              Send securely…
             </Button>
             <Button size="sm" variant="ghost" disabled={off} onClick={() => setPicked(new Set())}>
               Clear selection
@@ -1569,6 +1579,9 @@ function CabinetFileList({
   );
 }
 
+/** The most files one secure link holds (the API's SHARE_MAX_FILES). */
+const SECURE_LINK_MAX_FILES = 20;
+
 /** The form that sends files of one client to someone outside it, by a secure link (P49). */
 function SendSecurely({
   clientId,
@@ -1579,12 +1592,13 @@ function SendSecurely({
 }: {
   clientId: string;
   files: SharedFile[];
-  first: string;
+  /** The files ticked when the form opens. */
+  first: string[];
   onSent: (note: string) => void;
   onCancel: () => void;
 }): JSX.Element {
   const { act, busy, error } = useAct(() => undefined);
-  const [picked, setPicked] = useState<Set<string>>(new Set([first]));
+  const [picked, setPicked] = useState<Set<string>>(new Set(first));
   const [to, setTo] = useState({ email: '', name: '', organization: '', message: '' });
   // Owner 2026-11-12: a new link starts as view and download, 7 days, watermarked. The API
   // takes the same for whatever a caller leaves out.
@@ -1717,8 +1731,18 @@ function SendSecurely({
           </p>
         )}
         <Problem text={error} />
+        {picked.size > SECURE_LINK_MAX_FILES && (
+          <p role="alert" style={{ margin: 0 }}>
+            {`One link holds at most ${SECURE_LINK_MAX_FILES} files; ${picked.size} are ticked. Untick some, or send a second link.`}
+          </p>
+        )}
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button type="submit" disabled={busy || picked.size === 0 || !to.email.trim()}>
+          <Button
+            type="submit"
+            disabled={
+              busy || picked.size === 0 || picked.size > SECURE_LINK_MAX_FILES || !to.email.trim()
+            }
+          >
             {busy ? 'Sending…' : 'Send secure link'}
           </Button>
           <Button type="button" variant="secondary" disabled={busy} onClick={onCancel}>

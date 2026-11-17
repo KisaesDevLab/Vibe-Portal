@@ -174,7 +174,9 @@ A lender, a lawyer or another accountant sometimes needs a client's document. Th
 the client's people, so they get no portal account. Send them a **secure link** instead, from the
 staff page:
 
-1. Open the client. Beside a file under the shared files press **Send securely…**. The file must
+1. Open the client. Beside a file under the shared files press **Send securely…**. To send
+   several in one link, tick them first and press **Send securely…** in the bar that appears
+   above the list (a link holds at most 20 files). The file must
    already be on the portal: share it from Vibe Files first.
 2. Tick any other files of this client to send with it (up to 20).
 3. Enter the **recipient's email**, and their name and organization if you like (the recipient
