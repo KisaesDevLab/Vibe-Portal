@@ -25,7 +25,18 @@ import { chacha20poly1305, xchacha20poly1305 } from '@noble/ciphers/chacha';
 import argon2 from 'argon2';
 import { z } from 'zod';
 
-import type { Bucket } from './objects';
+import { VfTooBig, type Bucket } from './objects';
+
+/** The most the portal reads of cabinet.json, and of one manifest object (HEAD, a client's
+ *  segment): what is in the bucket is not trusted to be small. */
+const CABINET_JSON_MAX = 1024 * 1024;
+const MANIFEST_MAX = 64 * 1024 * 1024;
+/** Cabinets in one bucket, and wrapped keys in one cabinet, the passphrase is tried on: each
+ *  try is an Argon2 run. Vibe Files makes one cabinet with one key ("k-01"). */
+const CABINETS_TRIED = 8;
+const KEYS_TRIED = 4;
+/** The most memory one Argon2 run may ask for (Vibe Files asks for 64 MiB). */
+const KDF_MAX_KIB = 256 * 1024;
 
 /** The firm sync keys of one cabinet, as the portal keeps them (wrapped by its own key). */
 export interface VfAccess {
@@ -93,24 +104,30 @@ const Segment = z.object({
 /** A cabinet or client id, or a push's mark, as it may stand in a key. */
 const ID = /^[A-Za-z0-9-]{1,64}$/;
 
-/**
- * The firm sync key a wrapped copy holds, or null when the passphrase does not open it. The
- * cost asked for comes from a file anyone with the bucket could have written: an absurd one is
- * refused, not run (as Vibe Files does).
- */
+/** The cost a wrapped key asks for is one the portal runs. It comes from a file anyone with
+ *  the bucket could have written: an absurd one is not run. Below 1 MiB or 2 passes the Argon2
+ *  here does not run at all; Vibe Files makes keys at 64 MiB and 3 passes. */
+function runnable(w: z.infer<typeof Wrapped>): boolean {
+  const { m_kib, t, p } = w.params;
+  return (
+    m_kib >= 1024 &&
+    m_kib <= KDF_MAX_KIB &&
+    t >= 2 &&
+    t <= 16 &&
+    p >= 1 &&
+    p <= 16 &&
+    w.nonce.length === 24
+  );
+}
+
+/** The firm sync key a wrapped copy holds, or null when the passphrase does not open it. */
 async function unwrap(
   w: z.infer<typeof Wrapped>,
   passphrase: string,
   cabinetId: string,
 ): Promise<Buffer | null> {
   const { m_kib, t, p } = w.params;
-  // Below 1 MiB or 2 passes the Argon2 here does not run; Vibe Files makes keys at 64 MiB and
-  // 3 passes.
-  if (m_kib > 1024 * 1024 || t > 16 || p > 16 || m_kib < 1024 || t < 2 || p < 1) {
-    throw new VfError('vf_format', 'unreasonable key derivation settings');
-  }
   const nonce = Buffer.from(w.nonce, 'hex');
-  if (nonce.length !== 12) throw new VfError('vf_format', 'nonce length');
   const kek = await argon2.hash(passphrase, {
     type: argon2.argon2id,
     version: 0x13,
@@ -125,10 +142,8 @@ async function unwrap(
     const key = chacha20poly1305(kek, nonce, Buffer.from(cabinetId, 'utf8')).decrypt(
       Buffer.from(w.ciphertext, 'hex'),
     );
-    if (key.length !== 32) throw new VfError('vf_format', 'key length');
-    return Buffer.from(key);
-  } catch (err) {
-    if (err instanceof VfError) throw err;
+    return key.length === 32 ? Buffer.from(key) : null;
+  } catch {
     return null;
   } finally {
     kek.fill(0);
@@ -141,23 +156,36 @@ async function unwrap(
  */
 export async function unlock(bucket: Bucket, passphrase: string): Promise<VfAccess> {
   const cabinets = (await bucket.vfCabinets()).filter((id) => ID.test(id));
+  // Cabinets found, and those with a key the passphrase could be tried on.
   let found = 0;
+  let tried = 0;
   for (const cabinetId of cabinets) {
-    const raw = await bucket.vfGet(`${cabinetId}/cabinet.json`);
-    if (!raw) continue;
+    if (tried >= CABINETS_TRIED) break;
     let cab;
     try {
+      const raw = await bucket.vfGet(`${cabinetId}/cabinet.json`, CABINET_JSON_MAX);
+      if (!raw) continue;
       cab = CabinetJson.parse(JSON.parse(raw.toString('utf8')));
-    } catch {
-      continue;
+    } catch (err) {
+      // Not a cabinet file the portal reads (or far too large to be one): the next one.
+      if (err instanceof VfTooBig || err instanceof SyntaxError || err instanceof z.ZodError) {
+        continue;
+      }
+      throw err;
     }
     if (cab.cabinet_id !== cabinetId) continue;
     found += 1;
+    // A key in a form or at a cost the portal does not run is passed over, not a failure of
+    // the whole: another cabinet in the bucket (a trial's leftover) must not stop this one.
+    const wrapped = Object.entries(cab.wrapped)
+      .map(([keyId, w]) => ({ keyId, w: Wrapped.safeParse(w) }))
+      .flatMap(({ keyId, w }) => (w.success && runnable(w.data) ? [{ keyId, w: w.data }] : []))
+      .slice(0, KEYS_TRIED);
+    if (!wrapped.length) continue;
+    tried += 1;
     const keys: Record<string, string> = {};
-    for (const [keyId, w] of Object.entries(cab.wrapped)) {
-      const parsed = Wrapped.safeParse(w);
-      if (!parsed.success) continue;
-      const key = await unwrap(parsed.data, passphrase, cabinetId);
+    for (const { keyId, w } of wrapped) {
+      const key = await unwrap(w, passphrase, cabinetId);
       if (key) {
         keys[keyId] = key.toString('hex');
         key.fill(0);
@@ -165,7 +193,8 @@ export async function unlock(bucket: Bucket, passphrase: string): Promise<VfAcce
     }
     if (Object.keys(keys).length) return { cabinetId, keys };
   }
-  throw new VfError(found ? 'vf_wrong_passphrase' : 'vf_no_cabinet');
+  // A cabinet is there, but none with a key the portal can try the passphrase on.
+  throw new VfError(tried ? 'vf_wrong_passphrase' : found ? 'vf_format' : 'vf_no_cabinet');
 }
 
 const MAGIC = Buffer.from('VF1\0', 'latin1');
@@ -176,9 +205,10 @@ export function open(access: VfAccess, body: Buffer, key: string): Buffer {
   const n = body.readUInt16LE(4);
   if (body.length < 6 + n + 24 + 16) throw new VfError('vf_format', key);
   const keyId = body.subarray(6, 6 + n).toString('utf8');
-  const firm = access.keys[keyId];
+  // The id is from the object's own header, which nothing vouches for: an own key only.
+  const firm = Object.hasOwn(access.keys, keyId) ? access.keys[keyId] : undefined;
   // Sealed with a key made since the passphrase was entered here.
-  if (!firm) throw new VfError('vf_key', keyId);
+  if (typeof firm !== 'string') throw new VfError('vf_key', 'unknown key id');
   const content = Buffer.from(
     hkdfSync(
       'sha256',
@@ -190,11 +220,11 @@ export function open(access: VfAccess, body: Buffer, key: string): Buffer {
   );
   try {
     const nonce = body.subarray(6 + n, 6 + n + 24);
-    return Buffer.from(
-      xchacha20poly1305(content, nonce, Buffer.from(key, 'utf8')).decrypt(
-        body.subarray(6 + n + 24),
-      ),
+    const plain = xchacha20poly1305(content, nonce, Buffer.from(key, 'utf8')).decrypt(
+      body.subarray(6 + n + 24),
     );
+    // The same bytes, not a copy of them (a document can be tens of megabytes).
+    return Buffer.from(plain.buffer, plain.byteOffset, plain.length);
   } catch {
     throw new VfError('vf_damaged', key);
   } finally {
@@ -208,7 +238,13 @@ async function json<T>(
   key: string,
   shape: z.ZodType<T, z.ZodTypeDef, unknown>,
 ): Promise<T | null> {
-  const body = await bucket.vfGet(`${access.cabinetId}/${key}`);
+  let body;
+  try {
+    body = await bucket.vfGet(`${access.cabinetId}/${key}`, MANIFEST_MAX);
+  } catch (err) {
+    if (err instanceof VfTooBig) throw new VfError('vf_format', key);
+    throw err;
+  }
   if (!body) return null;
   const plain = open(access, body, key);
   try {
@@ -240,7 +276,16 @@ export async function find(
   clientId: string,
   docId: string,
 ): Promise<VfDocument> {
-  const head = await json(bucket, access, 'manifest/HEAD', Head);
+  let head;
+  try {
+    head = await json(bucket, access, 'manifest/HEAD', Head);
+  } catch (err) {
+    // The manifest's own head does not open with the key kept here: the cabinet's sync key
+    // was made anew since the passphrase was entered (Vibe Files names every key "k-01"), far
+    // likelier than a damaged HEAD. The passphrase is entered again.
+    if (err instanceof VfError && err.code === 'vf_damaged') throw new VfError('vf_key', 'HEAD');
+    throw err;
+  }
   if (!head) throw new VfError('vf_gone', 'nothing pushed');
   const client = Object.keys(head.segments).find((c) => c.toLowerCase() === clientId.toLowerCase());
   if (!client || !ID.test(client)) throw new VfError('vf_gone', 'client');
@@ -265,7 +310,14 @@ export async function find(
 
 /** The document's content, checked against the hash the manifest gives for it. */
 export async function content(bucket: Bucket, access: VfAccess, doc: VfDocument): Promise<Buffer> {
-  const body = await bucket.vfGet(`${access.cabinetId}/${doc.objectKey}`);
+  let body;
+  try {
+    // The document, its seal's header (the key id is short) and tag: nothing longer is read.
+    body = await bucket.vfGet(`${access.cabinetId}/${doc.objectKey}`, doc.size + 4096);
+  } catch (err) {
+    if (err instanceof VfTooBig) throw new VfError('vf_damaged', doc.objectKey);
+    throw err;
+  }
   if (!body) throw new VfError('vf_missing', doc.objectKey);
   const plain = open(access, body, doc.objectKey);
   if (createHash('sha256').update(plain).digest('hex') !== doc.sha256) {

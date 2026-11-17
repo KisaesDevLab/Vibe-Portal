@@ -64,9 +64,17 @@ export interface Bucket extends ObjectStore {
   removeNote(name: string): Promise<void>;
   /** Vibe Files' cabinets in this bucket (P91): the ids right below "vf/". Read only. */
   vfCabinets(): Promise<string[]>;
-  /** One object of Vibe Files' (its key below "vf/"), whole; null when there is none. The
-   *  portal never writes or deletes there. */
-  vfGet(key: string): Promise<Buffer | null>;
+  /** One object of Vibe Files' (its key below "vf/"), whole; null when there is none. One
+   *  larger than `maxBytes` is not read: VfTooBig. The portal never writes or deletes there. */
+  vfGet(key: string, maxBytes: number): Promise<Buffer | null>;
+}
+
+/** An object under "vf/" larger than its reader allows: not held in memory. Anyone who can
+ *  write to the bucket could have put it there. */
+export class VfTooBig extends Error {
+  constructor(key: string) {
+    super(`object too large: ${key}`);
+  }
 }
 
 /** A key below "vf/": a cabinet id, then Vibe Files' own key, with nothing a bucket could
@@ -250,8 +258,10 @@ export class MemoryObjects implements Bucket {
     return [...new Set([...this.vfItems.keys()].map((k) => k.slice(0, k.indexOf('/'))))];
   }
 
-  async vfGet(key: string): Promise<Buffer | null> {
+  async vfGet(key: string, maxBytes: number): Promise<Buffer | null> {
     this.check();
-    return this.vfItems.get(checkVfKey(key)) ?? null;
+    const b = this.vfItems.get(checkVfKey(key)) ?? null;
+    if (b && b.length > maxBytes) throw new VfTooBig(key);
+    return b;
   }
 }

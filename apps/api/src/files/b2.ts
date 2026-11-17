@@ -28,6 +28,7 @@ import {
   checkVfKey,
   NotFound,
   OBJECT_KEY,
+  VfTooBig,
   type Bucket,
   type Listed,
 } from './objects';
@@ -257,15 +258,32 @@ export class B2Objects implements Bucket {
     return ids;
   }
 
-  async vfGet(key: string): Promise<Buffer | null> {
+  async vfGet(key: string, maxBytes: number): Promise<Buffer | null> {
+    let body: Readable;
     try {
       const out = await this.s3.send(
         new GetObjectCommand({ Bucket: this.bucket, Key: `${VF}${checkVfKey(key)}` }),
       );
-      return await drain(out.Body as Readable);
+      body = out.Body as Readable;
+      // By the length B2 gives, before a byte is read; and again as it is read, below.
+      if ((out.ContentLength ?? 0) > maxBytes) {
+        body.destroy();
+        throw new VfTooBig(key);
+      }
     } catch (err) {
       if (missing(err)) return null;
       throw err;
     }
+    const parts: Buffer[] = [];
+    let n = 0;
+    for await (const c of body) {
+      n += (c as Buffer).length;
+      if (n > maxBytes) {
+        body.destroy();
+        throw new VfTooBig(key);
+      }
+      parts.push(c as Buffer);
+    }
+    return Buffer.concat(parts);
   }
 }

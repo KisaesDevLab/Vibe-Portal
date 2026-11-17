@@ -363,6 +363,15 @@ const VF_STATUS: Record<VfError['code'], number> = {
   vf_damaged: 502,
 };
 
+/** One document at a time is read from the bucket and opened: each is held whole in memory,
+ *  and opening it keeps the server busy, so two staff pressing Add wait their turn. */
+let adding: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
+  const run = adding.then(job, job);
+  adding = run.catch(() => undefined);
+  return run;
+}
+
 /**
  * POST /clients/:id/cabinet-files/:docId (staff, P91): puts one listed document on the portal.
  * Read from the bucket as it is now (not from the list): one deleted or taken out of B2 since
@@ -403,20 +412,23 @@ export function cabinetAdd(ctx: Ctx): RequestHandler {
     let name;
     let taxYear: number | null;
     try {
-      const doc = await find(bucket, access, id, docId);
-      // The object opens in one piece, in memory: refused by its size before it is fetched.
-      if (doc.size > limit) throw new HttpError(413, 'vf_too_large');
-      const plain = await content(bucket, access, doc);
-      name = cleanName(doc.name);
-      const year = doc.taxYear;
+      const got = await oneAtATime(async () => {
+        const doc = await find(bucket, access, id, docId);
+        // The object opens in one piece, in memory: refused by its size before it is fetched.
+        if (doc.size > limit) throw new HttpError(413, 'vf_too_large');
+        const plain = await content(bucket, access, doc);
+        const dek = generateKey();
+        const put = await ctx.blobs.put(Readable.from([plain]), dek, limit);
+        if (put.sha256 !== doc.sha256) {
+          await ctx.blobs.remove(put.blobKey);
+          throw new VfError('vf_damaged', 'stored copy');
+        }
+        return { doc, put, dekWrapped: Buffer.from(ctx.keyring.wrap(dek)) };
+      });
+      name = cleanName(got.doc.name);
+      const year = got.doc.taxYear;
       taxYear = year !== null && year >= 1990 && year <= 2100 ? year : null;
-      const dek = generateKey();
-      const put = await ctx.blobs.put(Readable.from([plain]), dek, limit);
-      stored = { ...put, dekWrapped: Buffer.from(ctx.keyring.wrap(dek)) };
-      if (stored.sha256 !== doc.sha256) {
-        await ctx.blobs.remove(stored.blobKey);
-        throw new VfError('vf_damaged', 'stored copy');
-      }
+      stored = { ...got.put, dekWrapped: got.dekWrapped };
     } catch (err) {
       if (err instanceof TooLarge) throw new HttpError(413, 'vf_too_large');
       if (err instanceof VfError) {

@@ -122,6 +122,8 @@ export function staffSay(err: unknown): string {
       'That document is larger than the portal takes (Settings › Firm sets the largest file).',
     vf_read_failed:
       'The bucket could not be read. Try again; if it keeps failing, an admin checks the application key under Settings › Storage.',
+    vf_bucket_changed:
+      'The bucket was changed while the passphrase was being checked. Enter the passphrase again.',
     vf_unlisted:
       'That document is no longer on the list Vibe Files sent for this client. Open the page again to see the list as it is now.',
     vf_cabinet_format:

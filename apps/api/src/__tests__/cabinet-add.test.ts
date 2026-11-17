@@ -81,6 +81,22 @@ describe('reading Vibe Files’ part of the bucket (P91)', () => {
     await expect(unlock(new MemoryObjects(), EXPECT.passphrase)).rejects.toMatchObject({
       code: 'vf_no_cabinet',
     });
+    // Another cabinet in the bucket whose key asks for a cost the portal does not run (a
+    // trial's leftover, or planted), listed first: passed over, and the real one still opens.
+    const real = JSON.parse(
+      bucket.vfItems.get(`${EXPECT.cabinetId}/cabinet.json`)!.toString('utf8'),
+    ) as { cabinet_id: string; wrapped: Record<string, { params: { m_kib: number; t: number } }> };
+    const stray = structuredClone(real);
+    stray.cabinet_id = '00000000-0000-4000-8000-000000000000';
+    stray.wrapped['k-01']!.params = { ...stray.wrapped['k-01']!.params, m_kib: 1024 * 1024, t: 1 };
+    const both = new MemoryObjects();
+    both.vfItems.set(`${stray.cabinet_id}/cabinet.json`, Buffer.from(JSON.stringify(stray)));
+    for (const [k, v] of bucket.vfItems) both.vfItems.set(k, v);
+    expect((await unlock(both, EXPECT.passphrase)).cabinetId).toBe(EXPECT.cabinetId);
+    // Only that one: the portal says it cannot read it, not that the passphrase is wrong.
+    const only = new MemoryObjects();
+    only.vfItems.set(`${stray.cabinet_id}/cabinet.json`, Buffer.from(JSON.stringify(stray)));
+    await expect(unlock(only, EXPECT.passphrase)).rejects.toMatchObject({ code: 'vf_format' });
     const access = await unlock(bucket, EXPECT.passphrase);
     // Deleted in the cabinet since it was pushed: the manifest has its tombstone.
     await expect(find(bucket, access, ANDERSON.id, EXPECT.deletedDocId)).rejects.toMatchObject({
@@ -99,6 +115,15 @@ describe('reading Vibe Files’ part of the bucket (P91)', () => {
     await expect(content(bucket, { ...access, keys: {} }, doc)).rejects.toMatchObject({
       code: 'vf_key',
     });
+    // The cabinet's sync key made anew since (Vibe Files names every key "k-01"): the
+    // manifest's head no longer opens, and the passphrase is to be entered again.
+    const other = { ...access, keys: { 'k-01': 'ab'.repeat(32) } };
+    await expect(find(bucket, other, ANDERSON.id, W2.docId)).rejects.toMatchObject({
+      code: 'vf_key',
+    });
+    // An object far larger than the manifest says its document is, is not read into memory.
+    bucket.vfItems.set(key, Buffer.alloc(doc.size + 5000));
+    await expect(content(bucket, access, doc)).rejects.toMatchObject({ code: 'vf_damaged' });
     bucket.vfItems.delete(key);
     await expect(content(bucket, access, doc)).rejects.toMatchObject({ code: 'vf_missing' });
   });

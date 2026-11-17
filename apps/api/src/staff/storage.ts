@@ -14,6 +14,7 @@
 //   POST   /api/staff/v1/settings/storage/snapshot  sends a database snapshot to the bucket now
 
 import express, { type Request, type Response, type Router } from 'express';
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -192,10 +193,17 @@ export function storageRouter(ctx: Ctx): Router {
         res.status(400).json({ error: 'vf_bucket_unread', detail: why(err) });
         return;
       }
-      await ctx.db.update(schema.firm).set({
-        vfSyncEnc: Buffer.from(ctx.keyring.wrap(Buffer.from(JSON.stringify(access), 'utf8'))),
-        updatedAt: ctx.now(),
-      });
+      // Only while the bucket is still the one the passphrase was checked against: another
+      // admin may have changed it meanwhile, and the key would be kept for the wrong bucket.
+      const kept = await ctx.db
+        .update(schema.firm)
+        .set({
+          vfSyncEnc: Buffer.from(ctx.keyring.wrap(Buffer.from(JSON.stringify(access), 'utf8'))),
+          updatedAt: ctx.now(),
+        })
+        .where(and(eq(schema.firm.b2Endpoint, s.endpoint), eq(schema.firm.b2Bucket, s.bucket)))
+        .returning({ id: schema.firm.id });
+      if (!kept.length) throw new HttpError(409, 'vf_bucket_changed');
       await record(ctx.db, 'storage_vf_saved', actor(req), {
         detail: { cabinetId: access.cabinetId },
       });
