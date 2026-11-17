@@ -294,6 +294,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       endpoint: 's3.us-west-004.backblazeb2.com',
       bucket: B2.bucket,
       keyId: B2.keyId,
+      problem: null,
     });
     // Neither the passphrase nor the key goes back to the page or into History.
     expect(JSON.stringify(saved.body)).not.toContain(EXPECT.passphrase);
@@ -382,12 +383,10 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     // Object Lock: the portal would refuse it for its own files; it is only read here.
     bucket.locked = true;
     const own = { ...B2, bucket: 'example-cpa-vibe-files' };
-    const bad = await boss
-      .put('/api/staff/v1/settings/storage/vibe-files')
-      .send({
-        passphrase: EXPECT.passphrase,
-        bucket: { ...own, endpoint: 'https://s3.amazonaws.com' },
-      });
+    const bad = await boss.put('/api/staff/v1/settings/storage/vibe-files').send({
+      passphrase: EXPECT.passphrase,
+      bucket: { ...own, endpoint: 'https://s3.amazonaws.com' },
+    });
     expect(bad.body).toEqual({ error: 'b2_endpoint' });
     // A space pasted after the passphrase: taken as typed first, then without it.
     const saved = await boss
@@ -400,8 +399,20 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       endpoint: 's3.us-west-004.backblazeb2.com',
       bucket: own.bucket,
       keyId: own.keyId,
+      problem: null,
     });
     expect(JSON.stringify(saved.body)).not.toContain(own.appKey);
+    // The passphrase entered again for the same bucket: its saved key is kept; another bucket
+    // needs its own.
+    const { appKey: _kept, ...sameBucket } = own;
+    await boss
+      .put('/api/staff/v1/settings/storage/vibe-files')
+      .send({ passphrase: EXPECT.passphrase, bucket: sameBucket })
+      .expect(200);
+    const other = await boss
+      .put('/api/staff/v1/settings/storage/vibe-files')
+      .send({ passphrase: EXPECT.passphrase, bucket: { ...sameBucket, bucket: 'another-bucket' } });
+    expect(other.body).toEqual({ error: 'b2_app_key' });
     // Nothing was written to Vibe Files' bucket: no test file, no mark of the portal's.
     expect(bucket.items.size).toBe(0);
     expect(bucket.noteItems.size).toBe(0);
@@ -471,6 +482,20 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     expect(replaced[0]).toEqual(
       expect.objectContaining({ actorKind: 'system', actor: 'Vibe Files’ B2', fileId }),
     );
+    // The client's History says who did it, and the file's row that it follows B2.
+    const hist = (await boss.get(`/api/staff/v1/clients/${ANDERSON.id}/history`).expect(200)).body
+      .events as { kind: string; who: string }[];
+    expect(hist.find((e) => e.kind === 'replace')?.who).toBe('Vibe Files’ B2');
+    const listedFile = (await boss.get(`/api/staff/v1/files?clientId=${ANDERSON.id}`).expect(200))
+      .body.files[0];
+    expect(listedFile.fromB2).toBe(true);
+
+    // Renamed in the cabinet, the same content: the name follows, and nobody is told of a
+    // new file.
+    await mary.agent.get(`/api/portal/files/${fileId}/content`).expect(200);
+    pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 2025 corrected', 'W-2 final.pdf');
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(await hers()).toEqual(expect.objectContaining({ name: 'W-2 final.pdf', isNew: false }));
     // The old stored copy is gone: one blob for one file.
     expect((await w.t.db.select().from(schema.files)).filter((f) => f.blobKey)).toHaveLength(1);
     // Looked at again with nothing new: nothing happens.
@@ -498,6 +523,56 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     expect((await w.t.db.select().from(schema.files))[0]!.sha256).toBe(row!.sha256);
     bucket.vfItems.set(key, good);
     expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+
+    // The client switched off: nothing of it follows.
+    await w.firm('put', `/clients/${ANDERSON.id}`).send({
+      clientCode: ANDERSON.code,
+      displayName: ANDERSON.name,
+      active: false,
+    });
+    pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 while off');
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    await w.firm('put', `/clients/${ANDERSON.id}`).send({
+      clientCode: ANDERSON.code,
+      displayName: ANDERSON.name,
+      active: true,
+    });
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+
+    // Vibe Files shares a changed version of it: Vibe Files' from then on, not followed.
+    const mine = Buffer.from('w2 shared from Vibe Files');
+    await w
+      .firm(
+        'put',
+        `/files/${fileId}/content?sha256=${createHash('sha256').update(mine).digest('hex')}`,
+      )
+      .set('Content-Type', 'application/octet-stream')
+      .send(mine)
+      .expect(200);
+    expect((await w.t.db.select().from(schema.files))[0]!.fromB2).toBe(false);
+    pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 pushed after that');
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    await w.t.db.update(schema.files).set({ fromB2: true });
+    forgetCompared();
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+
+    // The sync key made anew in Vibe Files: nothing follows, and Settings says why.
+    const head = `${EXPECT.cabinetId}/manifest/HEAD`;
+    const goodHead = bucket.vfItems.get(head)!;
+    bucket.vfItems.set(
+      head,
+      seal({ ...access, keys: { 'k-01': 'cd'.repeat(32) } }, Buffer.from('{}'), 'manifest/HEAD'),
+    );
+
+    await expect(followB2(w.ctx)).rejects.toMatchObject({ code: 'vf_key' });
+    expect(
+      (await boss.get('/api/staff/v1/settings/storage').expect(200)).body.vibeFiles.problem,
+    ).toBe('vf_key');
+    bucket.vfItems.set(head, goodHead);
+    await followB2(w.ctx);
+    expect(
+      (await boss.get('/api/staff/v1/settings/storage').expect(200)).body.vibeFiles.problem,
+    ).toBeNull();
 
     // Removed from the portal: it follows nothing any more.
     await boss.delete(`/api/staff/v1/files/${fileId}`).expect(200);

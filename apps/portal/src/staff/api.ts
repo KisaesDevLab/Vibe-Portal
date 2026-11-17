@@ -101,9 +101,13 @@ export function staffSay(err: unknown): string {
       "The endpoint must be the bucket's S3 endpoint from Backblaze, like s3.us-west-004.backblazeb2.com.",
     b2_bucket: 'A B2 bucket name is 6 to 63 letters, digits and hyphens.',
     b2_app_key: 'Enter the application key.',
+    vf_follow_key:
+      'Vibe Files’ sync key changed since the passphrase was entered: documents added from B2 are not being updated. Enter the passphrase again.',
+    vf_follow_unread:
+      'The portal could not read Vibe Files’ bucket when it last looked: documents added from B2 are not being updated. Check the bucket and its key.',
     b2_not_set_up: 'Set up the B2 bucket first.',
     vf_no_cabinet:
-      'Vibe Files has put nothing in this bucket. It must be the bucket Vibe Files’ B2 sync uses.',
+      'Vibe Files has put nothing in that bucket. It must be the bucket Vibe Files’ B2 sync uses: if that is not the portal’s own bucket, choose In a bucket of Vibe Files’ own.',
     vf_wrong_passphrase:
       'That is not the sync passphrase of the Vibe Files cabinet in this bucket.',
     vf_not_set_up:
@@ -154,7 +158,7 @@ export function staffSay(err: unknown): string {
   }
   if (code === 'vf_bucket_unread') {
     const why = err instanceof StaffApiError && err.detail ? ` B2 said: ${err.detail}` : '';
-    return `The portal could not read Vibe Files’ part of the bucket. The application key above must be allowed to read the whole bucket, not one folder of it.${why}`;
+    return `The portal could not read Vibe Files’ documents in that bucket. Check the bucket’s endpoint and name, the key ID and the application key; the key must be allowed to read and list the whole bucket, not one folder of it.${why}`;
   }
   if (code === 'b2_check_failed') {
     const why = err instanceof StaffApiError && err.detail ? ` B2 said: ${err.detail}` : '';
@@ -256,6 +260,8 @@ export interface SharedFile {
   sharedAt: string;
   sharedBy: string;
   contentUpdatedAt: string | null;
+  /** P94: added from B2: the portal replaces it by itself when B2 has a changed version. */
+  fromB2?: boolean;
   users: { identityId: string; visible: boolean; viewedAt: string | null }[];
 }
 

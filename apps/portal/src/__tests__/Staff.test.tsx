@@ -1989,6 +1989,8 @@ describe('the preview of a client portal (P77)', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     at('/staff/settings');
     const box = await screen.findByLabelText('Vibe Files’ sync passphrase');
+    // It starts on a bucket of Vibe Files' own (the usual case); here it is the portal's.
+    fireEvent.click(screen.getByLabelText(/^In the bucket above/));
     const save = screen.getByRole('button', { name: 'Check and save the passphrase' });
     expect((save as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(box, { target: { value: 'correct horse battery staple' } });

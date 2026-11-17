@@ -60,7 +60,8 @@ const VfSchema = z.object({
       endpoint: z.string().trim().max(200),
       bucket: z.string().trim().max(63),
       keyId: z.string().trim().min(1).max(100),
-      appKey: z.string().trim().min(1).max(200),
+      /** Left out to keep the saved key of the same bucket. */
+      appKey: z.string().trim().min(1).max(200).optional(),
     })
     .optional(),
 });
@@ -202,7 +203,19 @@ export function storageRouter(ctx: Ctx): Router {
         const at = parseEndpoint(input.bucket.endpoint);
         if (!at) throw new HttpError(400, 'b2_endpoint');
         if (!validBucket(input.bucket.bucket)) throw new HttpError(400, 'b2_bucket');
-        own = { ...input.bucket, endpoint: at.host };
+        const saved = vfAccess(ctx, f)?.b2;
+        const appKey =
+          input.bucket.appKey ??
+          (saved && saved.endpoint === at.host && saved.bucket === input.bucket.bucket
+            ? saved.appKey
+            : undefined);
+        if (!appKey) throw new HttpError(400, 'b2_app_key');
+        own = {
+          endpoint: at.host,
+          bucket: input.bucket.bucket,
+          keyId: input.bucket.keyId,
+          appKey,
+        };
       }
       const s = own ?? b2Settings(ctx, f);
       if (!s) throw new HttpError(400, 'b2_not_set_up');

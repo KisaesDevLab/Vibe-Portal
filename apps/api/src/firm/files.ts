@@ -188,7 +188,9 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       }
       const stored = await store(req, q.sha256);
       const name = q.name ? cleanName(q.name) : before.name;
-      if (!(await replaceContent(ctx, before, stored, name, actorOf(req)))) {
+      // A file added from B2 that Vibe Files replaces is Vibe Files' from now on (P94): the
+      // portal no longer follows the bucket for it, so the two never undo each other.
+      if (!(await replaceContent(ctx, before, stored, name, actorOf(req), {}, { fromB2: false }))) {
         await ctx.blobs.remove(stored.blobKey);
         throw new HttpError(404, 'not_found');
       }
@@ -322,6 +324,8 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
           sharedAt: f.sharedAt,
           sharedBy: f.sharedBy,
           contentUpdatedAt: f.contentUpdatedAt,
+          // P94: added from B2, so the portal replaces it by itself when B2 has a new version.
+          fromB2: f.fromB2,
           // P21: who sees it, and whether they opened the current content.
           users: (byFile.get(f.id) ?? []).map((v) => ({
             identityId: v.identityId,

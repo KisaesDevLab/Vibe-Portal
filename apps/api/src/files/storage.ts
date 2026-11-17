@@ -31,6 +31,7 @@ import { B2Objects, type B2Settings } from './b2';
 import { NotFound, type Bucket, type ObjectStore } from './objects';
 import { snapshotIfDue } from './snapshot';
 import type { VfAccess } from './vf-bucket';
+import { followProblem } from './vf-follow';
 
 type FirmRow = typeof schema.firm.$inferSelect;
 type StorageMove = schema.StorageMove;
@@ -491,6 +492,9 @@ function vfState(ctx: Ctx, f: FirmRow) {
     endpoint: access.b2?.endpoint ?? f.b2Endpoint,
     bucket: access.b2?.bucket ?? f.b2Bucket,
     keyId: access.b2?.keyId ?? f.b2KeyId,
+    /** Why the bucket could not be read when the portal last looked for changed documents
+     *  (P94): a code, or null. */
+    problem: followProblem(),
   };
 }
 

@@ -273,8 +273,9 @@ the 0.1.38 the list itself needs.
    - **In a bucket of Vibe Files' own** (the usual case, and the only one for a bucket with
      **Object Lock**): enter that bucket's **endpoint**, **name**, a **key ID** and its
      **application key**. The portal only reads this bucket, so make the key in Backblaze for
-     this bucket alone, allowed to **read and list files** and nothing more. The key must reach
-     the whole bucket, not one folder of it.
+     this bucket alone, of the kind Backblaze calls **Read Only** (it may read and list files
+     and nothing more). The key must reach the whole bucket, not one folder of it. To enter
+     the passphrase again later, leave the application key empty: the saved one is kept.
    - **In the bucket above**, where the portal keeps its own files in the same bucket as Vibe
      Files (possible only without Object Lock). The portal keeps to its own folders there
      (`blobs/` and `portal/`) and only reads Vibe Files' (`vf/`).
@@ -309,9 +310,16 @@ What to know:
 - **A document added this way follows B2.** When it changes in the cabinet and Vibe Files
   pushes the new version to B2, the portal replaces its copy by itself, within about 10
   minutes: the people who see it get it marked **New** and are told as for any updated file,
-  without anyone at the firm looking first. A new name in the cabinet follows too. History
-  says **Replaced a file**, by **Vibe Files' B2**. To stop one following, remove it
-  from the portal and share it from Vibe Files instead.
+  without anyone at the firm looking first. History says **Replaced a file**, by **Vibe
+  Files' B2**, and the file's row under **Files** says it was added from B2. A new name in the
+  cabinet follows too (nobody is told of a new name alone). A secure link that holds the file
+  gives the new version from then on.
+- A document added from B2 stops following it once someone shares a changed version of it from
+  Vibe Files: it is then Vibe Files' to replace, as any file shared from there. To stop one
+  following without that, remove it from the portal and share it from Vibe Files instead.
+- Documents added with 0.3.16 follow B2 from the update to 0.3.17 on.
+- If the portal cannot read the bucket (the key was removed in Backblaze, the sync key
+  changed), nothing is updated, and **Settings › Storage** says so.
 - A document deleted, or taken out of B2, in Vibe Files keeps its copy on the portal until
   staff remove it there.
 - Only documents added with **Add to portal** follow B2. One shared from Vibe Files changes on

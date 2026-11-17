@@ -48,6 +48,7 @@ import { sizeText } from '../pages/Files';
 import { ClientLinksImport, ClientPortalLink } from './ClientLinks';
 import {
   staffApi,
+  StaffApiError,
   staffSay,
   when,
   type CabinetList,
@@ -1160,6 +1161,7 @@ function ClientFiles({
           {f.contentUpdatedAt
             ? `Updated ${when(f.contentUpdatedAt)}`
             : `Shared ${when(f.sharedAt)} by ${f.sharedBy}`}
+          {f.fromB2 ? ' · Added from B2: updated by itself when it changes there' : ''}
         </small>
       </td>
       <td style={td}>
@@ -3757,6 +3759,8 @@ interface StorageData {
     endpoint?: string;
     bucket?: string;
     keyId?: string;
+    /** Why the bucket could not be read at the portal's last look for changed documents. */
+    problem?: string | null;
   } | null;
   move: {
     to: 'local' | 'b2';
@@ -3791,6 +3795,15 @@ function Storage(): JSX.Element {
   /** P94: Vibe Files' documents are in a bucket of its own (one with Object Lock, say). */
   const [vfOwn, setVfOwn] = useState<boolean | null>(null);
   const [vfB2, setVfB2] = useState({ endpoint: '', bucket: '', keyId: '', appKey: '' });
+  // Vibe Files' own bucket as saved (never its key), when that changes: as for the bucket above.
+  const savedVf = s.data?.vibeFiles?.own
+    ? `${s.data.vibeFiles.endpoint ?? ''}\n${s.data.vibeFiles.bucket ?? ''}\n${s.data.vibeFiles.keyId ?? ''}`
+    : null;
+  useEffect(() => {
+    if (savedVf === null) return;
+    const [endpoint = '', bucket = '', keyId = ''] = savedVf.split('\n');
+    setVfB2((v) => ({ ...v, endpoint, bucket, keyId }));
+  }, [savedVf]);
   const d = s.data;
   // Filled from what is saved when that changes, not on every reload (a move reloads every 2 s
   // and would wipe what the admin is typing).
@@ -3905,9 +3918,10 @@ function Storage(): JSX.Element {
           >
             <strong>Backblaze B2 bucket</strong>
             <span style={{ fontSize: 13 }}>
-              Use a bucket for the portal alone, or the one Vibe Files’ B2 sync uses (each keeps to
-              its own folders in it), and an application key limited to it that may read, write,
-              list and delete files. Saving checks the bucket with a small test file first.
+              Use a bucket for the portal alone, without Object Lock (or the one Vibe Files’ B2 sync
+              uses, if it has no Object Lock: each keeps to its own folders in it), and an
+              application key limited to it that may read, write, list and delete files. Saving
+              checks the bucket with a small test file first.
             </span>
             <Input
               label="Endpoint (on the bucket's page, e.g. s3.us-west-004.backblazeb2.com)"
@@ -3983,11 +3997,19 @@ function Storage(): JSX.Element {
             {tested && <p role="status">The bucket works with the saved key.</p>}
           </form>
           {(() => {
-            // Vibe Files' own bucket unless the bucket above is set up and was chosen (or is
-            // the one in use now).
-            const own = vfOwn ?? (d.vibeFiles ? d.vibeFiles.own === true : !d.b2.hasKey);
+            // Vibe Files' own bucket (the usual case: its bucket has Object Lock) unless the
+            // bucket above was chosen, or is the one in use now.
+            const own = vfOwn ?? (d.vibeFiles ? d.vibeFiles.own === true : true);
+            // The saved key is kept for the same bucket: only a new bucket needs one typed.
+            const keyKept =
+              d.vibeFiles?.own === true &&
+              vfB2.endpoint.trim() === (d.vibeFiles.endpoint ?? '') &&
+              vfB2.bucket.trim() === (d.vibeFiles.bucket ?? '');
             const ownReady =
-              vfB2.endpoint.trim() && vfB2.bucket.trim() && vfB2.keyId.trim() && vfB2.appKey.trim();
+              vfB2.endpoint.trim() &&
+              vfB2.bucket.trim() &&
+              vfB2.keyId.trim() &&
+              (vfB2.appKey.trim() || keyKept);
             return (
               <form
                 style={{ display: 'grid', gap: 8 }}
@@ -3996,7 +4018,17 @@ function Storage(): JSX.Element {
                   setVfSaved(false);
                   void actAt('vf')('/v1/settings/storage/vibe-files', {
                     method: 'PUT',
-                    body: own ? { passphrase: phrase, bucket: vfB2 } : { passphrase: phrase },
+                    body: own
+                      ? {
+                          passphrase: phrase,
+                          bucket: {
+                            endpoint: vfB2.endpoint,
+                            bucket: vfB2.bucket,
+                            keyId: vfB2.keyId,
+                            ...(vfB2.appKey.trim() ? { appKey: vfB2.appKey } : {}),
+                          },
+                        }
+                      : { passphrase: phrase },
                   }).then((r) => {
                     if (r) {
                       setPhrase('');
@@ -4021,6 +4053,16 @@ function Storage(): JSX.Element {
                     ? `The portal can open the documents of Vibe Files’ cabinet ${d.vibeFiles.cabinetId}, in the bucket ${d.vibeFiles.bucket ?? ''}${d.vibeFiles.own ? ' (Vibe Files’ own, only read)' : ''}.`
                     : 'Not set up: the portal has only the names Vibe Files sends it.'}
                 </span>
+                {d.vibeFiles?.problem && (
+                  <Problem
+                    text={staffSay(
+                      new StaffApiError(
+                        409,
+                        d.vibeFiles.problem === 'vf_key' ? 'vf_follow_key' : 'vf_follow_unread',
+                      ),
+                    )}
+                  />
+                )}
                 <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 6 }}>
                   <legend style={{ padding: 0, marginBottom: 4 }}>
                     Where Vibe Files’ documents are
@@ -4034,8 +4076,9 @@ function Storage(): JSX.Element {
                       onChange={() => setVfOwn(false)}
                     />
                     <span>
-                      In the bucket above{d.b2.hasKey ? '' : ' (not set up)'}. Changing that bucket
-                      forgets the key.
+                      {d.b2.hasKey
+                        ? 'In the bucket above. Changing that bucket forgets the key.'
+                        : 'In the bucket above (not set up).'}
                     </span>
                   </label>
                   <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -4072,7 +4115,11 @@ function Storage(): JSX.Element {
                       onChange={(e) => setVfB2({ ...vfB2, keyId: e.target.value })}
                     />
                     <Input
-                      label="Vibe Files’ bucket: application key"
+                      label={
+                        keyKept
+                          ? 'Vibe Files’ bucket: application key (leave empty to keep the saved one)'
+                          : 'Vibe Files’ bucket: application key'
+                      }
                       name="vfAppKey"
                       type="password"
                       autoComplete="new-password"
@@ -4106,7 +4153,9 @@ function Storage(): JSX.Element {
                       onClick={() => {
                         if (
                           window.confirm(
-                            'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay; no more can be added from B2.',
+                            d.vibeFiles?.own
+                              ? 'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay, and are no longer updated from B2; no more can be added from B2. Vibe Files’ bucket and its key are forgotten too.'
+                              : 'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay, and are no longer updated from B2; no more can be added from B2.',
                           )
                         ) {
                           setVfSaved(false);
