@@ -475,6 +475,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         .returning({ id: schema.portalInvitation.id });
       if (!inv) throw new Error('invitation insert returned nothing');
       // P98: the files chosen for the invitation(s) it replaces go with it (Resend).
+      let filesWaiting = false;
       if (replaced.length) {
         const kept = await ctx.db
           .select({
@@ -491,6 +492,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           );
         const seen = new Set<string>();
         const rows = kept.filter((k) => !seen.has(k.fileId) && seen.add(k.fileId));
+        filesWaiting = rows.length > 0;
         if (rows.length) {
           await ctx.db
             .insert(schema.invitationFile)
@@ -513,6 +515,9 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           `${firm} invites you to its client portal`,
           `${firm} has invited you to its client portal for ${client.displayName}, where you can ` +
             `get files from the firm and send files to it.\n\n` +
+            // Files were chosen for them while an earlier invitation waited (owner
+            // 2026-11-17): said, with no name or count of them.
+            (filesWaiting ? 'Files are waiting for you there.\n\n' : '') +
             `Accept the invitation (within ${INVITE_DAYS} days): ${link}`,
         ),
       );

@@ -123,9 +123,15 @@ describe('files chosen for someone invited (P98)', () => {
       (await staff.get('/api/staff/v1/people/list?q=joe').expect(200)).body.invited,
     ).toHaveLength(1);
 
-    // Resent: the new invitation has the same files chosen.
+    // The first invitation said nothing of files: none could be chosen before it existed.
+    expect(w.notes.last('joe@example.test').body).not.toContain('Files are waiting');
+    // Resent: the new invitation has the same files chosen, and its message says files wait
+    // (no name, no count).
     const again = await invite(CLIENT, 'joe@example.test', 'Joe Smith');
     expect(again).not.toBe(inv);
+    const mail = w.notes.last('joe@example.test').body;
+    expect(mail).toContain('Files are waiting for you there.');
+    expect(mail).not.toContain('Return.pdf');
     list = await filesOf(CLIENT);
     expect(list.find((f) => f.name === 'Return.pdf')?.invites).toEqual([again]);
     // The old one takes no more files.

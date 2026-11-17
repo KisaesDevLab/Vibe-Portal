@@ -529,8 +529,10 @@ working. Both ask first. An invitation that expired stays listed until it is res
 **Files for someone who has not accepted yet.** Under **Files on the portal**, tick the files,
 and in the bar that appears tick the invited person under **For:** (their name, with
 **(invited)**), then press **Show to them**. The file's row then says it is chosen for them.
-They are told nothing of the files yet; when they accept the invitation, the files are on their
-page at once, marked **New**. The choices follow a **Resend**; **Delete** drops them, and a file
+They are told nothing of the files then; when they accept the invitation, the files are on their
+page at once, marked **New**, with no further email. To tell them files are waiting, press
+**Resend** after choosing: the new invitation adds the line "Files are waiting for you there."
+(no file names). The choices follow a **Resend**; **Delete** drops them, and a file
 removed from the portal meanwhile is left out.
 
 **People** lists only those who can sign in, so someone invited is not among them until they
