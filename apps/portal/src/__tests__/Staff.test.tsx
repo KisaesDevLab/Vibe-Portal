@@ -336,6 +336,69 @@ describe('staff page', () => {
     );
   });
 
+  it('client page: a waiting invitation can be resent or deleted', async () => {
+    const id = CLIENT.id;
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/clients': { body: { clients: [CLIENT] } },
+      [`/v1/clients/${id}/users`]: {
+        body: {
+          users: [],
+          invitations: [
+            {
+              invitationId: 'i1',
+              name: 'Jane Smith',
+              email: 'jane@example.test',
+              phone: null,
+              roleLabel: 'Spouse',
+              expiresAt: '2026-11-20T10:00:00Z',
+              status: 'expired',
+            },
+          ],
+        },
+      },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      [`POST /v1/clients/${id}/invites`]: { status: 201, body: { invitationId: 'i2' } },
+      [`DELETE /v1/clients/${id}/invites/i1`]: { body: { ok: true } },
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    at(`/staff/clients/${id}`);
+    const resend = await screen.findByRole('button', {
+      name: 'Resend the invitation to jane@example.test',
+    });
+    // Not confirmed: nothing is sent.
+    fireEvent.click(resend);
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(resend);
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path.endsWith('/invites'))?.body).toEqual({
+        email: 'jane@example.test',
+        name: 'Jane Smith',
+        roleLabel: 'Spouse',
+      }),
+    );
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'A new invitation was sent to jane@example.test.',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete the invitation to jane@example.test' }),
+    );
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === 'DELETE' && c.path === `/v1/clients/${id}/invites/i1`),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(
+        'The invitation to jane@example.test was deleted.',
+      ),
+    );
+  });
+
   it('approves an access request for the chosen client', async () => {
     const calls = serve({
       '/auth/me': ME,

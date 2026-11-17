@@ -531,6 +531,8 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   const [inv, setInv] = useState({ email: '', phone: '', name: '', roleLabel: '' });
   /** The invite form, shown only after "Invite someone" is pressed (P54). */
   const [inviting, setInviting] = useState(false);
+  /** What Resend or Delete on a waiting invitation did. */
+  const [invNote, setInvNote] = useState('');
   const label = (u: PortalUser): string => u.name || u.email || u.phone || '?';
   const head = useLoad<ClientRow>(`/v1/clients/${id}`);
   const uploads = useLoad<{ uploads: UploadRow[] }>(`/v1/uploads?clientId=${id}`);
@@ -626,21 +628,67 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                   : `invited until ${when(i.expiresAt)}`}
               </td>
               <td style={td}>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  aria-label={`Withdraw the invitation to ${i.email ?? i.phone ?? ''}`}
-                  onClick={() =>
-                    void act(`/v1/clients/${id}/invites/${i.invitationId}`, { method: 'DELETE' })
-                  }
-                >
-                  Withdraw
-                </Button>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {/* A new invitation to the same contact replaces this one: a new link, and
+                      the full time to accept it again. */}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={`Resend the invitation to ${i.email ?? i.phone ?? ''}`}
+                    onClick={() => {
+                      const to = i.email ?? i.phone ?? '';
+                      if (
+                        !window.confirm(
+                          `Send ${to} a new invitation? The link they have now stops working.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setInvNote('');
+                      const again = {
+                        ...(i.email ? { email: i.email } : {}),
+                        ...(i.phone ? { phone: i.phone } : {}),
+                        name: i.name,
+                        roleLabel: i.roleLabel,
+                      };
+                      void act(`/v1/clients/${id}/invites`, { body: again }).then((r) => {
+                        if (r) setInvNote(`A new invitation was sent to ${to}.`);
+                      });
+                    }}
+                  >
+                    Resend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={`Delete the invitation to ${i.email ?? i.phone ?? ''}`}
+                    onClick={() => {
+                      const to = i.email ?? i.phone ?? '';
+                      if (
+                        !window.confirm(
+                          `Delete the invitation to ${to}? The link they were sent stops working.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setInvNote('');
+                      void act(`/v1/clients/${id}/invites/${i.invitationId}`, {
+                        method: 'DELETE',
+                      }).then((r) => {
+                        if (r) setInvNote(`The invitation to ${to} was deleted.`);
+                      });
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </td>
             </tr>
           ))}
         </Table>
+        {invNote && <p role="status">{invNote}</p>}
         {!inviting && (
           <div style={{ marginTop: 12 }}>
             <Button variant="secondary" onClick={() => setInviting(true)}>
