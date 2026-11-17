@@ -164,7 +164,8 @@ function pushChange(
   access: VfAccess,
   clientId: string,
   docId: string,
-  body: string,
+  /** Null: the document was deleted in the cabinet (its tombstone stays in the segment). */
+  body: string | null,
   rename?: string,
 ): void {
   const at = (k: string): string => `${access.cabinetId}/${k}`;
@@ -178,16 +179,31 @@ function pushChange(
   const old = `manifest/clients/${clientId}/${head.segments[clientId]}-${head.segment_writers[clientId]}`;
   const seg = JSON.parse(open(access, bucket.vfItems.get(at(old))!, old).toString()) as {
     segment_rev: number;
-    documents: { doc_id: string; rel_path: string; hash: string; object: string; size: number }[];
+    documents: {
+      doc_id: string;
+      rel_path: string;
+      hash: string;
+      object: string;
+      size: number;
+      deleted_at?: string | null;
+    }[];
   };
-  const plain = Buffer.from(body);
   const d = seg.documents.find((x) => x.doc_id === docId)!;
-  d.hash = createHash('sha256').update(plain).digest('hex');
-  d.object = createHash('sha256').update(`name ${d.hash}`).digest('hex');
-  d.size = plain.length;
-  if (rename) d.rel_path = d.rel_path.replace(/[^/]+$/, rename);
-  const object = `objects/${d.object.slice(0, 2)}/${d.object}`;
-  bucket.vfItems.set(at(object), seal(access, plain, object));
+  if (body === null && rename === 'no entry') {
+    // Taken out of B2, or moved to another client: the segment no longer has it at all.
+    seg.documents = seg.documents.filter((x) => x.doc_id !== docId);
+  } else if (body === null) {
+    d.deleted_at = '2026-11-17T12:00:00Z';
+  } else {
+    const plain = Buffer.from(body);
+    d.hash = createHash('sha256').update(plain).digest('hex');
+    d.object = createHash('sha256').update(`name ${d.hash}`).digest('hex');
+    d.size = plain.length;
+    d.deleted_at = null;
+    if (rename) d.rel_path = d.rel_path.replace(/[^/]+$/, rename);
+    const object = `objects/${d.object.slice(0, 2)}/${d.object}`;
+    bucket.vfItems.set(at(object), seal(access, plain, object));
+  }
   head.rev += 1;
   head.segments[clientId] = head.rev;
   seg.segment_rev = head.rev;
@@ -295,6 +311,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       bucket: B2.bucket,
       keyId: B2.keyId,
       problem: null,
+      removedLately: 0,
     });
     // Neither the passphrase nor the key goes back to the page or into History.
     expect(JSON.stringify(saved.body)).not.toContain(EXPECT.passphrase);
@@ -400,6 +417,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       bucket: own.bucket,
       keyId: own.keyId,
       problem: null,
+      removedLately: 0,
     });
     expect(JSON.stringify(saved.body)).not.toContain(own.appKey);
     // The passphrase entered again for the same bucket: its saved key is kept; another bucket
@@ -455,7 +473,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     expect((await hers()).isNew).toBe(false);
 
     // Nothing changed in the bucket: nothing is replaced, and a second look reads nothing more.
-    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
 
     // Vibe Files pushes a corrected W-2 under a new name.
     const access = await unlock(bucket, EXPECT.passphrase);
@@ -467,7 +485,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       'w2 2025 corrected',
       'W-2 Northwind corrected.pdf',
     );
-    expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, removed: 0, failed: 0 });
     expect(await hers()).toEqual(
       expect.objectContaining({ name: 'W-2 Northwind corrected.pdf', isNew: true, size: 17 }),
     );
@@ -482,6 +500,9 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     expect(replaced[0]).toEqual(
       expect.objectContaining({ actorKind: 'system', actor: 'Vibe Files’ B2', fileId }),
     );
+    // Marked new for her, but no notice is sent for an update the portal made by itself.
+    const queued = await w.t.db.select().from(schema.notifyQueue);
+    expect(queued.filter((q) => q.fileId === fileId).map((q) => q.kind)).toEqual(['shared']);
     // The client's History says who did it, and the file's row that it follows B2.
     const hist = (await boss.get(`/api/staff/v1/clients/${ANDERSON.id}/history`).expect(200)).body
       .events as { kind: string; who: string }[];
@@ -494,12 +515,12 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     // new file.
     await mary.agent.get(`/api/portal/files/${fileId}/content`).expect(200);
     pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 2025 corrected', 'W-2 final.pdf');
-    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
     expect(await hers()).toEqual(expect.objectContaining({ name: 'W-2 final.pdf', isNew: false }));
     // The old stored copy is gone: one blob for one file.
     expect((await w.t.db.select().from(schema.files)).filter((f) => f.blobKey)).toHaveLength(1);
     // Looked at again with nothing new: nothing happens.
-    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
     expect(
       (await w.t.db.select().from(schema.events)).filter((e) => e.kind === 'replace'),
     ).toHaveLength(1);
@@ -508,7 +529,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     const [row] = await w.t.db.select().from(schema.files);
     await w.t.db.update(schema.files).set({ fromB2: false });
     pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 2025 corrected again');
-    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
     await w.t.db.update(schema.files).set({ fromB2: true });
 
     // The changed object damaged in the bucket: not taken, said in the log, tried again.
@@ -519,10 +540,10 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     const broken = Buffer.from(good);
     broken[broken.length - 1]! ^= 1;
     bucket.vfItems.set(key, broken);
-    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 1 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 1 });
     expect((await w.t.db.select().from(schema.files))[0]!.sha256).toBe(row!.sha256);
     bucket.vfItems.set(key, good);
-    expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, removed: 0, failed: 0 });
 
     // The client switched off: nothing of it follows.
     await w.firm('put', `/clients/${ANDERSON.id}`).send({
@@ -531,13 +552,13 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       active: false,
     });
     pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 while off');
-    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
     await w.firm('put', `/clients/${ANDERSON.id}`).send({
       clientCode: ANDERSON.code,
       displayName: ANDERSON.name,
       active: true,
     });
-    expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, removed: 0, failed: 0 });
 
     // Vibe Files shares a changed version of it: Vibe Files' from then on, not followed.
     const mine = Buffer.from('w2 shared from Vibe Files');
@@ -551,10 +572,10 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       .expect(200);
     expect((await w.t.db.select().from(schema.files))[0]!.fromB2).toBe(false);
     pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 pushed after that');
-    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
     await w.t.db.update(schema.files).set({ fromB2: true });
     forgetCompared();
-    expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, removed: 0, failed: 0 });
 
     // The sync key made anew in Vibe Files: nothing follows, and Settings says why.
     const head = `${EXPECT.cabinetId}/manifest/HEAD`;
@@ -574,10 +595,58 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       (await boss.get('/api/staff/v1/settings/storage').expect(200)).body.vibeFiles.problem,
     ).toBeNull();
 
+    // The document deleted in the cabinet (or taken out of B2): its copy leaves the portal, as
+    // if staff had removed it. One that Vibe Files replaced since is Vibe Files', and stays.
+    await w.t.db.update(schema.files).set({ fromB2: false });
+    pushChange(bucket, access, ANDERSON.id, W2.docId, null);
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    await w.t.db.update(schema.files).set({ fromB2: true });
+    forgetCompared();
+    // Not at the first look that finds it gone, nor a moment later: ten minutes on, if it is
+    // still gone.
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    // Back meanwhile (an older head for a moment, a delete undone): nothing is removed.
+    pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 back again');
+    w.later(10);
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, removed: 0, failed: 0 });
+    pushChange(bucket, access, ANDERSON.id, W2.docId, null);
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    w.later(10);
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 1, failed: 0 });
+    expect(
+      (await boss.get(`/api/staff/v1/files?clientId=${ANDERSON.id}`).expect(200)).body.files,
+    ).toEqual([]);
+    const [off] = await w.t.db.select().from(schema.files);
+    expect(off).toEqual(
+      expect.objectContaining({ removedBy: 'Vibe Files’ B2', blobKey: null, dekWrapped: null }),
+    );
+    const gone = (await boss.get(`/api/staff/v1/clients/${ANDERSON.id}/history`).expect(200)).body
+      .events as { kind: string; who: string }[];
+    expect(gone.find((e) => e.kind === 'remove')?.who).toBe('Vibe Files’ B2');
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    // Back in B2 (deleted by mistake, restored): staff add it again from the list.
+    pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 restored');
+    const again = await add(boss, W2.docId).expect(201);
+    expect(again.body.fileId).not.toBe(fileId);
+    const fileId2 = again.body.fileId as string;
+
     // Removed from the portal: it follows nothing any more.
-    await boss.delete(`/api/staff/v1/files/${fileId}`).expect(200);
+    await boss.delete(`/api/staff/v1/files/${fileId2}`).expect(200);
     pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 2025 once more');
-    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+
+    // Added once more, then taken out of B2 (no entry at all, not a tombstone): removed the
+    // same way, and Settings counts both.
+    const fileId3 = (await add(boss, W2.docId).expect(201)).body.fileId as string;
+    expect(fileId3).not.toBe(fileId2);
+    pushChange(bucket, access, ANDERSON.id, W2.docId, null, 'no entry');
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    w.later(10);
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 1, failed: 0 });
+    expect(
+      (await boss.get('/api/staff/v1/settings/storage').expect(200)).body.vibeFiles.removedLately,
+    ).toBe(2);
   });
 
   it('refuses a document larger than the portal takes, before fetching it', async () => {

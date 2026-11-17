@@ -8,8 +8,7 @@ import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
-/** The actor of what the portal does by itself from Vibe Files' bucket (files/vf-follow.ts). */
-export const FOLLOW_ACTOR = 'Vibe Files\u2019 B2';
+import { FOLLOW_ACTOR } from '../files/vf-follow';
 
 import type { Ctx } from '../context';
 import { checkWords } from '../portal/access-id';

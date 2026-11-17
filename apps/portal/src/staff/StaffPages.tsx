@@ -1161,7 +1161,7 @@ function ClientFiles({
           {f.contentUpdatedAt
             ? `Updated ${when(f.contentUpdatedAt)}`
             : `Shared ${when(f.sharedAt)} by ${f.sharedBy}`}
-          {f.fromB2 ? ' · Added from B2: updated by itself when it changes there' : ''}
+          {f.fromB2 ? ' · Added from B2: follows it' : ''}
         </small>
       </td>
       <td style={td}>
@@ -1495,7 +1495,7 @@ function CabinetFileList({
           <p>
             {`${count} ${count === 1 ? 'document' : 'documents'} in B2, ${here} on the portal. `}
             {canAdd
-              ? 'Add to portal puts a copy of a document on the portal, shown to nobody until you choose who sees it under Files. The copy is updated by itself when Vibe Files pushes a changed version to B2. '
+              ? 'Add to portal puts a copy of a document on the portal, shown to nobody until you choose who sees it under Files. The copy is updated by itself when Vibe Files pushes a changed version to B2, and removed from the portal when the document is deleted in Vibe Files or taken out of B2. '
               : 'Only the names are here: share a document from Vibe Files to put it on the portal. '}
             {load.data.listedAt && (
               <small style={{ color: tokens.color.textMuted }}>
@@ -3761,6 +3761,8 @@ interface StorageData {
     keyId?: string;
     /** Why the bucket could not be read at the portal's last look for changed documents. */
     problem?: string | null;
+    /** P95: files the portal removed by itself in the last 7 days (their document left B2). */
+    removedLately?: number;
   } | null;
   move: {
     to: 'local' | 'b2';
@@ -4041,18 +4043,23 @@ function Storage(): JSX.Element {
                 <strong>Vibe Files’ documents in B2</strong>
                 <span style={{ fontSize: 13 }}>
                   The portal can put a document Vibe Files has in B2 on the portal: a client’s page
-                  then has <strong>Add to portal</strong> on its documents in B2, and a document
-                  added that way is updated by itself when Vibe Files pushes a changed version. Vibe
-                  Files encrypts what it sends to B2, so the portal needs Vibe Files’ sync
-                  passphrase. With it, this appliance can open every document Vibe Files has in the
-                  bucket. The passphrase is checked and not kept; the key it opens is kept here,
-                  encrypted.
+                  then has <strong>Add to portal</strong> on its documents in B2. A document added
+                  that way is updated by itself when Vibe Files pushes a changed version, and
+                  removed from the portal when it leaves B2. Vibe Files encrypts what it sends to
+                  B2, so the portal needs Vibe Files’ sync passphrase. With it, this appliance can
+                  open every document Vibe Files has in the bucket. The passphrase is checked and
+                  not kept; the key it opens is kept here, encrypted.
                 </span>
                 <span>
                   {d.vibeFiles
                     ? `The portal can open the documents of Vibe Files’ cabinet ${d.vibeFiles.cabinetId}, in the bucket ${d.vibeFiles.bucket ?? ''}${d.vibeFiles.own ? ' (Vibe Files’ own, only read)' : ''}.`
                     : 'Not set up: the portal has only the names Vibe Files sends it.'}
                 </span>
+                {(d.vibeFiles?.removedLately ?? 0) > 0 && (
+                  <span>
+                    {`In the last 7 days the portal removed ${d.vibeFiles?.removedLately} ${d.vibeFiles?.removedLately === 1 ? 'file' : 'files'} by itself, because the document was deleted, moved to another client or taken out of B2 in Vibe Files. History lists each (Removed a file, by Vibe Files’ B2).`}
+                  </span>
+                )}
                 {d.vibeFiles?.problem && (
                   <Problem
                     text={staffSay(
