@@ -3829,155 +3829,156 @@ function Storage(): JSX.Element {
       void act('/v1/settings/storage/move', { method: 'POST', body: { to } });
     }
   };
-  return (
-    <Card title="Storage">
-      <Status load={s} what="the storage settings" />
-      <Problem text={error} />
-      {d && (
-        <div style={{ display: 'grid', gap: 12, maxWidth: 520 }}>
-          <p style={{ margin: 0 }}>
-            Shared files and client uploads are stored <strong>{PLACE[d.storage]}</strong>
-            {d.bothInUse && !running
-              ? ', and some still in the other place: move again to finish'
-              : ''}
-            . They are encrypted with the firm key before they are stored, wherever that is. Keep
-            the appliance backup of the firm key: without it no file can be opened.
-          </p>
-          {d.move && (
-            <span role="status" className="visually-hidden">
-              {d.move.state === 'requested' || d.move.state === 'running'
-                ? `Moving ${PLACE[d.move.to]}.`
-                : d.move.state === 'done'
-                  ? `Moved ${PLACE[d.move.to]}.`
-                  : `The move ${PLACE[d.move.to]} stopped.`}
-            </span>
-          )}
-          {d.move && (
-            <p style={{ margin: 0 }}>
-              {d.move.state === 'requested' &&
-                `Moving ${PLACE[d.move.to]}: ${d.move.attempts ? 'starting again after a restart' : 'starting'}…`}
-              {d.move.state === 'running' &&
-                `Moving ${PLACE[d.move.to]}: ${d.move.copied ?? 0} of ${d.move.total ?? '…'} files checked.`}
-              {d.move.state === 'done' &&
-                `Moved ${PLACE[d.move.to]} ${when(d.move.finishedAt ?? null)} (${d.move.total ?? 0} files), asked by ${d.move.by}.`}
-              {d.move.state === 'failed' &&
-                `The move ${PLACE[d.move.to]} stopped: ${d.move.error ?? 'unknown'}. Nothing is lost; move again to finish.`}
-              {d.move.state === 'interrupted' &&
-                `The move ${PLACE[d.move.to]} was cut off by restarts ${d.move.attempts ?? 1} times, so it no longer starts again by itself. Nothing is lost; move again to finish.`}
-            </p>
-          )}
-          {d.note?.refused && (
-            <p role="alert" style={{ margin: 0 }}>
-              The daily check found {d.note.refused.count} of {d.note.refused.total} stored files
-              named by no file or upload, too many to be leftovers, so none was deleted. This
-              happens when the database is older than the files (a backup restored): ask for help
-              before moving files.
-            </p>
-          )}
-          {d.note?.otherBucket && (
-            <p role="alert" style={{ margin: 0 }}>
-              The bucket carries another portal&rsquo;s mark, so the daily check for leftover files
-              does not run on it.
-            </p>
-          )}
-          {d.storage === 'b2' && (
-            <div style={{ display: 'grid', gap: 4 }}>
-              <span>
-                A copy of the portal&rsquo;s database, encrypted, goes to the bucket every hour:
-                with the appliance&rsquo;s firm key file it is enough to get every file back.{' '}
-                {d.note?.snapshotAt
-                  ? `Last sent ${when(d.note.snapshotAt)}.`
-                  : 'None has been sent yet.'}
-              </span>
-              {d.note?.snapshotError && (
-                <span role="alert">The last one failed: {d.note.snapshotError}</span>
-              )}
-              <div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={busy || running}
-                  onClick={() => void act('/v1/settings/storage/snapshot', { method: 'POST' })}
-                >
-                  Send a database copy now
-                </Button>
-              </div>
-            </div>
-          )}
+  const vfForm = d
+    ? (() => {
+        // Vibe Files' own bucket (the usual case: its bucket has Object Lock) unless the
+        // bucket above was chosen, or is the one in use now.
+        const own = vfOwn ?? (d.vibeFiles ? d.vibeFiles.own === true : true);
+        // The saved key is kept for the same bucket: only a new bucket needs one typed.
+        const keyKept =
+          d.vibeFiles?.own === true &&
+          vfB2.endpoint.trim() === (d.vibeFiles.endpoint ?? '') &&
+          vfB2.bucket.trim() === (d.vibeFiles.bucket ?? '');
+        const ownReady =
+          vfB2.endpoint.trim() &&
+          vfB2.bucket.trim() &&
+          vfB2.keyId.trim() &&
+          (vfB2.appKey.trim() || keyKept);
+        return (
           <form
             style={{ display: 'grid', gap: 8 }}
             onSubmit={(e) => {
               e.preventDefault();
-              setTested(false);
-              const { appKey, ...rest } = b2;
-              void actAt('b2')('/v1/settings/storage/b2', {
+              setVfSaved(false);
+              void actAt('vf')('/v1/settings/storage/vibe-files', {
                 method: 'PUT',
-                body: appKey ? { ...rest, appKey } : rest,
+                body: own
+                  ? {
+                      passphrase: phrase,
+                      bucket: {
+                        endpoint: vfB2.endpoint,
+                        bucket: vfB2.bucket,
+                        keyId: vfB2.keyId,
+                        ...(vfB2.appKey.trim() ? { appKey: vfB2.appKey } : {}),
+                      },
+                    }
+                  : { passphrase: phrase },
               }).then((r) => {
-                if (r) setB2((v) => ({ ...v, appKey: '' }));
+                if (r) {
+                  setPhrase('');
+                  setVfB2((v) => ({ ...v, appKey: '' }));
+                  setVfSaved(true);
+                }
               });
             }}
           >
-            <strong>Backblaze B2 bucket</strong>
             <span style={{ fontSize: 13 }}>
-              Use a bucket for the portal alone, without Object Lock (or the one Vibe Files’ B2 sync
-              uses, if it has no Object Lock: each keeps to its own folders in it), and an
-              application key limited to it that may read, write, list and delete files. Saving
-              checks the bucket with a small test file first.
+              The portal can put a document Vibe Files has in B2 on the portal: a client’s page then
+              has <strong>Add to portal</strong> on its documents in B2. A document added that way
+              is updated by itself when Vibe Files pushes a changed version, and removed from the
+              portal when it leaves B2. Vibe Files encrypts what it sends to B2, so the portal needs
+              Vibe Files’ sync passphrase. With it, this appliance can open every document Vibe
+              Files has in the bucket. The passphrase is checked and not kept; the key it opens is
+              kept here, encrypted.
             </span>
-            <Input
-              label="Endpoint (on the bucket's page, e.g. s3.us-west-004.backblazeb2.com)"
-              name="b2Endpoint"
-              value={b2.endpoint}
-              disabled={locked}
-              onChange={(e) => setB2({ ...b2, endpoint: e.target.value })}
-            />
-            <Input
-              label="Bucket name"
-              name="b2Bucket"
-              value={b2.bucket}
-              disabled={locked}
-              onChange={(e) => setB2({ ...b2, bucket: e.target.value })}
-            />
-            <Input
-              label="Key ID"
-              name="b2KeyId"
-              value={b2.keyId}
-              onChange={(e) => setB2({ ...b2, keyId: e.target.value })}
-            />
+            <span>
+              {d.vibeFiles
+                ? `The portal can open Vibe Files’ documents in the bucket ${d.vibeFiles.bucket ?? ''}${d.vibeFiles.own ? ' (Vibe Files’ own, only read)' : ''}.`
+                : 'Not set up: the portal has only the names Vibe Files sends it.'}
+            </span>
+            {(d.vibeFiles?.removedLately ?? 0) > 0 && (
+              <span>
+                {`In the last 7 days the portal removed ${d.vibeFiles?.removedLately} ${d.vibeFiles?.removedLately === 1 ? 'file' : 'files'} by itself, because the document was deleted, moved to another client or taken out of B2 in Vibe Files. History lists each (Removed a file, by Vibe Files’ B2).`}
+              </span>
+            )}
+            {d.vibeFiles?.problem && (
+              <Problem
+                text={staffSay(
+                  new StaffApiError(
+                    409,
+                    d.vibeFiles.problem === 'vf_key' ? 'vf_follow_key' : 'vf_follow_unread',
+                  ),
+                )}
+              />
+            )}
+            <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 6 }}>
+              <legend style={{ padding: 0, marginBottom: 4 }}>
+                Where Vibe Files’ documents are
+              </legend>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="radio"
+                  name="vfWhere"
+                  checked={!own}
+                  disabled={!d.b2.hasKey}
+                  onChange={() => setVfOwn(false)}
+                />
+                <span>
+                  {d.b2.hasKey
+                    ? 'In the bucket above. Changing that bucket forgets the key.'
+                    : 'In the bucket above (not set up).'}
+                </span>
+              </label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input type="radio" name="vfWhere" checked={own} onChange={() => setVfOwn(true)} />
+                <span>
+                  In a bucket of Vibe Files’ own. The portal only reads it, so a bucket with Object
+                  Lock will do, and a key that may only read and list files.
+                </span>
+              </label>
+            </fieldset>
+            {own && (
+              <>
+                <Input
+                  label="Vibe Files’ bucket: endpoint (e.g. s3.us-west-004.backblazeb2.com)"
+                  name="vfEndpoint"
+                  value={vfB2.endpoint}
+                  onChange={(e) => setVfB2({ ...vfB2, endpoint: e.target.value })}
+                />
+                <Input
+                  label="Vibe Files’ bucket: name"
+                  name="vfBucket"
+                  value={vfB2.bucket}
+                  onChange={(e) => setVfB2({ ...vfB2, bucket: e.target.value })}
+                />
+                <Input
+                  label="Vibe Files’ bucket: key ID"
+                  name="vfKeyId"
+                  value={vfB2.keyId}
+                  onChange={(e) => setVfB2({ ...vfB2, keyId: e.target.value })}
+                />
+                <Input
+                  label={
+                    keyKept
+                      ? 'Vibe Files’ bucket: application key (leave empty to keep the saved one)'
+                      : 'Vibe Files’ bucket: application key'
+                  }
+                  name="vfAppKey"
+                  type="password"
+                  autoComplete="new-password"
+                  value={vfB2.appKey}
+                  onChange={(e) => setVfB2({ ...vfB2, appKey: e.target.value })}
+                />
+              </>
+            )}
             <Input
               label={
-                d.b2.hasKey
-                  ? 'Application key (leave empty to keep the saved one)'
-                  : 'Application key'
+                d.vibeFiles
+                  ? 'Vibe Files’ sync passphrase (to enter it again)'
+                  : 'Vibe Files’ sync passphrase'
               }
-              name="b2AppKey"
+              name="vfPassphrase"
               type="password"
-              autoComplete="off"
-              value={b2.appKey}
-              onChange={(e) => setB2({ ...b2, appKey: e.target.value })}
+              autoComplete="new-password"
+              value={phrase}
+              onChange={(e) => setPhrase(e.target.value)}
             />
-            <Problem text={errorAt('b2')} />
+            <Problem text={errorAt('vf')} />
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Button type="submit" disabled={busy || running}>
-                {busyAt === 'b2' ? 'Checking the bucket…' : 'Check and save'}
+              <Button type="submit" disabled={busy || !phrase || (own && !ownReady)}>
+                {busyAt === 'vf' ? 'Checking…' : 'Check and save the passphrase'}
               </Button>
-              {d.b2.hasKey && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => {
-                    setTested(false);
-                    void act('/v1/settings/storage/test', { method: 'POST' }).then((r) => {
-                      if (r) setTested(true);
-                    });
-                  }}
-                >
-                  Test
-                </Button>
-              )}
-              {d.b2.hasKey && !locked && (
+              {d.vibeFiles && (
                 <Button
                   type="button"
                   variant="secondary"
@@ -3985,237 +3986,241 @@ function Storage(): JSX.Element {
                   onClick={() => {
                     if (
                       window.confirm(
-                        'Remove the B2 bucket settings? The bucket itself is not emptied.',
+                        d.vibeFiles?.own
+                          ? 'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay, and are no longer updated from B2; no more can be added from B2. Vibe Files’ bucket and its key are forgotten too.'
+                          : 'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay, and are no longer updated from B2; no more can be added from B2.',
                       )
                     ) {
-                      void act('/v1/settings/storage/b2', { method: 'DELETE' });
+                      setVfSaved(false);
+                      void actAt('vf')('/v1/settings/storage/vibe-files', { method: 'DELETE' });
                     }
                   }}
                 >
-                  Remove bucket
+                  Remove
                 </Button>
               )}
             </div>
-            {tested && <p role="status">The bucket works with the saved key.</p>}
+            {vfSaved && (
+              <p role="status">
+                Saved. A client’s page now has Add to portal on its documents in B2.
+              </p>
+            )}
           </form>
-          {(() => {
-            // Vibe Files' own bucket (the usual case: its bucket has Object Lock) unless the
-            // bucket above was chosen, or is the one in use now.
-            const own = vfOwn ?? (d.vibeFiles ? d.vibeFiles.own === true : true);
-            // The saved key is kept for the same bucket: only a new bucket needs one typed.
-            const keyKept =
-              d.vibeFiles?.own === true &&
-              vfB2.endpoint.trim() === (d.vibeFiles.endpoint ?? '') &&
-              vfB2.bucket.trim() === (d.vibeFiles.bucket ?? '');
-            const ownReady =
-              vfB2.endpoint.trim() &&
-              vfB2.bucket.trim() &&
-              vfB2.keyId.trim() &&
-              (vfB2.appKey.trim() || keyKept);
-            return (
-              <form
-                style={{ display: 'grid', gap: 8 }}
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setVfSaved(false);
-                  void actAt('vf')('/v1/settings/storage/vibe-files', {
-                    method: 'PUT',
-                    body: own
-                      ? {
-                          passphrase: phrase,
-                          bucket: {
-                            endpoint: vfB2.endpoint,
-                            bucket: vfB2.bucket,
-                            keyId: vfB2.keyId,
-                            ...(vfB2.appKey.trim() ? { appKey: vfB2.appKey } : {}),
-                          },
-                        }
-                      : { passphrase: phrase },
-                  }).then((r) => {
-                    if (r) {
-                      setPhrase('');
-                      setVfB2((v) => ({ ...v, appKey: '' }));
-                      setVfSaved(true);
-                    }
-                  });
-                }}
-              >
-                <strong>Vibe Files’ documents in B2</strong>
-                <span style={{ fontSize: 13 }}>
-                  The portal can put a document Vibe Files has in B2 on the portal: a client’s page
-                  then has <strong>Add to portal</strong> on its documents in B2. A document added
-                  that way is updated by itself when Vibe Files pushes a changed version, and
-                  removed from the portal when it leaves B2. Vibe Files encrypts what it sends to
-                  B2, so the portal needs Vibe Files’ sync passphrase. With it, this appliance can
-                  open every document Vibe Files has in the bucket. The passphrase is checked and
-                  not kept; the key it opens is kept here, encrypted.
-                </span>
+        );
+      })()
+    : null;
+  return (
+    <>
+      <Card title="Storage">
+        <Status load={s} what="the storage settings" />
+        <Problem text={error} />
+        {d && (
+          <div style={{ display: 'grid', gap: 12, maxWidth: 520 }}>
+            <p style={{ margin: 0 }}>
+              Shared files and client uploads are stored <strong>{PLACE[d.storage]}</strong>
+              {d.bothInUse && !running
+                ? ', and some still in the other place: move again to finish'
+                : ''}
+              . They are encrypted with the firm key before they are stored, wherever that is. Keep
+              the appliance backup of the firm key: without it no file can be opened.
+            </p>
+            {d.move && (
+              <span role="status" className="visually-hidden">
+                {d.move.state === 'requested' || d.move.state === 'running'
+                  ? `Moving ${PLACE[d.move.to]}.`
+                  : d.move.state === 'done'
+                    ? `Moved ${PLACE[d.move.to]}.`
+                    : `The move ${PLACE[d.move.to]} stopped.`}
+              </span>
+            )}
+            {d.move && (
+              <p style={{ margin: 0 }}>
+                {d.move.state === 'requested' &&
+                  `Moving ${PLACE[d.move.to]}: ${d.move.attempts ? 'starting again after a restart' : 'starting'}…`}
+                {d.move.state === 'running' &&
+                  `Moving ${PLACE[d.move.to]}: ${d.move.copied ?? 0} of ${d.move.total ?? '…'} files checked.`}
+                {d.move.state === 'done' &&
+                  `Moved ${PLACE[d.move.to]} ${when(d.move.finishedAt ?? null)} (${d.move.total ?? 0} files), asked by ${d.move.by}.`}
+                {d.move.state === 'failed' &&
+                  `The move ${PLACE[d.move.to]} stopped: ${d.move.error ?? 'unknown'}. Nothing is lost; move again to finish.`}
+                {d.move.state === 'interrupted' &&
+                  `The move ${PLACE[d.move.to]} was cut off by restarts ${d.move.attempts ?? 1} times, so it no longer starts again by itself. Nothing is lost; move again to finish.`}
+              </p>
+            )}
+            {d.note?.refused && (
+              <p role="alert" style={{ margin: 0 }}>
+                The daily check found {d.note.refused.count} of {d.note.refused.total} stored files
+                named by no file or upload, too many to be leftovers, so none was deleted. This
+                happens when the database is older than the files (a backup restored): ask for help
+                before moving files.
+              </p>
+            )}
+            {d.note?.otherBucket && (
+              <p role="alert" style={{ margin: 0 }}>
+                The bucket carries another portal&rsquo;s mark, so the daily check for leftover
+                files does not run on it.
+              </p>
+            )}
+            {d.storage === 'b2' && (
+              <div style={{ display: 'grid', gap: 4 }}>
                 <span>
-                  {d.vibeFiles
-                    ? `The portal can open Vibe Files’ documents in the bucket ${d.vibeFiles.bucket ?? ''}${d.vibeFiles.own ? ' (Vibe Files’ own, only read)' : ''}.`
-                    : 'Not set up: the portal has only the names Vibe Files sends it.'}
+                  A copy of the portal&rsquo;s database, encrypted, goes to the bucket every hour:
+                  with the appliance&rsquo;s firm key file it is enough to get every file back.{' '}
+                  {d.note?.snapshotAt
+                    ? `Last sent ${when(d.note.snapshotAt)}.`
+                    : 'None has been sent yet.'}
                 </span>
-                {(d.vibeFiles?.removedLately ?? 0) > 0 && (
-                  <span>
-                    {`In the last 7 days the portal removed ${d.vibeFiles?.removedLately} ${d.vibeFiles?.removedLately === 1 ? 'file' : 'files'} by itself, because the document was deleted, moved to another client or taken out of B2 in Vibe Files. History lists each (Removed a file, by Vibe Files’ B2).`}
-                  </span>
+                {d.note?.snapshotError && (
+                  <span role="alert">The last one failed: {d.note.snapshotError}</span>
                 )}
-                {d.vibeFiles?.problem && (
-                  <Problem
-                    text={staffSay(
-                      new StaffApiError(
-                        409,
-                        d.vibeFiles.problem === 'vf_key' ? 'vf_follow_key' : 'vf_follow_unread',
-                      ),
-                    )}
-                  />
-                )}
-                <fieldset style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 6 }}>
-                  <legend style={{ padding: 0, marginBottom: 4 }}>
-                    Where Vibe Files’ documents are
-                  </legend>
-                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="radio"
-                      name="vfWhere"
-                      checked={!own}
-                      disabled={!d.b2.hasKey}
-                      onChange={() => setVfOwn(false)}
-                    />
-                    <span>
-                      {d.b2.hasKey
-                        ? 'In the bucket above. Changing that bucket forgets the key.'
-                        : 'In the bucket above (not set up).'}
-                    </span>
-                  </label>
-                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                    <input
-                      type="radio"
-                      name="vfWhere"
-                      checked={own}
-                      onChange={() => setVfOwn(true)}
-                    />
-                    <span>
-                      In a bucket of Vibe Files’ own. The portal only reads it, so a bucket with
-                      Object Lock will do, and a key that may only read and list files.
-                    </span>
-                  </label>
-                </fieldset>
-                {own && (
-                  <>
-                    <Input
-                      label="Vibe Files’ bucket: endpoint (e.g. s3.us-west-004.backblazeb2.com)"
-                      name="vfEndpoint"
-                      value={vfB2.endpoint}
-                      onChange={(e) => setVfB2({ ...vfB2, endpoint: e.target.value })}
-                    />
-                    <Input
-                      label="Vibe Files’ bucket: name"
-                      name="vfBucket"
-                      value={vfB2.bucket}
-                      onChange={(e) => setVfB2({ ...vfB2, bucket: e.target.value })}
-                    />
-                    <Input
-                      label="Vibe Files’ bucket: key ID"
-                      name="vfKeyId"
-                      value={vfB2.keyId}
-                      onChange={(e) => setVfB2({ ...vfB2, keyId: e.target.value })}
-                    />
-                    <Input
-                      label={
-                        keyKept
-                          ? 'Vibe Files’ bucket: application key (leave empty to keep the saved one)'
-                          : 'Vibe Files’ bucket: application key'
-                      }
-                      name="vfAppKey"
-                      type="password"
-                      autoComplete="new-password"
-                      value={vfB2.appKey}
-                      onChange={(e) => setVfB2({ ...vfB2, appKey: e.target.value })}
-                    />
-                  </>
-                )}
-                <Input
-                  label={
-                    d.vibeFiles
-                      ? 'Vibe Files’ sync passphrase (to enter it again)'
-                      : 'Vibe Files’ sync passphrase'
-                  }
-                  name="vfPassphrase"
-                  type="password"
-                  autoComplete="new-password"
-                  value={phrase}
-                  onChange={(e) => setPhrase(e.target.value)}
-                />
-                <Problem text={errorAt('vf')} />
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <Button type="submit" disabled={busy || !phrase || (own && !ownReady)}>
-                    {busyAt === 'vf' ? 'Checking…' : 'Check and save the passphrase'}
+                <div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={busy || running}
+                    onClick={() => void act('/v1/settings/storage/snapshot', { method: 'POST' })}
+                  >
+                    Send a database copy now
                   </Button>
-                  {d.vibeFiles && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={busy}
-                      onClick={() => {
-                        if (
-                          window.confirm(
-                            d.vibeFiles?.own
-                              ? 'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay, and are no longer updated from B2; no more can be added from B2. Vibe Files’ bucket and its key are forgotten too.'
-                              : 'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay, and are no longer updated from B2; no more can be added from B2.',
-                          )
-                        ) {
-                          setVfSaved(false);
-                          void actAt('vf')('/v1/settings/storage/vibe-files', { method: 'DELETE' });
-                        }
-                      }}
-                    >
-                      Remove
-                    </Button>
-                  )}
                 </div>
-                {vfSaved && (
-                  <p role="status">
-                    Saved. A client’s page now has Add to portal on its documents in B2.
-                  </p>
+              </div>
+            )}
+            <form
+              style={{ display: 'grid', gap: 8 }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                setTested(false);
+                const { appKey, ...rest } = b2;
+                void actAt('b2')('/v1/settings/storage/b2', {
+                  method: 'PUT',
+                  body: appKey ? { ...rest, appKey } : rest,
+                }).then((r) => {
+                  if (r) setB2((v) => ({ ...v, appKey: '' }));
+                });
+              }}
+            >
+              <strong>Backblaze B2 bucket</strong>
+              <span style={{ fontSize: 13 }}>
+                Use a bucket for the portal alone, without Object Lock (or the one Vibe Files’ B2
+                sync uses, if it has no Object Lock: each keeps to its own folders in it), and an
+                application key limited to it that may read, write, list and delete files. Saving
+                checks the bucket with a small test file first.
+              </span>
+              <Input
+                label="Endpoint (on the bucket's page, e.g. s3.us-west-004.backblazeb2.com)"
+                name="b2Endpoint"
+                value={b2.endpoint}
+                disabled={locked}
+                onChange={(e) => setB2({ ...b2, endpoint: e.target.value })}
+              />
+              <Input
+                label="Bucket name"
+                name="b2Bucket"
+                value={b2.bucket}
+                disabled={locked}
+                onChange={(e) => setB2({ ...b2, bucket: e.target.value })}
+              />
+              <Input
+                label="Key ID"
+                name="b2KeyId"
+                value={b2.keyId}
+                onChange={(e) => setB2({ ...b2, keyId: e.target.value })}
+              />
+              <Input
+                label={
+                  d.b2.hasKey
+                    ? 'Application key (leave empty to keep the saved one)'
+                    : 'Application key'
+                }
+                name="b2AppKey"
+                type="password"
+                autoComplete="off"
+                value={b2.appKey}
+                onChange={(e) => setB2({ ...b2, appKey: e.target.value })}
+              />
+              <Problem text={errorAt('b2')} />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Button type="submit" disabled={busy || running}>
+                  {busyAt === 'b2' ? 'Checking the bucket…' : 'Check and save'}
+                </Button>
+                {d.b2.hasKey && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      setTested(false);
+                      void act('/v1/settings/storage/test', { method: 'POST' }).then((r) => {
+                        if (r) setTested(true);
+                      });
+                    }}
+                  >
+                    Test
+                  </Button>
                 )}
-              </form>
-            );
-          })()}
-          {d.b2.hasKey && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {(d.storage !== 'b2' || d.bothInUse) && (
-                <Button
-                  disabled={busy || running}
-                  onClick={() =>
-                    move(
-                      'b2',
-                      'Move every stored file to the B2 bucket? The portal keeps working while it runs. Files are deleted from the appliance only once all of them are in the bucket.',
-                    )
-                  }
-                >
-                  Move files to B2
-                </Button>
-              )}
-              {(d.storage !== 'local' || d.bothInUse) && (
-                <Button
-                  variant="secondary"
-                  disabled={busy || running}
-                  onClick={() =>
-                    move(
-                      'local',
-                      'Move every stored file back to the appliance? Check it has room for them first. Files are deleted from the bucket only once all of them are on the appliance.',
-                    )
-                  }
-                >
-                  Move files back to the appliance
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
+                {d.b2.hasKey && !locked && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          'Remove the B2 bucket settings? The bucket itself is not emptied.',
+                        )
+                      ) {
+                        void act('/v1/settings/storage/b2', { method: 'DELETE' });
+                      }
+                    }}
+                  >
+                    Remove bucket
+                  </Button>
+                )}
+              </div>
+              {tested && <p role="status">The bucket works with the saved key.</p>}
+            </form>
+            {d.b2.hasKey && (
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                {(d.storage !== 'b2' || d.bothInUse) && (
+                  <Button
+                    disabled={busy || running}
+                    onClick={() =>
+                      move(
+                        'b2',
+                        'Move every stored file to the B2 bucket? The portal keeps working while it runs. Files are deleted from the appliance only once all of them are in the bucket.',
+                      )
+                    }
+                  >
+                    Move files to B2
+                  </Button>
+                )}
+                {(d.storage !== 'local' || d.bothInUse) && (
+                  <Button
+                    variant="secondary"
+                    disabled={busy || running}
+                    onClick={() =>
+                      move(
+                        'local',
+                        'Move every stored file back to the appliance? Check it has room for them first. Files are deleted from the bucket only once all of them are on the appliance.',
+                      )
+                    }
+                  >
+                    Move files back to the appliance
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+      {/* P96: apart from Storage, which is about the portal's own files: the bucket Vibe
+          Files syncs to was entered up there, where one with Object Lock is refused. */}
+      {vfForm && (
+        <Card title="Vibe Files’ documents in B2">
+          <div style={{ display: 'grid', gap: 12, maxWidth: 520 }}>{vfForm}</div>
+        </Card>
       )}
-    </Card>
+    </>
   );
 }
 

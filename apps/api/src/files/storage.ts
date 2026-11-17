@@ -91,7 +91,9 @@ export async function checkBucket(bucket: Bucket, installId: string): Promise<vo
   if ((await bucket.objectLock()) === true) {
     throw new BucketRefused(
       'Object Lock is on for this bucket, so files removed from the portal could not be ' +
-        'deleted from it. Use a bucket without Object Lock.',
+        'deleted from it. Use a bucket without Object Lock. If this is the bucket Vibe Files ' +
+        'syncs to, it is not needed here: enter it under Vibe Files’ documents in B2, further ' +
+        'down this page, where a bucket with Object Lock will do.',
     );
   }
   const mark = (await bucket.getNote(MARK))?.toString('utf8').trim();
