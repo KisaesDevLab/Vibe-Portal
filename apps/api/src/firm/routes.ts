@@ -9,6 +9,8 @@
 //   GET    /api/firm/v1/clients/:id/users
 //   GET    /api/firm/v1/clients/:id/cabinet-files           its documents in Vibe Files' B2 bucket (P90)
 //   POST   /api/firm/v1/clients/:id/invites                { email?, phone?, name, roleLabel? }
+//          staff page only (P101): `send: false` sends nothing and answers the invitation's
+//          `link`, once, for the staff member to pass on themselves (an email that is blocked)
 //   DELETE /api/firm/v1/clients/:id/invites/:invitationId
 //   PATCH  /api/firm/v1/clients/:id/users/:identityId      { active }
 //   GET    /api/firm/v1/people?q=…                          people on the portal, by name or contact (P63)
@@ -59,6 +61,8 @@ const InviteSchema = z.object({
   phone: z.string().trim().max(32).optional(),
   name: z.string().trim().max(120).default(''),
   roleLabel: z.string().trim().max(60).default(''),
+  /** P101: false makes the invitation without sending it: its link is answered instead. */
+  send: z.boolean().default(true),
 });
 const AccessSchema = z.object({ active: z.boolean() });
 // P63: at least two letters or digits, so the whole list is never read by accident.
@@ -403,6 +407,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           roleLabel: i.roleLabel,
           expiresAt: i.expiresAt,
           status: i.expiresAt > now ? 'invited' : 'expired',
+          // P101: nothing was sent for it: staff copied its link.
+          copied: i.copied,
         })),
       });
     }),
@@ -419,6 +425,9 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       if (input.phone && !phone) throw new HttpError(400, 'invalid_phone');
       const sendTo = email ?? phone;
       if (!sendTo) throw new HttpError(400, 'contact_required');
+      // P101: a link to copy is for a staff member in front of the staff page: it lets in
+      // whoever opens it, so it is handed to nobody else (not to Vibe Files' key).
+      if (!input.send && !req.staff) throw new HttpError(403, 'staff_only');
       const [client] = await ctx.db
         .select()
         .from(schema.clients)
@@ -452,6 +461,16 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         .from(schema.portalIdentity)
         .where(and(contactMatch, eq(schema.portalIdentity.status, 'disabled')));
       if (off) throw new HttpError(409, 'account_off');
+      // P101: a copied link shows nothing about who opens it, so it never leads into an
+      // account that exists: whoever held it would be signed in as that person, with all
+      // their clients. Someone with an account is given the client on their own page.
+      if (!input.send) {
+        const [account] = await ctx.db
+          .select({ id: schema.portalIdentity.id })
+          .from(schema.portalIdentity)
+          .where(contactMatch);
+        if (account) throw new HttpError(409, 'has_account');
+      }
 
       const actor = actorOf(req);
       const now = ctx.now();
@@ -506,6 +525,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
             tokenHash: sha256(token),
             invitedBy: actor.name,
             expiresAt,
+            copied: !input.send,
           })
           .returning({ id: schema.portalInvitation.id });
         if (!made) throw new Error('invitation insert returned nothing');
@@ -520,6 +540,15 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       const filesWaiting = kept.length > 0;
       const firm = await firmName(ctx);
       const link = `${ctx.portalUrl}/invite#t=${token}`;
+      if (!input.send) {
+        // Nothing is sent. The link is in no log and no History entry: only in this answer.
+        await record(ctx.db, 'invite', actor, {
+          clientId,
+          detail: { invitationId: inv.id, replaced: replaced.map((x) => x.id), copied: true },
+        });
+        res.status(201).json({ invitationId: inv.id, expiresAt, link });
+        return;
+      }
       deliver(
         ctx,
         messageTo(

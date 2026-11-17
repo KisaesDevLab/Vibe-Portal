@@ -378,6 +378,7 @@ export function StaffHome(): JSX.Element {
           <Route path="clients/:id" element={<ClientDetail allClients={allClients} />} />
           {allClients && <Route path="requests" element={<Requests />} />}
           {allClients && <Route path="people" element={<People />} />}
+          {allClients && <Route path="people/invited/:invitationId" element={<InvitedPerson />} />}
           {allClients && <Route path="people/:identityId" element={<Person />} />}
           <Route
             path="uploads"
@@ -507,6 +508,83 @@ function Clients({ limited }: { limited: boolean }): JSX.Element {
   );
 }
 
+/**
+ * P101 (owner 2026-11-17: "copy a link to invite someone… some emails seem to be blocked"): an
+ * invitation's link, shown once to be copied and passed on by the staff member. It is not
+ * kept anywhere it can be read again: closed, a new one has to be made.
+ */
+function InviteLink({
+  to,
+  link,
+  onClose,
+}: {
+  to: string;
+  link: string;
+  onClose: () => void;
+}): JSX.Element {
+  const [copied, setCopied] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  // The button that made it is gone from the page by now: the link takes the focus, so a
+  // keyboard and a screen reader are where the link is.
+  useEffect(() => {
+    wrap.current?.querySelector('input')?.focus();
+  }, [link]);
+  return (
+    <div
+      role="region"
+      aria-label="Invitation link to copy"
+      style={{
+        display: 'grid',
+        gap: 8,
+        padding: 12,
+        margin: '12px 0',
+        border: '1px solid var(--vibe-color-border)',
+        borderRadius: 8,
+        maxWidth: 640,
+      }}
+    >
+      <strong>Invitation link for {to}</strong>
+      <span>
+        Nothing was sent. Copy the link and give it to them yourself (a text, another email
+        address). It works once, for 7 days. Whoever opens it gets their access to this client, so
+        send it only to them. It is not shown again after you close this.
+      </span>
+      <div ref={wrap}>
+        <Input
+          label="Invitation link"
+          name="inviteLink"
+          readOnly
+          value={link}
+          onFocus={(e) => e.target.select()}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <Button
+          type="button"
+          onClick={() => {
+            const done = (): void => setCopied(true);
+            // Where the browser will not copy for the page, the link is selected to copy by hand.
+            const byHand = (): void => {
+              const box = wrap.current?.querySelector('input');
+              box?.focus();
+              box?.select();
+            };
+            if (navigator.clipboard?.writeText) {
+              navigator.clipboard.writeText(link).then(done, byHand);
+            } else byHand();
+          }}
+        >
+          Copy link
+        </Button>
+        <Button type="button" variant="secondary" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+      {copied && <p role="status">Copied.</p>}
+    </div>
+  );
+}
+
 function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   const { id = '' } = useParams();
   const people = useLoad<{ users: PortalUser[]; invitations: Invitation[] }>(
@@ -537,14 +615,26 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   const label = (u: PortalUser): string => u.name || u.email || u.phone || '?';
   const head = useLoad<ClientRow>(`/v1/clients/${id}`);
   const uploads = useLoad<{ uploads: UploadRow[] }>(`/v1/uploads?clientId=${id}`);
-  const invite = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
+  /** P101: an invitation's link to copy, while it is shown. */
+  const [inviteLink, setInviteLink] = useState<{ to: string; link: string } | null>(null);
+  const sendInvite = async (send: boolean): Promise<void> => {
     const body = Object.fromEntries(Object.entries(inv).filter(([, v]) => v.trim() !== ''));
-    if (await actAt('invite')(`/v1/clients/${id}/invites`, { body })) {
+    const to = inv.name.trim() || inv.email.trim() || inv.phone.trim();
+    setInviteLink(null);
+    const r = await actAt(send ? 'invite' : 'inviteLink')(`/v1/clients/${id}/invites`, {
+      body: send ? body : { ...body, send: false },
+    });
+    if (r) {
       setInv({ email: '', phone: '', name: '', roleLabel: '' });
       setInviting(false);
       head.reload();
+      const link = (r as { link?: string }).link;
+      if (!send && link) setInviteLink({ to, link });
     }
+  };
+  const invite = async (e: FormEvent): Promise<void> => {
+    e.preventDefault();
+    await sendInvite(true);
   };
   return (
     <div style={{ display: 'grid', gap: 16 }}>
@@ -644,6 +734,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                 {i.status === 'expired'
                   ? 'invitation expired'
                   : `invited until ${when(i.expiresAt)}`}
+                {i.copied ? ' (link copied, not sent)' : ''}
               </td>
               <td style={td}>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -683,6 +774,40 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                     size="sm"
                     variant="secondary"
                     disabled={busy}
+                    aria-label={`Copy an invitation link for ${i.email ?? i.phone ?? ''}`}
+                    onClick={() => {
+                      const to = i.name || i.email || i.phone || '';
+                      if (
+                        !window.confirm(
+                          i.status === 'expired'
+                            ? `Make a new invitation link for ${to} to copy? Nothing is sent to them.`
+                            : `Make a new invitation link for ${to} to copy? Nothing is sent to them, and the link they have now stops working.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setInvNote('');
+                      setInviteLink(null);
+                      void act(`/v1/clients/${id}/invites`, {
+                        body: {
+                          ...(i.email ? { email: i.email } : {}),
+                          ...(i.phone ? { phone: i.phone } : {}),
+                          name: i.name,
+                          roleLabel: i.roleLabel,
+                          send: false,
+                        },
+                      }).then((r) => {
+                        const link = (r as { link?: string } | null)?.link;
+                        if (link) setInviteLink({ to, link });
+                      });
+                    }}
+                  >
+                    Copy link
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
                     aria-label={`Delete the invitation to ${i.email ?? i.phone ?? ''}`}
                     onClick={() => {
                       const to = i.email ?? i.phone ?? '';
@@ -711,6 +836,13 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
           ))}
         </Table>
         {invNote && <p role="status">{invNote}</p>}
+        {inviteLink && (
+          <InviteLink
+            to={inviteLink.to}
+            link={inviteLink.link}
+            onClose={() => setInviteLink(null)}
+          />
+        )}
         {!inviting && (
           <div style={{ marginTop: 12 }}>
             <Button variant="secondary" onClick={() => setInviting(true)}>
@@ -754,10 +886,18 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                 value={inv.roleLabel}
                 onChange={(e) => setInv({ ...inv, roleLabel: e.target.value })}
               />
-              <Problem text={errorAt('invite')} />
+              <Problem text={errorAt('invite') || errorAt('inviteLink')} />
               <div style={{ display: 'flex', gap: 8 }}>
                 <Button type="submit" disabled={busy || !(inv.email.trim() || inv.phone.trim())}>
                   {busyAt === 'invite' ? 'Sending…' : 'Send invitation'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy || !(inv.email.trim() || inv.phone.trim())}
+                  onClick={() => void sendInvite(false)}
+                >
+                  {busyAt === 'inviteLink' ? 'Making the link…' : 'Copy a link instead'}
                 </Button>
                 <Button
                   type="button"
@@ -2807,13 +2947,18 @@ function People(): JSX.Element {
             Invited, not accepted yet
           </h3>
           <p style={{ marginTop: 0 }}>
-            They are listed above once they accept. Until then, resend or delete the invitation, and
-            choose files for them, on the client’s page.
+            Someone new is listed above once they accept. Open one to resend or delete their
+            invitations, or to invite them to another client; files are chosen for them on the
+            client’s page.
           </p>
           <Table head={['Name', 'Email / phone', 'Client', 'Invitation']}>
             {(load.data?.invited ?? []).map((i) => (
               <tr key={i.invitationId}>
-                <td style={td}>{i.name || '—'}</td>
+                <td style={td}>
+                  <Link to={`/staff/people/invited/${i.invitationId}`}>
+                    {i.name || i.email || i.phone || 'Someone invited'}
+                  </Link>
+                </td>
                 <td style={{ ...td, overflowWrap: 'anywhere' }}>
                   {[i.email, i.phone].filter(Boolean).join(', ')}
                 </td>
@@ -2862,6 +3007,324 @@ const NOTIFY_WORDS = {
   both: 'By email and text',
   none: 'Not at all',
 } as const;
+
+/** P100: what `GET /people/invited/:id` gives of someone invited who has not accepted. */
+interface InvitedPersonData {
+  invited: { name: string; email: string | null; phone: string | null };
+  invitations: {
+    invitationId: string;
+    name?: string;
+    email?: string | null;
+    phone?: string | null;
+    copied?: boolean;
+    roleLabel: string;
+    invitedBy: string;
+    expiresAt: string;
+    status: 'invited' | 'expired';
+    clientId: string;
+    clientName: string;
+    clientActive: boolean;
+    files: number;
+  }[];
+  account: { identityId: string; name: string; status: 'active' | 'disabled' } | null;
+  accountClients: string[];
+}
+
+/**
+ * P100 (owner 2026-11-17: "open their details and add clients and resend from the people
+ * view"): someone invited who has not accepted. They are no person of the portal yet, so this
+ * page is their invitations: one for each client, resent or deleted here, and another client
+ * is added by inviting them to it. Accepting any one of them accepts all that still wait.
+ */
+function InvitedPerson(): JSX.Element {
+  const { invitationId = '' } = useParams();
+  const navigate = useNavigate();
+  const load = useLoad<InvitedPersonData>(`/v1/people/invited/${invitationId}`);
+  const all = useLoad<{ clients: ClientRow[] }>('/v1/clients');
+  const { actAt, busy, busyAt, error, errorAt } = useAct(load.reload);
+  // What moves the page to another invitation (Resend, Copy link, Delete) does not read this
+  // one again first: it no longer waits.
+  const go = useAct(() => undefined);
+  const act = go.act;
+  const [note, setNote] = useState('');
+  const [inviteLink, setInviteLink] = useState<{ to: string; link: string } | null>(null);
+  const [adding, setAdding] = useState({ clientId: '', roleLabel: '' });
+  const [clientFind, setClientFind] = useState('');
+  const d = load.data;
+  const back = (
+    <Link to="/staff/people">
+      <span aria-hidden="true">← </span>People
+    </Link>
+  );
+  if (!d) {
+    return (
+      <div style={{ display: 'grid', gap: 16 }}>
+        {back}
+        {load.error ? (
+          <p role="alert">
+            {load.error.startsWith('It is no longer there')
+              ? 'This invitation is no longer waiting: it was accepted, deleted or sent again. Find the person under People.'
+              : `Could not load the invitation: ${load.error}`}
+          </p>
+        ) : (
+          <p role="status">Loading the invitation…</p>
+        )}
+      </div>
+    );
+  }
+  const who = d.invited.name || d.invited.email || d.invited.phone || 'Someone invited';
+  const contact = [d.invited.email, d.invited.phone].filter(Boolean).join(', ');
+  // As the first invitation was sent: the same email, number and name.
+  const same = {
+    ...(d.invited.email ? { email: d.invited.email } : {}),
+    ...(d.invited.phone ? { phone: d.invited.phone } : {}),
+    name: d.invited.name,
+  };
+  // Each invitation as it was sent: its own email, number (a number typed beside the email is
+  // kept) and name.
+  const contactOf = (i: InvitedPersonData['invitations'][number]): Record<string, string> => {
+    // An older server gives no contact with a row: the person's, then.
+    const email = i.email === undefined ? d.invited.email : i.email;
+    const phone = i.phone === undefined ? d.invited.phone : i.phone;
+    return {
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+      name: i.name ?? d.invited.name,
+    };
+  };
+  const taken = new Set([...d.invitations.map((i) => i.clientId), ...d.accountClients]);
+  const canAdd = (all.data?.clients ?? []).filter((c) => c.active && !taken.has(c.id));
+  const findWords = clientFind.toLowerCase().split(/\s+/).filter(Boolean);
+  const offered = canAdd.filter((c) =>
+    findWords.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
+  );
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {back}
+      <div>
+        <h2 style={{ margin: 0, fontSize: 24 }}>{who}</h2>
+        <p style={{ margin: '4px 0 0', color: tokens.color.textMuted }}>
+          Invited, not accepted yet · {contact}
+        </p>
+      </div>
+      <Problem text={error || go.error} />
+      {note && <p role="status">{note}</p>}
+      {inviteLink && (
+        <InviteLink to={inviteLink.to} link={inviteLink.link} onClose={() => setInviteLink(null)} />
+      )}
+      <Card title="Invitations">
+        <p style={{ marginTop: 0 }}>
+          {d.account ? (
+            <>
+              They already sign in to the portal as{' '}
+              <Link to={`/staff/people/${d.account.identityId}`}>{d.account.name || contact}</Link>
+              {d.account.status === 'disabled'
+                ? '. That account is turned off: they cannot accept until it is turned on. '
+                : ': accepting adds these clients to that account. To give them a client at once, without an invitation, use Add a client on their own page. '}
+            </>
+          ) : (
+            'They have no account yet: one is made when they accept. '
+          )}
+          Accepting any one invitation that was sent to them accepts every one below that is still
+          waiting (not an expired one, nor one for a client that is switched off), and the other
+          links then say they were already used. A link you copied gives only its own client. Files
+          are chosen for them on each client’s page: press the client’s name.
+        </p>
+        <Table head={['Client', 'Role', 'Invitation', 'Files chosen', 'Actions']}>
+          {d.invitations.map((i) => (
+            <tr key={i.invitationId}>
+              <td style={td}>
+                <Link className="client-name" to={`/staff/clients/${i.clientId}`}>
+                  {i.clientName}
+                </Link>
+                {!i.clientActive && ' (switched off)'}
+              </td>
+              <td style={td}>{i.roleLabel}</td>
+              <td style={td}>
+                {i.status === 'expired' ? 'expired' : `waiting until ${when(i.expiresAt)}`}
+                {i.copied ? ' (link copied, not sent)' : ''}
+              </td>
+              <td style={td}>{i.files || ''}</td>
+              <td style={td}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy || !i.clientActive}
+                    aria-label={`Resend the invitation to ${i.clientName}`}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          i.status === 'expired'
+                            ? `Send ${who} a new invitation to ${i.clientName}?`
+                            : `Send ${who} a new invitation to ${i.clientName}? The link they have now stops working.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setNote('');
+                      void act(`/v1/clients/${i.clientId}/invites`, {
+                        body: { ...contactOf(i), roleLabel: i.roleLabel },
+                      }).then((r) => {
+                        if (!r) return;
+                        setNote(`A new invitation to ${i.clientName} was sent.`);
+                        // The new invitation takes the place of the one this page was opened by.
+                        navigate(
+                          `/staff/people/invited/${(r as { invitationId: string }).invitationId}`,
+                          { replace: true },
+                        );
+                      });
+                    }}
+                  >
+                    Resend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy || !i.clientActive || d.account !== null}
+                    title={
+                      d.account
+                        ? 'They already have an account: use Add a client on their own page'
+                        : undefined
+                    }
+                    aria-label={`Copy an invitation link to ${i.clientName}`}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          i.status === 'expired'
+                            ? `Make a new invitation link to ${i.clientName} to copy? Nothing is sent to ${who}.`
+                            : `Make a new invitation link to ${i.clientName} to copy? Nothing is sent to ${who}, and the link they have now stops working.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setNote('');
+                      setInviteLink(null);
+                      void act(`/v1/clients/${i.clientId}/invites`, {
+                        body: { ...contactOf(i), roleLabel: i.roleLabel, send: false },
+                      }).then((r) => {
+                        const made = r as { invitationId: string; link?: string } | null;
+                        if (!made?.link) return;
+                        setInviteLink({ to: `${who} (${i.clientName})`, link: made.link });
+                        navigate(`/staff/people/invited/${made.invitationId}`, { replace: true });
+                      });
+                    }}
+                  >
+                    Copy link
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={`Delete the invitation to ${i.clientName}`}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Delete the invitation to ${i.clientName}? The link they were sent stops working, and files chosen for them there are chosen for nobody.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setNote('');
+                      const left = d.invitations.filter((x) => x.invitationId !== i.invitationId);
+                      void act(`/v1/clients/${i.clientId}/invites/${i.invitationId}`, {
+                        method: 'DELETE',
+                      }).then((r) => {
+                        if (!r) return;
+                        // Nothing waits for them any more: back to People. Else to one that does.
+                        if (left[0]) setNote(`The invitation to ${i.clientName} was deleted.`);
+                        navigate(
+                          left[0]
+                            ? `/staff/people/invited/${left[0].invitationId}`
+                            : '/staff/people',
+                          { replace: true },
+                        );
+                      });
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </Table>
+        <form
+          style={{ display: 'grid', gap: 8, maxWidth: 520, marginTop: 16 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const client = canAdd.find((c) => c.id === adding.clientId);
+            if (!client) return;
+            setNote('');
+            void actAt('addClient')(`/v1/clients/${client.id}/invites`, {
+              body: {
+                ...same,
+                ...(adding.roleLabel.trim() ? { roleLabel: adding.roleLabel } : {}),
+              },
+            }).then((r) => {
+              if (!r) return;
+              setAdding({ clientId: '', roleLabel: '' });
+              setClientFind('');
+              setNote(`${who} was invited to ${client.displayName} too.`);
+            });
+          }}
+        >
+          <strong>Add a client</strong>
+          <span style={{ fontSize: 13 }}>
+            They are sent an invitation to it. They see it once they accept: any one of their
+            invitations will do.
+          </span>
+          <Input
+            label="Find a client (name or client ID)"
+            name="invitedClientFind"
+            value={clientFind}
+            onChange={(e) => {
+              const typed = e.target.value;
+              setClientFind(typed);
+              const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
+              const left = canAdd.filter((c) =>
+                words.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
+              );
+              // A client chosen before that no longer matches is let go.
+              if (adding.clientId && !left.some((c) => c.id === adding.clientId)) {
+                setAdding({ ...adding, clientId: '' });
+              }
+            }}
+          />
+          <Select
+            label="Client"
+            value={adding.clientId}
+            onChange={(e) => setAdding({ ...adding, clientId: e.target.value })}
+          >
+            <option value="">
+              {findWords.length
+                ? `Choose a client (${offered.length} of ${canAdd.length} match)`
+                : 'Choose a client'}
+            </option>
+            {offered.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.displayName}
+                {c.clientCode ? ` (${c.clientCode})` : ''}
+              </option>
+            ))}
+          </Select>
+          <Input
+            label="Role (optional, e.g. Spouse)"
+            name="invitedRole"
+            value={adding.roleLabel}
+            onChange={(e) => setAdding({ ...adding, roleLabel: e.target.value })}
+          />
+          <Problem text={errorAt('addClient')} />
+          <div>
+            <Button type="submit" disabled={busy || !adding.clientId}>
+              {busyAt === 'addClient' ? 'Sending…' : 'Send invitation'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
+}
 
 /** One person: details, clients, account and activity (P66). */
 function Person(): JSX.Element {
@@ -3136,6 +3599,23 @@ function Person(): JSX.Element {
                   >
                     Remove
                   </Button>
+                )}
+                {/* P92/P100: this client's portal as this person sees it, read only, in a new
+                    tab. Not for an account that is off, a client that is off or access removed:
+                    they sign in to nothing there. */}
+                {c.active && c.clientActive && !off && (
+                  <a
+                    href={`/staff/preview/${c.id}?as=${p.identityId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ marginLeft: 8, whiteSpace: 'nowrap' }}
+                  >
+                    View as
+                    <span className="visually-hidden">
+                      {' '}
+                      {who} at {c.name} (opens in a new tab)
+                    </span>
+                  </a>
                 )}
               </td>
             </tr>

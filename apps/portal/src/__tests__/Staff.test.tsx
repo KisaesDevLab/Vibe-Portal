@@ -1688,6 +1688,133 @@ describe('staff page', () => {
     );
   });
 
+  it('client page: an invitation link is made to copy instead of sent (P101)', async () => {
+    const id = CLIENT.id;
+    const waiting = {
+      invitationId: 'i1',
+      name: 'Jane Smith',
+      email: 'jane@example.test',
+      phone: null,
+      roleLabel: 'Spouse',
+      expiresAt: '2026-11-20T10:00:00Z',
+      status: 'invited',
+    };
+    const link = 'https://files.example-cpa.test/invite#t=abcdefghijklmnopqrstuvwxyz';
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [], invitations: [waiting] } },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      [`POST /v1/clients/${id}/invites`]: { status: 201, body: { invitationId: 'i2', link } },
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    at(`/staff/clients/${id}`);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Copy an invitation link for jane@example.test' }),
+    );
+    const box = (await screen.findByLabelText('Invitation link')) as HTMLInputElement;
+    expect(box.value).toBe(link);
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      email: 'jane@example.test',
+      name: 'Jane Smith',
+      roleLabel: 'Spouse',
+      send: false,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(await screen.findByText('Copied.')).toBeTruthy();
+    expect(writeText).toHaveBeenCalledWith(link);
+    // Closed, it is gone: it is shown once.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByLabelText('Invitation link')).toBeNull();
+  });
+
+  it('People: someone invited has a page to resend, delete and add a client (P100)', async () => {
+    const id = CLIENT.id;
+    const one = {
+      invitationId: 'i1',
+      roleLabel: 'Spouse',
+      invitedBy: 'kurt@example-cpa.test',
+      expiresAt: '2026-11-20T10:00:00Z',
+      status: 'invited',
+      clientId: id,
+      clientName: 'Smith, John',
+      clientActive: true,
+      files: 2,
+    };
+    const page = {
+      invited: { name: 'Jane Smith', email: 'jane@example.test', phone: null },
+      invitations: [one],
+      account: null,
+      accountClients: [],
+    };
+    const farm = { ...CLIENT, id: 'c2', displayName: 'Smith Farms LLC', clientCode: 'FARM' };
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/clients': { body: { clients: [CLIENT, farm] } },
+      '/v1/people/list?q=': {
+        body: {
+          people: [],
+          more: false,
+          invited: [{ ...one, name: 'Jane Smith', email: 'jane@example.test', phone: null }],
+        },
+      },
+      '/v1/people/invited/i1': { body: page },
+      '/v1/people/invited/i2': {
+        body: { ...page, invitations: [{ ...one, invitationId: 'i2' }] },
+      },
+      [`POST /v1/clients/${id}/invites`]: { status: 201, body: { invitationId: 'i2' } },
+      'POST /v1/clients/c2/invites': { status: 201, body: { invitationId: 'i3' } },
+      [`DELETE /v1/clients/${id}/invites/i2`]: { body: { ok: true } },
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    at('/staff/people');
+    fireEvent.click(await screen.findByRole('link', { name: 'Jane Smith' }));
+    expect(await screen.findByRole('heading', { name: 'Jane Smith' })).toBeTruthy();
+    expect(screen.getByText(/They have no account yet/)).toBeTruthy();
+
+    // Another client: an invitation to it, to the same contact. Only clients not invited to.
+    const pick = (await screen.findByLabelText('Client')) as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(pick.options).map((o) => o.text)).toEqual([
+        'Choose a client',
+        'Smith Farms LLC (FARM)',
+      ]),
+    );
+    fireEvent.change(pick, { target: { value: 'c2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send invitation' }));
+    expect(await screen.findByText('Jane Smith was invited to Smith Farms LLC too.')).toBeTruthy();
+    expect(calls.find((c) => c.path === '/v1/clients/c2/invites')?.body).toEqual({
+      email: 'jane@example.test',
+      name: 'Jane Smith',
+    });
+
+    // Resent: the same contact, name and role; the page follows the new invitation.
+    fireEvent.click(screen.getByRole('button', { name: 'Resend the invitation to Smith, John' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === `/v1/clients/${id}/invites`)?.body).toEqual({
+        email: 'jane@example.test',
+        name: 'Jane Smith',
+        roleLabel: 'Spouse',
+      }),
+    );
+    await waitFor(() => expect(calls.some((c) => c.path === '/v1/people/invited/i2')).toBe(true));
+
+    // Deleted, and nothing else waits for her: back to People.
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Delete the invitation to Smith, John' }),
+    );
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === 'DELETE' && c.path === `/v1/clients/${id}/invites/i2`),
+      ).toBe(true),
+    );
+    expect(
+      await screen.findByLabelText('Find a person (name, email or mobile number)'),
+    ).toBeTruthy();
+  });
+
   it('client page: the selected files go out together in one secure link (P97)', async () => {
     const id = CLIENT.id;
     const calls = serve({

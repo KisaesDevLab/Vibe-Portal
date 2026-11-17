@@ -292,6 +292,9 @@ export const portalInvitation = pgTable('portal_invitation', {
   expiresAt: ts('expires_at').notNull(),
   acceptedAt: ts('accepted_at'),
   revokedAt: ts('revoked_at'),
+  /** P101: its link was copied by staff, not sent to the contact: the contact is not proved
+   *  by whoever opens it. */
+  copied: boolean('copied').notNull().default(false),
   createdAt: ts('created_at').notNull().defaultNow(),
 });
 
