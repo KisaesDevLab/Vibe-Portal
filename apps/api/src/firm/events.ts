@@ -27,7 +27,7 @@ const Query = z.object({
 
 /** What admins do in Settings, and who signs in: the staff list and the portal keys could be
  *  read back from these, so staff who are not admins do not get them (QA 2026-11-10). */
-const ADMIN_KINDS: EventKind[] = [
+export const ADMIN_KINDS: EventKind[] = [
   'staff_sign_in',
   'staff_sso',
   'settings_updated',

@@ -631,7 +631,7 @@ export function staffPeopleRouter(ctx: Ctx): Router {
       }
       await record(ctx.db, 'sign_in_link_sent', staffActor(req), {
         identityId: who.id,
-        detail: { to: maskContact(to) },
+        detail: { to: maskContact(to), channel: email ? 'email' : 'text' },
       });
       res.json({ ok: true, to });
     }),

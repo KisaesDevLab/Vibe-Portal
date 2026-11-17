@@ -22,6 +22,8 @@ export const EVENT_KINDS = [
   'download',
   'upload',
   'upload_notice',
+  // P103: a person was told of new or updated files (the gathered notice), by email or text.
+  'file_notice',
   'fetch',
   'invite',
   'invite_revoked',

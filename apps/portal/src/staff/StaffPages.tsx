@@ -1011,6 +1011,21 @@ interface ClientEvent {
   client?: string | null;
   /** An approval: how staff checked who was asking (Addendum 01, layer B). */
   check?: string | null;
+  /** P103: how a message went out: email, text, email and text, a copied link. */
+  channel?: string | null;
+}
+
+/** What a row is about besides its file: the person, a secure link's recipient, how an
+ *  approval was checked, how a message went out. */
+function aboutOf(e: ClientEvent): string {
+  return [
+    e.person && e.person !== e.who ? e.person : null,
+    e.recipient && `to ${e.recipient}`,
+    e.check,
+    e.channel && `by ${e.channel}`,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 const CLIENT_HISTORY_PAGE = 50;
@@ -1025,7 +1040,25 @@ const DID: Record<string, string> = {
   view: 'Viewed a file',
   download: 'Downloaded a file',
   upload: 'Uploaded a file',
-  upload_notice: 'Upload notice sent',
+  upload_notice: 'Told staff of an upload',
+  file_notice: 'Told of new files',
+  staff_sign_in: 'Staff signed in',
+  staff_sso: 'Staff signed in with Vibe Auth',
+  settings_updated: 'Settings changed',
+  staff_added: 'Staff member added',
+  staff_on: 'Staff member turned on',
+  staff_off: 'Staff member turned off',
+  staff_reset: 'Staff setup link made',
+  staff_access: 'Staff access changed',
+  firm_key_created: 'Portal key made',
+  firm_key_revoked: 'Portal key revoked',
+  storage_b2_saved: 'B2 bucket saved',
+  storage_b2_removed: 'B2 bucket removed',
+  storage_move: 'Move of stored files started',
+  storage_moved: 'Stored files moved',
+  storage_swept: 'Leftover stored files deleted',
+  storage_sweep_refused: 'Leftover check refused',
+  storage_snapshot_failed: 'Database copy failed',
   fetch: 'Fetched an upload',
   upload_removed: 'Removed an upload',
   upload_purged: 'Upload cleared after the keep period',
@@ -1128,14 +1161,7 @@ function HistoryCard({
             <td style={td}>{e.who}</td>
             {showClient && <td style={td}>{e.client ?? ''}</td>}
             <td style={{ ...td, overflowWrap: 'anywhere' }}>
-              {[
-                e.file,
-                e.person && e.person !== e.who ? e.person : null,
-                e.recipient && `to ${e.recipient}`,
-                e.check,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
+              {[e.file, aboutOf(e)].filter(Boolean).join(' · ')}
             </td>
           </tr>
         ))}
@@ -2674,25 +2700,67 @@ function Unfiled(): JSX.Element {
   );
 }
 
-interface EventRow {
-  id: number;
-  at: string;
-  kind: string;
-  actorKind: string;
-  actor: string;
-  clientId: string | null;
-  detail: Record<string, unknown>;
-}
-
 const HISTORY_PAGE = 100;
 
+/** The most rows one CSV file holds: read a page at a time until then. */
+const CSV_MAX_ROWS = 20_000;
+const CSV_PAGE = 500;
+
+/** One CSV cell: quoted, and never a formula (a name that starts with = + - or @ is text). */
+function csvCell(v: string): string {
+  const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+/** yyyy-mm-dd hh:mm:ss in this computer's time, as a spreadsheet takes a date. */
+function csvWhen(iso: string): string {
+  const d = new Date(iso);
+  const two = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+}
+
+/**
+ * P103 (owner 2026-11-17: "add a filter for each column and add a column for client and file
+ * name… send it to CSV"): everything that happened, newest first, in words. Each column
+ * narrows the list, in the whole history and not only the rows read so far; the filters are
+ * kept in the address. Download CSV gives the rows the filters leave.
+ */
 function History(): JSX.Element {
-  const load = useLoad<{ events: EventRow[] }>(`/v1/events?latest=1&limit=${HISTORY_PAGE}`);
+  const [from, setFrom] = useUrlState('from');
+  const [to, setTo] = useUrlState('to');
+  const [kind, setKind] = useUrlState('what');
+  const [whoTyped, who, setWho] = useUrlSearch('who');
+  const [clientTyped, client, setClient] = useUrlSearch('client');
+  const [fileTyped, file, setFile] = useUrlSearch('file');
+  const [aboutTyped, about, setAbout] = useUrlSearch('about');
+  // A day is this computer's day: from its first moment to the first moment of the next.
+  const dayStart = (day: string, add = 0): string | null => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    if (!m) return null;
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + add);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  };
+  const query = [
+    ['from', dayStart(from)],
+    ['to', dayStart(to, 1)],
+    ['kind', kind],
+    ['who', who],
+    ['client', client],
+    ['file', file],
+    ['about', about],
+  ]
+    .filter((x): x is [string, string] => Boolean(x[1]))
+    .map(([k, v]) => `&${k}=${encodeURIComponent(v)}`)
+    .join('');
+  const filtered = query !== '';
+  const path = `/v1/history?limit=${HISTORY_PAGE}${query}`;
+  const load = useLoad<{ events: ClientEvent[] }>(path);
   // Older pages, fetched as asked for (P57).
-  const [older, setOlder] = useState<EventRow[]>([]);
+  const [older, setOlder] = useState<ClientEvent[]>([]);
   const [more, setMore] = useState(true);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
+  const [csvNote, setCsvNote] = useState('');
   const first = load.data?.events ?? [];
   useEffect(() => {
     setOlder([]);
@@ -2705,9 +2773,7 @@ function History(): JSX.Element {
     setBusy(true);
     setProblem('');
     try {
-      const r = await staffApi<{ events: EventRow[] }>(
-        `/v1/events?latest=1&limit=${HISTORY_PAGE}&before=${last.id}`,
-      );
+      const r = await staffApi<{ events: ClientEvent[] }>(`${path}&before=${last.id}`);
       setOlder((o) => [...o, ...r.events]);
       setMore(r.events.length === HISTORY_PAGE);
     } catch (err) {
@@ -2716,21 +2782,166 @@ function History(): JSX.Element {
       setBusy(false);
     }
   };
+  const what = (e: ClientEvent): string => DID[e.kind] ?? e.kind.replace(/_/g, ' ');
+  /** Every row the filters leave (not only those on the page), as a CSV file. */
+  const download = async (): Promise<void> => {
+    setBusy(true);
+    setProblem('');
+    setCsvNote('Reading the history…');
+    try {
+      const all: ClientEvent[] = [];
+      let before = '';
+      for (;;) {
+        const r = await staffApi<{ events: ClientEvent[] }>(
+          `/v1/history?limit=${CSV_PAGE}${query}${before}`,
+        );
+        all.push(...r.events);
+        const last = r.events[r.events.length - 1];
+        if (r.events.length < CSV_PAGE || !last || all.length >= CSV_MAX_ROWS) break;
+        before = `&before=${last.id}`;
+        setCsvNote(`Reading the history… ${all.length} rows so far.`);
+      }
+      const lines = [
+        ['When', 'What', 'Who', 'Client', 'File', 'About'],
+        ...all.map((e) => [
+          csvWhen(e.at),
+          what(e),
+          e.who,
+          e.client ?? '',
+          e.file ?? '',
+          aboutOf(e),
+        ]),
+      ].map((cells) => cells.map(csvCell).join(','));
+      // With the mark a spreadsheet reads the accents by.
+      const blob = new Blob(['\uFEFF', lines.join('\r\n'), '\r\n'], {
+        type: 'text/csv;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `portal-history-${csvWhen(new Date().toISOString()).slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setCsvNote(
+        all.length >= CSV_MAX_ROWS
+          ? `The file has the newest ${all.length} rows, the most one file holds. Narrow the dates for the rest.`
+          : `The file has ${all.length} ${all.length === 1 ? 'row' : 'rows'}.`,
+      );
+    } catch (err) {
+      setCsvNote('');
+      setProblem(staffSay(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const kinds = Object.entries(DID).sort((x, y) => x[1].localeCompare(y[1]));
+  const clear = (): void => {
+    setFrom('');
+    setTo('');
+    setKind('');
+    setWho('');
+    setClient('');
+    setFile('');
+    setAbout('');
+  };
   return (
     <Card title="History">
-      <p>
-        Newest first: sign-ins, invitations, sharing, client views and downloads, uploads, and
-        secure links sent outside (&ldquo;outside&rdquo; events).
+      <p style={{ marginTop: 0 }}>
+        Newest first: sign-ins, invitations, sharing, client views and downloads, uploads, notices
+        sent, and secure links sent outside. Each box below narrows the list by its column, in the
+        whole history.
       </p>
+      <div
+        role="group"
+        aria-label="Narrow the history"
+        style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'end', marginBottom: 8 }}
+      >
+        <div style={{ flex: '0 1 150px' }}>
+          <Input
+            label="From (day)"
+            name="historyFrom"
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </div>
+        <div style={{ flex: '0 1 150px' }}>
+          <Input
+            label="To (day)"
+            name="historyTo"
+            type="date"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+          />
+        </div>
+        <div style={{ flex: '1 1 200px' }}>
+          <Select label="What" value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="">Everything</option>
+            {kinds.map(([k, words]) => (
+              <option key={k} value={k}>
+                {words}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div style={{ flex: '1 1 160px' }}>
+          <Input
+            label="Who"
+            name="historyWho"
+            value={whoTyped}
+            onChange={(e) => setWho(e.target.value)}
+          />
+        </div>
+        <div style={{ flex: '1 1 160px' }}>
+          <Input
+            label="Client (name or ID)"
+            name="historyClient"
+            value={clientTyped}
+            onChange={(e) => setClient(e.target.value)}
+          />
+        </div>
+        <div style={{ flex: '1 1 160px' }}>
+          <Input
+            label="File"
+            name="historyFile"
+            value={fileTyped}
+            onChange={(e) => setFile(e.target.value)}
+          />
+        </div>
+        <div style={{ flex: '1 1 160px' }}>
+          <Input
+            label="About"
+            name="historyAbout"
+            value={aboutTyped}
+            onChange={(e) => setAbout(e.target.value)}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Button variant="secondary" disabled={!filtered && !whoTyped} onClick={clear}>
+            Clear filters
+          </Button>
+          <Button variant="secondary" disabled={busy || !load.data} onClick={() => void download()}>
+            Download CSV
+          </Button>
+        </div>
+      </div>
       <Status load={load} what="the history" />
       <Problem text={problem} />
-      {load.data && rows.length === 0 && <p>Nothing has happened yet.</p>}
-      <Table head={['When', 'What', 'Who']}>
+      {csvNote && <p role="status">{csvNote}</p>}
+      {load.data && rows.length === 0 && (
+        <p>{filtered ? 'Nothing matches these filters.' : 'Nothing has happened yet.'}</p>
+      )}
+      <Table head={['When', 'What', 'Who', 'Client', 'File', 'About']}>
         {rows.map((e) => (
           <tr key={e.id}>
-            <td style={td}>{when(e.at)}</td>
-            <td style={td}>{e.kind.replace(/_/g, ' ')}</td>
-            <td style={td}>{e.actorKind === 'client' ? 'a client' : e.actor}</td>
+            <td style={{ ...td, whiteSpace: 'nowrap' }}>{when(e.at)}</td>
+            <td style={td}>{what(e)}</td>
+            <td style={{ ...td, overflowWrap: 'anywhere' }}>{e.who}</td>
+            <td style={td}>{e.client ?? ''}</td>
+            <td style={{ ...td, overflowWrap: 'anywhere' }}>{e.file ?? ''}</td>
+            <td style={{ ...td, overflowWrap: 'anywhere' }}>{aboutOf(e)}</td>
           </tr>
         ))}
       </Table>

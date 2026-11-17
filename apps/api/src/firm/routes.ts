@@ -19,14 +19,26 @@
 //   POST   /api/firm/v1/access-requests/:id/deny
 
 import express, { type Request, type RequestHandler, type Router } from 'express';
-import { and, asc, eq, ilike, inArray, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
 import { grantAccess, type Executor } from '../auth/grant';
 import { endSessionsOf } from '../auth/sessions';
 import { deliver, firmName, type Ctx } from '../context';
-import { normalizeEmail, normalizePhone } from '../lib/contact';
+import { normalizeEmail, normalizePhone, maskContact } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import { messageTo } from '../lib/notify';
@@ -38,7 +50,8 @@ import { VERSION } from '../version';
 import { dropChoices, setAccess, withdrawInvites } from './access';
 import { cabinetAdd, cabinetFilesOf, firmCabinetRouter } from './cabinet';
 import { firmFilesRouter } from './files';
-import { historyRows, HistoryQuery } from './history';
+import { ADMIN_KINDS } from './events';
+import { HistoryFilters, historyRows, HistoryQuery } from './history';
 import { staffPeopleRouter } from './people';
 import { staffClientLinksRouter } from './client-links';
 import { staffPreviewRouter } from './preview';
@@ -231,6 +244,30 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       });
     }),
   );
+
+  // P103: the History page: everything that happened, in words, a page at a time, narrowed by
+  // any of its columns. Staff limited to some clients get those clients' rows alone, and only
+  // admins get what admins do in Settings and who of the staff signed in (as GET /events).
+  if (staff) {
+    r.get(
+      '/history',
+      h(async (req, res) => {
+        const q = HistoryQuery.parse(req.query);
+        const filter = HistoryFilters.parse(req.query);
+        const events = await historyRows(
+          ctx,
+          and(
+            inScope(req, schema.events.clientId),
+            req.staff && !req.staff.admin ? notInArray(schema.events.kind, ADMIN_KINDS) : undefined,
+          ),
+          q,
+          // How an approval was checked may name people: for staff who see every client.
+          { check: limitedTo(req) === null, filter },
+        );
+        res.json({ events });
+      }),
+    );
+  }
 
   // P90: the client's documents in Vibe Files' B2 bucket (names, no content).
   r.get('/clients/:id/cabinet-files', cabinetFilesOf(ctx));
@@ -544,7 +581,13 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         // Nothing is sent. The link is in no log and no History entry: only in this answer.
         await record(ctx.db, 'invite', actor, {
           clientId,
-          detail: { invitationId: inv.id, replaced: replaced.map((x) => x.id), copied: true },
+          detail: {
+            invitationId: inv.id,
+            replaced: replaced.map((x) => x.id),
+            copied: true,
+            channel: 'a copied link',
+            invitedName: input.name || maskContact(sendTo),
+          },
         });
         res.status(201).json({ invitationId: inv.id, expiresAt, link });
         return;
@@ -565,7 +608,13 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
       );
       await record(ctx.db, 'invite', actor, {
         clientId,
-        detail: { invitationId: inv.id, replaced: replaced.map((x) => x.id) },
+        detail: {
+          invitationId: inv.id,
+          replaced: replaced.map((x) => x.id),
+          // P103: how the invitation went out, and who it is for (no person yet).
+          channel: email ? 'email' : 'text',
+          invitedName: input.name || maskContact(sendTo),
+        },
       });
       res.status(201).json({ invitationId: inv.id, expiresAt });
     }),
