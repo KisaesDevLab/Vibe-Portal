@@ -239,6 +239,7 @@ export function staffPeopleRouter(ctx: Ctx): Router {
           phone: inv.phone,
           roleLabel: inv.roleLabel,
           invitedBy: inv.invitedBy,
+          copied: inv.copied,
           createdAt: inv.createdAt,
           expiresAt: inv.expiresAt,
           clientId: schema.clients.id,

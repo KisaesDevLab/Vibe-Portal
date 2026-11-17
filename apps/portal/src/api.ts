@@ -53,7 +53,7 @@ export function say(err: unknown): string {
     request_closed: 'This request has already been sent. Start a new request if something changed.',
     id_type: 'The photo ID must be a picture (JPEG, PNG or HEIC) or a PDF.',
     invite_expired:
-      'This invitation has expired or was already used. Ask the firm to send a new one.',
+      'This invitation has expired or was already used. If you already accepted an invitation from the firm, sign in instead; otherwise ask the firm to send a new one.',
     no_access: 'Your access to the portal has ended. Contact the firm.',
     too_many_requests: 'Too many tries. Wait a few minutes and try again.',
     invalid: 'Check the fields and try again.',

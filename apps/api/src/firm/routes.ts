@@ -407,6 +407,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           roleLabel: i.roleLabel,
           expiresAt: i.expiresAt,
           status: i.expiresAt > now ? 'invited' : 'expired',
+          // P101: nothing was sent for it: staff copied its link.
+          copied: i.copied,
         })),
       });
     }),
@@ -459,6 +461,16 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         .from(schema.portalIdentity)
         .where(and(contactMatch, eq(schema.portalIdentity.status, 'disabled')));
       if (off) throw new HttpError(409, 'account_off');
+      // P101: a copied link shows nothing about who opens it, so it never leads into an
+      // account that exists: whoever held it would be signed in as that person, with all
+      // their clients. Someone with an account is given the client on their own page.
+      if (!input.send) {
+        const [account] = await ctx.db
+          .select({ id: schema.portalIdentity.id })
+          .from(schema.portalIdentity)
+          .where(contactMatch);
+        if (account) throw new HttpError(409, 'has_account');
+      }
 
       const actor = actorOf(req);
       const now = ctx.now();
@@ -513,6 +525,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
             tokenHash: sha256(token),
             invitedBy: actor.name,
             expiresAt,
+            copied: !input.send,
           })
           .returning({ id: schema.portalInvitation.id });
         if (!made) throw new Error('invitation insert returned nothing');

@@ -328,6 +328,49 @@ describe('files chosen for someone invited (P98)', () => {
     expect((await joe.get('/api/portal/files').expect(200)).body.files).toHaveLength(1);
   });
 
+  it('a copied link gives its own client only, and never opens an account that exists (P101)', async () => {
+    const copy = (clientId: string, email: string) =>
+      staff
+        .post(`/api/staff/v1/clients/${clientId}/invites`)
+        .send({ email, name: 'Joe Smith', send: false });
+    const tokenOf = (link: string): string => link.split('#t=')[1] ?? '';
+
+    // Invited to one client by email, to another by a copied link.
+    await invite(CLIENT, 'joe@example.test', 'Joe Smith');
+    const copied = await copy(OTHER, 'joe@example.test').expect(201);
+    const rows = (await staff.get(`/api/staff/v1/clients/${OTHER}/users`).expect(200)).body
+      .invitations as { copied: boolean }[];
+    expect(rows.map((r) => r.copied)).toEqual([true]);
+
+    // Whoever opens the copied link gets that one client: the emailed invitation still waits.
+    const holder = request.agent(w.app);
+    await holder
+      .post('/api/portal/invitations/accept')
+      .send({ token: tokenOf(copied.body.link as string) })
+      .expect(200);
+    const me = (await holder.get('/api/portal/auth/me').expect(200)).body;
+    expect((me.clients as { name: string }[]).map((c) => c.name)).toEqual(['Smith Farms LLC']);
+    expect(
+      ((await staff.get('/api/staff/v1/people/list').expect(200)).body.invited as unknown[]).length,
+    ).toBe(1);
+
+    // He has an account now: no link is copied into it (it would sign its holder in as him).
+    const refused = await copy(CLIENT, 'joe@example.test');
+    expect([refused.status, refused.body]).toEqual([409, { error: 'has_account' }]);
+
+    // A link copied before the account existed is dead once it does.
+    const early = await copy(CLIENT, 'ann@example.test').expect(201);
+    await w.member('ann@example.test', OTHER);
+    // (Her emailed invitation, accepted, took the copied one with it: she proved the address.)
+    const ann = (await staff.get('/api/staff/v1/people/list?q=ann').expect(200)).body;
+    expect(ann.invited).toEqual([]);
+    expect((ann.people[0].clients as unknown[]).length).toBe(2);
+    await request(w.app)
+      .post('/api/portal/invitations/accept')
+      .send({ token: tokenOf(early.body.link as string) })
+      .expect(404);
+  });
+
   it('a deleted invitation takes its choices with it', async () => {
     const a = await share(CLIENT, 'Return.pdf');
     const inv = await invite(CLIENT, 'joe@example.test', 'Joe Smith');

@@ -523,18 +523,23 @@ account is turned off has no **View as**: they sign in to nothing.
 
 ## An invitation that was not accepted
 
-On a client's page, under **People with access**, an invitation still waiting has two buttons.
-**Resend** sends a new invitation to the same email or number: a new link, good for 7 days, and
-the link sent before stops working. **Delete** takes the invitation away, and its link stops
-working. Both ask first. An invitation that expired stays listed until it is resent or deleted.
+On a client's page, under **People with access**, an invitation still waiting has three
+buttons. **Resend** sends a new invitation to the same email or number: a new link, good for 7
+days, and the link sent before stops working. **Copy link** makes a new link without sending
+anything (see below). **Delete** takes the invitation away, and its link stops working. All
+three ask first. An invitation that expired stays listed until it is resent or deleted.
 
 **When their email does not arrive (0.3.20).** Some mail systems block the portal's messages.
 **Copy link** on a waiting invitation (and **Copy a link instead** in the invite form) makes a
 new invitation without sending anything, and shows its link once for you to copy and pass on
 yourself: by text, or to another address of theirs. The link they had before stops working.
-It works once, for 7 days. **Whoever opens the link gets that person's access**, so give it
-only to them; unlike the emailed one, it does not show that the address is theirs. The link is
-not kept where it can be read again: once the box is closed, make a new one.
+It works once, for 7 days. **Whoever opens the link gets that person's access to that client**,
+so give it only to them; unlike the emailed one, it does not show that the address is theirs.
+For that reason a copied link gives its own client only (it does not accept their other
+invitations), and it is refused for someone who **already has an account**: it would sign
+whoever opened it into that account. Give such a person the client at once instead, on their
+page under **People** (**Add a client**). The invitation's row says **link copied, not sent**.
+The link is not kept where it can be read again: once the box is closed, make a new one.
 
 **Files for someone who has not accepted yet.** Under **Files on the portal**, tick the files,
 and in the bar that appears tick the invited person under **For:** (their name, with
@@ -553,10 +558,12 @@ accept. Below the list, **Invited, not accepted yet** names each invitation stil
 its client.
 
 **Someone invited has a page of their own** (0.3.20): press their name there. It lists every
-invitation waiting for that email or number, one for each client, with **Resend** and
-**Delete**, and **Add a client**, which invites them to another client (they get an invitation
-for it too). **Accepting any one invitation accepts every one still waiting for them**, so one
-link is enough to see all their clients. Files are chosen for them on each client's page. If
+invitation waiting for that email or number, one for each client, with **Resend**, **Copy
+link** and **Delete**, and **Add a client**, which invites them to another client (they get an
+invitation for it too). **Accepting any one invitation that was sent to them accepts every one
+still waiting for them** (not an expired one, nor one for a client that is switched off), so
+one link is enough to see all their clients; their other links then say they were already
+used, and tell them to sign in. Files are chosen for them on each client's page. If
 they already sign in to the portal with that email or number, the page says so and links to
 their account: accepting adds the clients to it, and no second account is made.
 

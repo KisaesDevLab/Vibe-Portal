@@ -524,6 +524,11 @@ function InviteLink({
 }): JSX.Element {
   const [copied, setCopied] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
+  // The button that made it is gone from the page by now: the link takes the focus, so a
+  // keyboard and a screen reader are where the link is.
+  useEffect(() => {
+    wrap.current?.querySelector('input')?.focus();
+  }, [link]);
   return (
     <div
       role="region"
@@ -541,8 +546,8 @@ function InviteLink({
       <strong>Invitation link for {to}</strong>
       <span>
         Nothing was sent. Copy the link and give it to them yourself (a text, another email
-        address). It works once, for 7 days. Whoever opens it gets their access, so send it only to
-        them. It is not shown again after you close this.
+        address). It works once, for 7 days. Whoever opens it gets their access to this client, so
+        send it only to them. It is not shown again after you close this.
       </span>
       <div ref={wrap}>
         <Input
@@ -616,7 +621,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
     const body = Object.fromEntries(Object.entries(inv).filter(([, v]) => v.trim() !== ''));
     const to = inv.name.trim() || inv.email.trim() || inv.phone.trim();
     setInviteLink(null);
-    const r = await actAt('invite')(`/v1/clients/${id}/invites`, {
+    const r = await actAt(send ? 'invite' : 'inviteLink')(`/v1/clients/${id}/invites`, {
       body: send ? body : { ...body, send: false },
     });
     if (r) {
@@ -729,6 +734,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                 {i.status === 'expired'
                   ? 'invitation expired'
                   : `invited until ${when(i.expiresAt)}`}
+                {i.copied ? ' (link copied, not sent)' : ''}
               </td>
               <td style={td}>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -880,7 +886,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                 value={inv.roleLabel}
                 onChange={(e) => setInv({ ...inv, roleLabel: e.target.value })}
               />
-              <Problem text={errorAt('invite')} />
+              <Problem text={errorAt('invite') || errorAt('inviteLink')} />
               <div style={{ display: 'flex', gap: 8 }}>
                 <Button type="submit" disabled={busy || !(inv.email.trim() || inv.phone.trim())}>
                   {busyAt === 'invite' ? 'Sending…' : 'Send invitation'}
@@ -891,7 +897,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                   disabled={busy || !(inv.email.trim() || inv.phone.trim())}
                   onClick={() => void sendInvite(false)}
                 >
-                  Copy a link instead
+                  {busyAt === 'inviteLink' ? 'Making the link…' : 'Copy a link instead'}
                 </Button>
                 <Button
                   type="button"
@@ -3007,6 +3013,10 @@ interface InvitedPersonData {
   invited: { name: string; email: string | null; phone: string | null };
   invitations: {
     invitationId: string;
+    name?: string;
+    email?: string | null;
+    phone?: string | null;
+    copied?: boolean;
     roleLabel: string;
     invitedBy: string;
     expiresAt: string;
@@ -3031,7 +3041,11 @@ function InvitedPerson(): JSX.Element {
   const navigate = useNavigate();
   const load = useLoad<InvitedPersonData>(`/v1/people/invited/${invitationId}`);
   const all = useLoad<{ clients: ClientRow[] }>('/v1/clients');
-  const { act, actAt, busy, busyAt, error, errorAt } = useAct(load.reload);
+  const { actAt, busy, busyAt, error, errorAt } = useAct(load.reload);
+  // What moves the page to another invitation (Resend, Copy link, Delete) does not read this
+  // one again first: it no longer waits.
+  const go = useAct(() => undefined);
+  const act = go.act;
   const [note, setNote] = useState('');
   const [inviteLink, setInviteLink] = useState<{ to: string; link: string } | null>(null);
   const [adding, setAdding] = useState({ clientId: '', roleLabel: '' });
@@ -3048,8 +3062,9 @@ function InvitedPerson(): JSX.Element {
         {back}
         {load.error ? (
           <p role="alert">
-            This invitation is no longer waiting: it was accepted, deleted or sent again. Find the
-            person under People.
+            {load.error.startsWith('It is no longer there')
+              ? 'This invitation is no longer waiting: it was accepted, deleted or sent again. Find the person under People.'
+              : `Could not load the invitation: ${load.error}`}
           </p>
         ) : (
           <p role="status">Loading the invitation…</p>
@@ -3064,6 +3079,18 @@ function InvitedPerson(): JSX.Element {
     ...(d.invited.email ? { email: d.invited.email } : {}),
     ...(d.invited.phone ? { phone: d.invited.phone } : {}),
     name: d.invited.name,
+  };
+  // Each invitation as it was sent: its own email, number (a number typed beside the email is
+  // kept) and name.
+  const contactOf = (i: InvitedPersonData['invitations'][number]): Record<string, string> => {
+    // An older server gives no contact with a row: the person's, then.
+    const email = i.email === undefined ? d.invited.email : i.email;
+    const phone = i.phone === undefined ? d.invited.phone : i.phone;
+    return {
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+      name: i.name ?? d.invited.name,
+    };
   };
   const taken = new Set([...d.invitations.map((i) => i.clientId), ...d.accountClients]);
   const canAdd = (all.data?.clients ?? []).filter((c) => c.active && !taken.has(c.id));
@@ -3080,7 +3107,7 @@ function InvitedPerson(): JSX.Element {
           Invited, not accepted yet · {contact}
         </p>
       </div>
-      <Problem text={error} />
+      <Problem text={error || go.error} />
       {note && <p role="status">{note}</p>}
       {inviteLink && (
         <InviteLink to={inviteLink.to} link={inviteLink.link} onClose={() => setInviteLink(null)} />
@@ -3091,14 +3118,17 @@ function InvitedPerson(): JSX.Element {
             <>
               They already sign in to the portal as{' '}
               <Link to={`/staff/people/${d.account.identityId}`}>{d.account.name || contact}</Link>
-              {d.account.status === 'disabled' ? ' (account turned off)' : ''}: accepting adds these
-              clients to that account.{' '}
+              {d.account.status === 'disabled'
+                ? '. That account is turned off: they cannot accept until it is turned on. '
+                : ': accepting adds these clients to that account. To give them a client at once, without an invitation, use Add a client on their own page. '}
             </>
           ) : (
             'They have no account yet: one is made when they accept. '
           )}
-          Accepting any one invitation accepts every one below that is still waiting. Files are
-          chosen for them on each client’s page.
+          Accepting any one invitation that was sent to them accepts every one below that is still
+          waiting (not an expired one, nor one for a client that is switched off), and the other
+          links then say they were already used. A link you copied gives only its own client. Files
+          are chosen for them on each client’s page: press the client’s name.
         </p>
         <Table head={['Client', 'Role', 'Invitation', 'Files chosen', 'Actions']}>
           {d.invitations.map((i) => (
@@ -3112,6 +3142,7 @@ function InvitedPerson(): JSX.Element {
               <td style={td}>{i.roleLabel}</td>
               <td style={td}>
                 {i.status === 'expired' ? 'expired' : `waiting until ${when(i.expiresAt)}`}
+                {i.copied ? ' (link copied, not sent)' : ''}
               </td>
               <td style={td}>{i.files || ''}</td>
               <td style={td}>
@@ -3133,7 +3164,7 @@ function InvitedPerson(): JSX.Element {
                       }
                       setNote('');
                       void act(`/v1/clients/${i.clientId}/invites`, {
-                        body: { ...same, roleLabel: i.roleLabel },
+                        body: { ...contactOf(i), roleLabel: i.roleLabel },
                       }).then((r) => {
                         if (!r) return;
                         setNote(`A new invitation to ${i.clientName} was sent.`);
@@ -3150,7 +3181,12 @@ function InvitedPerson(): JSX.Element {
                   <Button
                     size="sm"
                     variant="secondary"
-                    disabled={busy || !i.clientActive}
+                    disabled={busy || !i.clientActive || d.account !== null}
+                    title={
+                      d.account
+                        ? 'They already have an account: use Add a client on their own page'
+                        : undefined
+                    }
                     aria-label={`Copy an invitation link to ${i.clientName}`}
                     onClick={() => {
                       if (
@@ -3165,7 +3201,7 @@ function InvitedPerson(): JSX.Element {
                       setNote('');
                       setInviteLink(null);
                       void act(`/v1/clients/${i.clientId}/invites`, {
-                        body: { ...same, roleLabel: i.roleLabel, send: false },
+                        body: { ...contactOf(i), roleLabel: i.roleLabel, send: false },
                       }).then((r) => {
                         const made = r as { invitationId: string; link?: string } | null;
                         if (!made?.link) return;
@@ -3196,6 +3232,7 @@ function InvitedPerson(): JSX.Element {
                       }).then((r) => {
                         if (!r) return;
                         // Nothing waits for them any more: back to People. Else to one that does.
+                        if (left[0]) setNote(`The invitation to ${i.clientName} was deleted.`);
                         navigate(
                           left[0]
                             ? `/staff/people/invited/${left[0].invitationId}`

@@ -102,6 +102,8 @@ export function staffSay(err: unknown): string {
     b2_bucket: 'A B2 bucket name is 6 to 63 letters, digits and hyphens.',
     b2_app_key: 'Enter the application key.',
     staff_only: 'That is done on the staff page.',
+    has_account:
+      'They already have an account, so a copied link is not used: it would let whoever opens it into that account. Open them under People and use Add a client, which gives access at once.',
     not_an_invitation:
       'That invitation was accepted or deleted meanwhile. Open the page again and choose again.',
     vf_follow_key:
@@ -251,6 +253,8 @@ export interface Invitation {
   roleLabel: string;
   expiresAt: string;
   status: 'invited' | 'expired';
+  /** P101: nothing was sent for it: staff copied its link. */
+  copied?: boolean;
 }
 
 export interface SharedFile {
