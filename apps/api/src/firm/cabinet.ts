@@ -404,7 +404,7 @@ export function cabinetAdd(ctx: Ctx): RequestHandler {
     try {
       const doc = await find(bucket, access, id, docId);
       // The object opens in one piece, in memory: refused by its size before it is fetched.
-      if (doc.size > limit) throw new HttpError(413, 'too_large');
+      if (doc.size > limit) throw new HttpError(413, 'vf_too_large');
       const plain = await content(bucket, access, doc);
       name = cleanName(doc.name);
       const year = doc.taxYear;
@@ -417,7 +417,7 @@ export function cabinetAdd(ctx: Ctx): RequestHandler {
         throw new VfError('vf_damaged', 'stored copy');
       }
     } catch (err) {
-      if (err instanceof TooLarge) throw new HttpError(413, 'too_large');
+      if (err instanceof TooLarge) throw new HttpError(413, 'vf_too_large');
       if (err instanceof VfError) {
         // The code and the object's place in the bucket; never a file name.
         ctx.log.warn({ reason: err.message }, 'a document in B2 could not be put on the portal');

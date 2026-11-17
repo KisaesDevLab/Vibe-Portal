@@ -118,6 +118,8 @@ export function staffSay(err: unknown): string {
       'The document in B2 does not open: it was changed or damaged there. Share it from Vibe Files instead.',
     vf_format:
       'The portal cannot read what Vibe Files put in the bucket. Share it from Vibe Files instead.',
+    vf_too_large:
+      'That document is larger than the portal takes (Settings › Firm sets the largest file).',
     vf_read_failed: 'The bucket could not be read right now. Try again.',
     b2_in_use:
       'Files are stored in this bucket. Move them back to the appliance before changing the bucket or removing it.',

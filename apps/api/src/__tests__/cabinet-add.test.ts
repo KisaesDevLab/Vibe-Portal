@@ -266,7 +266,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       .expect(200);
     await w.t.db.update(schema.firm).set({ uploadLimitBytes: 4 });
     const res = await add(boss, W2.docId);
-    expect([res.status, res.body]).toEqual([413, { error: 'too_large' }]);
+    expect([res.status, res.body]).toEqual([413, { error: 'vf_too_large' }]);
     expect(await w.t.db.select().from(schema.files)).toHaveLength(0);
   });
 });
