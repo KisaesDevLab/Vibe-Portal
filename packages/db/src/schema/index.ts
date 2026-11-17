@@ -104,6 +104,9 @@ export const firm = pgTable('firm', {
   b2KeyId: text('b2_key_id').notNull().default(''),
   /** The B2 application key, wrapped by the firm key. Never sent back to the page. */
   b2AppKeyEnc: bytea('b2_app_key_enc'),
+  /** P91: Vibe Files' firm sync key(s) and cabinet id, wrapped by the firm key: opens the
+   *  documents Vibe Files put in the same bucket. Never sent back to the page. */
+  vfSyncEnc: bytea('vf_sync_enc'),
   storageMove: jsonb('storage_move').$type<StorageMove>(),
   /** This installation; written into the bucket it uses (P51). */
   installId: uuid('install_id').notNull().defaultRandom(),

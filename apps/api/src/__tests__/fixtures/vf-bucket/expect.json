@@ -1,0 +1,35 @@
+{
+  "cabinetId": "01a1e9c8-f1d6-7622-a089-85253b27fddf",
+  "clients": [
+    {
+      "code": "2002",
+      "docs": [
+        {
+          "content": "941 invented",
+          "docId": "01a1e9c8-f23d-7211-b272-be7bdbb31ebd",
+          "path": "Payroll/2025/941 Q1.pdf",
+          "size": 12,
+          "taxYear": 2025
+        }
+      ],
+      "id": "c3581946-17e8-4c2c-a5e9-6f29295c8e6f",
+      "name": "Bell Ranch Inc"
+    },
+    {
+      "code": "1042",
+      "docs": [
+        {
+          "content": "w2 2025 invented",
+          "docId": "01a1e9c8-f23d-7211-b272-be79a3edddcd",
+          "path": "Income Tax/2025/W-2 Northwind.pdf",
+          "size": 16,
+          "taxYear": 2025
+        }
+      ],
+      "id": "df1c5916-917f-4ba7-8990-175228b0554f",
+      "name": "Anderson Farms LLC"
+    }
+  ],
+  "deletedDocId": "01a1e9c8-f23d-7211-b272-be7add6c6fca",
+  "passphrase": "correct horse battery staple"
+}

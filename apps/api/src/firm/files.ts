@@ -57,7 +57,8 @@ function actorOf(req: Request): Actor {
 export function firmFilesRouter(ctx: Ctx, staff = false): Router {
   const r = express.Router();
   if (staff) {
-    // Only Vibe Files reaches the cabinet: staff cannot share new files or replace content.
+    // Staff send no file of their own and replace no content: a new file comes from Vibe Files,
+    // or (P91) from Vibe Files' part of the bucket by firm/cabinet.ts.
     // Registered on the same routes, ahead of them, so they match exactly as those do (Express
     // ignores case and a trailing slash).
     r.post('/', notForStaff);

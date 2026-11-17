@@ -21,3 +21,4 @@ pnpm-lock.yaml -text
 *.ico          binary
 *.pdf          binary
 *.woff2        binary
+apps/api/src/__tests__/fixtures/vf-bucket/** -text

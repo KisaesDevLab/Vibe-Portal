@@ -102,6 +102,23 @@ export function staffSay(err: unknown): string {
     b2_bucket: 'A B2 bucket name is 6 to 63 letters, digits and hyphens.',
     b2_app_key: 'Enter the application key.',
     b2_not_set_up: 'Set up the B2 bucket first.',
+    vf_no_cabinet:
+      'Vibe Files has put nothing in this bucket. It must be the bucket Vibe Files’ B2 sync uses.',
+    vf_wrong_passphrase:
+      'That is not the sync passphrase of the Vibe Files cabinet in this bucket.',
+    vf_not_set_up:
+      'The portal cannot read Vibe Files’ documents yet: an admin enters Vibe Files’ sync passphrase under Settings › Storage.',
+    vf_key:
+      'Vibe Files’ sync key changed since the passphrase was entered here. An admin enters it again under Settings › Storage.',
+    vf_gone:
+      'That document is no longer in B2: it was deleted or taken out of B2 in Vibe Files since this list was sent.',
+    vf_missing:
+      'The document is listed in B2 but its content is not there. Push again from Vibe Files.',
+    vf_damaged:
+      'The document in B2 does not open: it was changed or damaged there. Share it from Vibe Files instead.',
+    vf_format:
+      'The portal cannot read what Vibe Files put in the bucket. Share it from Vibe Files instead.',
+    vf_read_failed: 'The bucket could not be read right now. Try again.',
     b2_in_use:
       'Files are stored in this bucket. Move them back to the appliance before changing the bucket or removing it.',
     move_running: 'A move is already under way.',
@@ -179,6 +196,8 @@ export interface ClientRow {
 /** P90: a client's documents in Vibe Files' B2 bucket (names only). `listedAt` null: no list. */
 export interface CabinetList {
   listedAt: string | null;
+  /** P91: the portal can read these documents from the bucket and put one on the portal. */
+  canAdd?: boolean;
   files: {
     docId: string;
     /** Below the client's folder, with the file name. */

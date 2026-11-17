@@ -30,6 +30,7 @@ import { mergeStorageNote, rowsOf } from '../lib/rows';
 import { B2Objects, type B2Settings } from './b2';
 import { NotFound, type Bucket, type ObjectStore } from './objects';
 import { snapshotIfDue } from './snapshot';
+import type { VfAccess } from './vf-bucket';
 
 type FirmRow = typeof schema.firm.$inferSelect;
 type StorageMove = schema.StorageMove;
@@ -49,6 +50,14 @@ export function b2Settings(ctx: Ctx, f: FirmRow): B2Settings | null {
   if (!f.b2Endpoint || !f.b2Bucket || !f.b2KeyId || !f.b2AppKeyEnc) return null;
   const appKey = Buffer.from(ctx.keyring.unwrap(new Uint8Array(f.b2AppKeyEnc))).toString('utf8');
   return { endpoint: f.b2Endpoint, bucket: f.b2Bucket, keyId: f.b2KeyId, appKey };
+}
+
+/** Vibe Files' firm sync keys (P91), or null when the sync passphrase was not entered. */
+export function vfAccess(ctx: Ctx, f: FirmRow): VfAccess | null {
+  if (!f.vfSyncEnc) return null;
+  return JSON.parse(
+    Buffer.from(ctx.keyring.unwrap(new Uint8Array(f.vfSyncEnc))).toString('utf8'),
+  ) as VfAccess;
 }
 
 export function openB2(ctx: Ctx, s: B2Settings): Bucket {
@@ -455,6 +464,8 @@ export async function storageState(ctx: Ctx) {
     },
     move: f.storageMove,
     note: f.storageNote,
+    /** P91: the cabinet of Vibe Files whose documents in this bucket the portal can open. */
+    vibeFiles: f.vfSyncEnc ? { cabinetId: vfAccess(ctx, f)?.cabinetId ?? '' } : null,
   };
 }
 

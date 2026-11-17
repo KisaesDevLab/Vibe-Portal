@@ -1,0 +1,25 @@
+{
+  "layout_ver": 1,
+  "cabinet_id": "01a1e9c8-f1d6-7622-a089-85253b27fddf",
+  "firm_id": "807e474c-7f56-489c-a316-2bc42feafb0a",
+  "created": "2026-11-17T13:53:42.994830Z",
+  "key_ids": [
+    "k-01"
+  ],
+  "wrapped": {
+    "k-01": {
+      "v": 1,
+      "kdf": "argon2id",
+      "params": {
+        "m_kib": 1024,
+        "t": 2,
+        "p": 1
+      },
+      "cipher": "chacha20poly1305",
+      "salt": "678403f4d1c9c24e3efa11d92c8567b3",
+      "nonce": "9258145612eed4fd7613ff7e",
+      "ciphertext": "c552f176ff2fca600fef4a6e51d295f380c6884a75e2e06fe2acb0ead604fc43f2e5b81500a21f9292c335379d4df3c6"
+    }
+  },
+  "object_lock_days": null
+}

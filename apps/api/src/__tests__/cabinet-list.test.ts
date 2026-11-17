@@ -172,7 +172,7 @@ describe('the list of documents in Vibe Files’ B2 bucket (P90)', () => {
     // One that has seen as much does; the client stays.
     await w.firm('delete', `/cabinet/${NEW}?headRev=9`).expect(200);
     const after = await w.firm('get', `/clients/${NEW}/cabinet-files`).expect(200);
-    expect(after.body).toEqual({ listedAt: null, files: [] });
+    expect(after.body).toEqual({ listedAt: null, canAdd: false, files: [] });
     // The portal remembers the clearing and how much its sender had seen: a PC that has
     // seen less cannot bring the list back; one that has seen as much can.
     expect((await w.firm('get', '/cabinet').expect(200)).body.clients).toEqual([

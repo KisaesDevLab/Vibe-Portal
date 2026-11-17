@@ -221,11 +221,10 @@ code. Resend also opens a link that was **Locked**. Also:
 
 ## Seeing the documents Vibe Files has in B2 (optional)
 
-Vibe Files can keep documents in your firm's own B2 bucket (its **Sync** tab). The portal cannot
-read that bucket: Vibe Files encrypts it with your sync passphrase, which the appliance never
-has. Vibe Files can send the portal a list instead, so staff see on the staff page which clients
-have documents in B2 and what they are. It needs Vibe Portal 0.3.15 and Vibe Files 0.1.38, or
-later.
+Vibe Files can keep documents in your firm's own B2 bucket (its **Sync** tab). Vibe Files
+encrypts them with your sync passphrase before they go up, so the bucket alone shows nothing.
+Vibe Files can send the portal a list of them, so staff see on the staff page which clients have
+documents in B2 and what they are. It needs Vibe Portal 0.3.15 and Vibe Files 0.1.38, or later.
 
 1. Update the portal first (`sudo vibe upgrade portal`), then Vibe Files on every PC.
 2. In Vibe Files › **Admin › Portal**, tick **Show the documents in B2 on the portal's staff
@@ -239,7 +238,8 @@ later.
 What to know:
 
 - **Names only.** The list holds no document. To put one on the portal, share it from Vibe Files
-  as before; the list then says **Yes** under **On the portal**.
+  as before; the list then says **Yes** under **On the portal**. Or let the portal read the
+  bucket itself: see **Adding a document in B2 to the portal from the staff page** below.
 - **Only what is in B2.** Documents held back by Vibe Files' **Sync › What goes to B2** are not
   listed. Change the rule, or push a document by hand, to list it.
 - **Staff only.** Clients' people see what was shared with them and nothing of this list. A staff
@@ -260,6 +260,40 @@ What to know:
 - The lists are not in the hourly database copy sent to the portal's own bucket (see
   **Backups**): after a restore from it they are empty until Vibe Files sends them again, about
   10 minutes after Vibe Files is next open on the computer B2 sync runs on.
+
+### Adding a document in B2 to the portal from the staff page (optional)
+
+Where the portal and Vibe Files' B2 sync use **the same bucket**, staff can put a document from
+the list on the portal without going to Vibe Files. It needs Vibe Portal 0.3.16 or later; Vibe
+Files needs no update.
+
+1. On the staff page, **Settings › Storage**, set up the B2 bucket if it is not (the bucket Vibe
+   Files' B2 sync uses; files need not be moved to it).
+2. Under **Vibe Files' documents in this bucket**, enter Vibe Files' **sync passphrase** and
+   press **Check and save**. The portal checks it against the bucket.
+3. On a client's page, each document under **Documents in B2 (from Vibe Files)** that is not on
+   the portal has **Add to portal**. The portal reads the document from the bucket and keeps
+   its own copy.
+4. The document is then under **Files**, shown to nobody: choose who sees it there, or send it
+   by a secure link, as for any file.
+
+What to know:
+
+- **The appliance can then open every document Vibe Files has in the bucket**, not only the
+  ones added. Until the passphrase is entered it can open none. Anyone who gets into the
+  appliance gets that too. Leave it out if that matters more than the convenience; sharing from
+  Vibe Files works as before either way.
+- The passphrase itself is not kept. The key it opens is, encrypted with the portal's own key,
+  as the bucket's application key is. **Remove** takes it off the portal again; documents
+  already added stay.
+- The document is read as the bucket has it at that moment. One deleted, or taken out of B2, in
+  Vibe Files since the list was sent is refused, and says so.
+- A document larger than the portal's largest upload is refused.
+- Vibe Files finds a document added this way as one it shared itself: Browse marks it, and
+  sharing it again from Vibe Files does not add it twice.
+- A document changed in the cabinet after it was added is not changed on the portal by this:
+  share it again from Vibe Files, or remove it from the portal and add it again.
+- If Vibe Files' sync passphrase is changed, enter the new one here.
 
 ## Storing files in Backblaze B2 (optional)
 

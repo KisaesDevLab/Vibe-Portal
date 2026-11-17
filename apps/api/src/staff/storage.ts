@@ -7,6 +7,8 @@
 //   GET    /api/staff/v1/settings/storage
 //   PUT    /api/staff/v1/settings/storage/b2     { endpoint, bucket, keyId, appKey? }  checked first
 //   DELETE /api/staff/v1/settings/storage/b2     only while no file is on B2
+//   PUT    /api/staff/v1/settings/storage/vibe-files  { passphrase }  Vibe Files' sync passphrase
+//   DELETE /api/staff/v1/settings/storage/vibe-files
 //   POST   /api/staff/v1/settings/storage/test   checks the saved bucket and key
 //   POST   /api/staff/v1/settings/storage/move   { to: 'b2' | 'local' }  runs in the background
 //   POST   /api/staff/v1/settings/storage/snapshot  sends a database snapshot to the bucket now
@@ -31,6 +33,7 @@ import {
   storageState,
 } from '../files/storage';
 import { forgetBucket, snapshotIfDue } from '../files/snapshot';
+import { unlock, VfError } from '../files/vf-bucket';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError } from '../lib/http';
 import type { StaffSession } from './auth';
@@ -44,6 +47,8 @@ const B2Schema = z.object({
   appKey: z.string().trim().min(1).max(200).optional(),
 });
 const MoveSchema = z.object({ to: z.enum(['b2', 'local']) });
+/** Not trimmed: a passphrase is taken as typed. */
+const VfSchema = z.object({ passphrase: z.string().min(1).max(1000) });
 
 const actor = (req: Request): Actor => ({
   kind: 'staff',
@@ -106,6 +111,8 @@ export function storageRouter(ctx: Ctx): Router {
         b2Bucket: input.bucket,
         b2KeyId: input.keyId,
         b2AppKeyEnc: Buffer.from(ctx.keyring.wrap(Buffer.from(appKey, 'utf8'))),
+        // Another bucket: Vibe Files' key was checked against the old one (P91).
+        ...(endpoint !== f.b2Endpoint || input.bucket !== f.b2Bucket ? { vfSyncEnc: null } : {}),
         updatedAt: ctx.now(),
       });
       // A new key for the bucket in use takes over at once.
@@ -144,9 +151,52 @@ export function storageRouter(ctx: Ctx): Router {
         b2Bucket: '',
         b2KeyId: '',
         b2AppKeyEnc: null,
+        vfSyncEnc: null,
         updatedAt: ctx.now(),
       });
       await record(ctx.db, 'storage_b2_removed', actor(req));
+      res.json(await storageState(ctx));
+    }),
+  );
+
+  // P91: Vibe Files' sync passphrase, so staff can put a document that is in Vibe Files' part
+  // of this bucket on the portal. The passphrase is checked against the bucket and not kept:
+  // the firm sync key it opens is, wrapped by the firm key. Neither is sent back, logged or
+  // written to History.
+  r.put(
+    '/vibe-files',
+    h(async (req, res) => {
+      const { passphrase } = body(VfSchema, req);
+      const f = await firmRow(ctx);
+      const s = b2Settings(ctx, f);
+      if (!s) throw new HttpError(400, 'b2_not_set_up');
+      let access;
+      try {
+        access = await unlock(openB2(ctx, s), passphrase);
+      } catch (err) {
+        if (err instanceof VfError) throw new HttpError(400, err.code);
+        refuse(ctx, res, err, 'reading Vibe Files’ documents');
+        return;
+      }
+      await ctx.db.update(schema.firm).set({
+        vfSyncEnc: Buffer.from(ctx.keyring.wrap(Buffer.from(JSON.stringify(access), 'utf8'))),
+        updatedAt: ctx.now(),
+      });
+      await record(ctx.db, 'storage_vf_saved', actor(req), {
+        detail: { cabinetId: access.cabinetId },
+      });
+      res.json(await storageState(ctx));
+    }),
+  );
+
+  r.delete(
+    '/vibe-files',
+    h(async (req, res) => {
+      const f = await firmRow(ctx);
+      if (f.vfSyncEnc) {
+        await ctx.db.update(schema.firm).set({ vfSyncEnc: null, updatedAt: ctx.now() });
+        await record(ctx.db, 'storage_vf_removed', actor(req));
+      }
       res.json(await storageState(ctx));
     }),
   );

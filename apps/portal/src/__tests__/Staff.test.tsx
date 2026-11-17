@@ -504,6 +504,51 @@ describe('staff page', () => {
     expect(reads()).toBe(1);
   });
 
+  it('adds a document in B2 to the portal where the portal can read the bucket (P91)', async () => {
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}`]: {
+        body: { ...CLIENT, cabinetListed: true, cabinetFiles: 2 },
+      },
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+      [`/v1/clients/${CLIENT.id}/cabinet-files`]: {
+        body: {
+          listedAt: '2026-11-15T10:00:00Z',
+          canAdd: true,
+          files: [
+            {
+              docId: 'd2',
+              path: 'Income Tax/2025/W-2.pdf',
+              size: 100,
+              taxYear: 2025,
+              fileId: null,
+            },
+            { docId: 'd3', path: 'EIN letter.pdf', size: 5, taxYear: null, fileId: null },
+          ],
+        },
+      },
+      [`POST /v1/clients/${CLIENT.id}/cabinet-files/d2`]: { status: 201, body: { fileId: 'f9' } },
+      [`POST /v1/clients/${CLIENT.id}/cabinet-files/d3`]: {
+        status: 409,
+        body: { error: 'vf_gone' },
+      },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add W-2.pdf to the portal' }));
+    expect(
+      await screen.findByText(
+        'W-2.pdf is on the portal now, shown to nobody yet: choose who sees it under Files.',
+      ),
+    ).toBeTruthy();
+    // The client's files are read again: they say what is on the portal.
+    expect(calls.filter((c) => c.path === `/v1/files?clientId=${CLIENT.id}`).length).toBe(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add EIN letter.pdf to the portal' }));
+    expect(await screen.findByText(/That document is no longer in B2/)).toBeTruthy();
+  });
+
   it('reads no list for a client Vibe Files has sent none for, or that has nothing in B2 (P90)', async () => {
     const calls = serve({
       '/auth/me': ME,

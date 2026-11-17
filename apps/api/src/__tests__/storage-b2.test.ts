@@ -158,6 +158,7 @@ describe('Settings > Storage (P51)', () => {
       },
       move: null,
       note: null,
+      vibeFiles: null,
     });
     // The check left no file behind in the bucket, only this portal's mark.
     expect(bucket.items.size).toBe(0);

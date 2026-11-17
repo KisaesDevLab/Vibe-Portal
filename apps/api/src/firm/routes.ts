@@ -34,7 +34,7 @@ import { inScope, limitedTo, mustSee, requireAllClients } from '../staff/scope';
 import { storageSummary } from '../files/storage';
 import { VERSION } from '../version';
 import { setAccess, withdrawInvites } from './access';
-import { cabinetFilesOf, firmCabinetRouter } from './cabinet';
+import { cabinetAdd, cabinetFilesOf, firmCabinetRouter } from './cabinet';
 import { firmFilesRouter } from './files';
 import { historyRows, HistoryQuery } from './history';
 import { staffPeopleRouter } from './people';
@@ -229,6 +229,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
 
   // P90: the client's documents in Vibe Files' B2 bucket (names, no content).
   r.get('/clients/:id/cabinet-files', cabinetFilesOf(ctx));
+  // P91: staff put one of them on the portal, read from Vibe Files' part of the bucket.
+  if (staff) r.post('/clients/:id/cabinet-files/:docId', cabinetAdd(ctx));
 
   r.put(
     '/clients/:id',
