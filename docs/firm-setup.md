@@ -528,6 +528,14 @@ On a client's page, under **People with access**, an invitation still waiting ha
 the link sent before stops working. **Delete** takes the invitation away, and its link stops
 working. Both ask first. An invitation that expired stays listed until it is resent or deleted.
 
+**When their email does not arrive (0.3.20).** Some mail systems block the portal's messages.
+**Copy link** on a waiting invitation (and **Copy a link instead** in the invite form) makes a
+new invitation without sending anything, and shows its link once for you to copy and pass on
+yourself: by text, or to another address of theirs. The link they had before stops working.
+It works once, for 7 days. **Whoever opens the link gets that person's access**, so give it
+only to them; unlike the emailed one, it does not show that the address is theirs. The link is
+not kept where it can be read again: once the box is closed, make a new one.
+
 **Files for someone who has not accepted yet.** Under **Files on the portal**, tick the files,
 and in the bar that appears tick the invited person under **For:** (their name, with
 **(invited)**; everyone is ticked to start with, so untick anyone the files are not for), then

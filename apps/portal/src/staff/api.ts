@@ -101,6 +101,7 @@ export function staffSay(err: unknown): string {
       "The endpoint must be the bucket's S3 endpoint from Backblaze, like s3.us-west-004.backblazeb2.com.",
     b2_bucket: 'A B2 bucket name is 6 to 63 letters, digits and hyphens.',
     b2_app_key: 'Enter the application key.',
+    staff_only: 'That is done on the staff page.',
     not_an_invitation:
       'That invitation was accepted or deleted meanwhile. Open the page again and choose again.',
     vf_follow_key:

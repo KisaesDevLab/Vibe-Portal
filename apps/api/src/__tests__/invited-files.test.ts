@@ -291,6 +291,43 @@ describe('files chosen for someone invited (P98)', () => {
     await request(w.app).post('/api/portal/invitations/accept').send({ token: token2 }).expect(404);
   });
 
+  it('an invitation link is made to copy, with nothing sent (P101)', async () => {
+    const a = await share(CLIENT, 'Return.pdf');
+    const first = await invite(CLIENT, 'joe@example.test', 'Joe Smith');
+    await staff
+      .put(`/api/staff/v1/files/${a}/visibility`)
+      .send({ invites: { [first]: true } })
+      .expect(200);
+    const sentBefore = w.notes.sent.length;
+    const made = await staff
+      .post(`/api/staff/v1/clients/${CLIENT}/invites`)
+      .send({ email: 'joe@example.test', name: 'Joe Smith', send: false })
+      .expect(201);
+    // Nothing went out; the link is in the answer, and nowhere in History.
+    expect(w.notes.sent.length).toBe(sentBefore);
+    expect(made.body.link).toMatch(/^https:\/\/files\.example-cpa\.test\/invite#t=[\w-]+$/);
+    const events = await w.t.db.select().from(schema.events);
+    expect(JSON.stringify(events)).not.toContain(made.body.link.split('#t=')[1]);
+    expect(events.filter((e) => e.kind === 'invite').at(-1)?.detail).toEqual(
+      expect.objectContaining({ copied: true }),
+    );
+    // Only from the staff page: Vibe Files' key is not handed a link.
+    const firm = await w
+      .firm('post', `/clients/${CLIENT}/invites`)
+      .send({ email: 'ann@example.test', name: 'Ann', send: false });
+    expect([firm.status, firm.body]).toEqual([403, { error: 'staff_only' }]);
+    // The link works as the emailed one would, and the files chosen came with it; the link
+    // emailed before does not work any more.
+    const old = /#t=([\w-]+)/.exec(w.notes.last('joe@example.test').body)?.[1] ?? '';
+    const joe = request.agent(w.app);
+    await request(w.app).post('/api/portal/invitations/accept').send({ token: old }).expect(404);
+    await joe
+      .post('/api/portal/invitations/accept')
+      .send({ token: (made.body.link as string).split('#t=')[1] })
+      .expect(200);
+    expect((await joe.get('/api/portal/files').expect(200)).body.files).toHaveLength(1);
+  });
+
   it('a deleted invitation takes its choices with it', async () => {
     const a = await share(CLIENT, 'Return.pdf');
     const inv = await invite(CLIENT, 'joe@example.test', 'Joe Smith');

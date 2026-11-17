@@ -1688,6 +1688,48 @@ describe('staff page', () => {
     );
   });
 
+  it('client page: an invitation link is made to copy instead of sent (P101)', async () => {
+    const id = CLIENT.id;
+    const waiting = {
+      invitationId: 'i1',
+      name: 'Jane Smith',
+      email: 'jane@example.test',
+      phone: null,
+      roleLabel: 'Spouse',
+      expiresAt: '2026-11-20T10:00:00Z',
+      status: 'invited',
+    };
+    const link = 'https://files.example-cpa.test/invite#t=abcdefghijklmnopqrstuvwxyz';
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [], invitations: [waiting] } },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      [`POST /v1/clients/${id}/invites`]: { status: 201, body: { invitationId: 'i2', link } },
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    at(`/staff/clients/${id}`);
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Copy an invitation link for jane@example.test' }),
+    );
+    const box = (await screen.findByLabelText('Invitation link')) as HTMLInputElement;
+    expect(box.value).toBe(link);
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      email: 'jane@example.test',
+      name: 'Jane Smith',
+      roleLabel: 'Spouse',
+      send: false,
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(await screen.findByText('Copied.')).toBeTruthy();
+    expect(writeText).toHaveBeenCalledWith(link);
+    // Closed, it is gone: it is shown once.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByLabelText('Invitation link')).toBeNull();
+  });
+
   it('People: someone invited has a page to resend, delete and add a client (P100)', async () => {
     const id = CLIENT.id;
     const one = {
