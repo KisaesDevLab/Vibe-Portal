@@ -140,6 +140,10 @@ export async function notifyBatch(
     ctx.db,
     'upload_notice',
     { kind: 'client', name: s.identityId },
-    { clientId: input.clientId, identityId: s.identityId, detail: { staff: staff.name, files: n } },
+    {
+      clientId: input.clientId,
+      identityId: s.identityId,
+      detail: { staff: staff.name, files: n, channel: 'email' },
+    },
   );
 }

@@ -1178,6 +1178,7 @@ describe('staff page', () => {
       who: 'Vibe Files (PC1\\ann)',
       file: '=2025 "Return".pdf',
       channel: null,
+      clientCode: '1001',
     };
     const calls = serve({
       '/auth/me': ME,
@@ -1235,14 +1236,34 @@ describe('staff page', () => {
     expect(await screen.findByText('The file has 1 row.')).toBeTruthy();
     expect(click).toHaveBeenCalled();
     const lines = csv.replace('\uFEFF', '').trim().split('\r\n');
-    expect(lines[0]).toBe('"When","What","Who","Client","File","About"');
-    expect(lines[1]).toContain('"Shared a file","Vibe Files (PC1\\ann)","Smith, John"');
+    expect(lines[0]).toBe(
+      '"When (this computer’s time)","What","Who","Client","Client ID","File","About"',
+    );
+    expect(lines[1]).toContain('"Shared a file","Vibe Files (PC1\\ann)","Smith, John","1001"');
     expect(lines[1]).toContain(`"'=2025 ""Return"".pdf"`);
     expect(lines).toHaveLength(2);
 
-    // Cleared: everything again.
+    // A day, too: asked for from its first moment to the first moment of the next.
+    fireEvent.change(screen.getByLabelText('From (day)'), { target: { value: '2026-11-01' } });
+    fireEvent.change(screen.getByLabelText('To (day)'), { target: { value: '2026-11-01' } });
+    await waitFor(() =>
+      expect(calls.some((c) => c.path.includes('&from=') && c.path.includes('&to='))).toBe(true),
+    );
+    // Cleared: everything again, the days with the rest (every box empty, nothing asked for
+    // but the plain list).
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
     expect(await screen.findByText('Told of new files', { selector: 'td' })).toBeTruthy();
+    expect((screen.getByLabelText('From (day)') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('To (day)') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('What') as HTMLSelectElement).value).toBe('');
+    expect((screen.getByLabelText('Client (name or ID)') as HTMLInputElement).value).toBe('');
+    expect(calls[calls.length - 1]?.path).toBe('/v1/history?limit=100');
+    // What offers every message at once; an admin also has the Settings kinds.
+    const whats = Array.from((screen.getByLabelText('What') as HTMLSelectElement).options).map(
+      (o) => o.text,
+    );
+    expect(whats).toContain('Any message sent (email or text)');
+    expect(whats).toContain('Staff signed in');
   });
 
   it("a client's page shows its history in plain words (P65)", async () => {

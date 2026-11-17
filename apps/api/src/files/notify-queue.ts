@@ -113,9 +113,25 @@ export async function flush(ctx: Ctx): Promise<number> {
     if (to.length === 0) to.push(...[who.email, who.phone].filter((c): c is string => !!c));
     // Sent here, not in the background: a failure puts the notices back for the next run
     // (QA 2026-11-09), so a short SMTP or Twilio outage does not lose them.
+    let told = false;
     try {
       for (const t of to) await ctx.notifier.send(messageTo(t, subject, text));
       sent += 1;
+      told = true;
+    } catch (err) {
+      ctx.log.error({ err, identityId }, 'new-files notice failed; will retry');
+      await ctx.db
+        .update(schema.notifyQueue)
+        .set({ sentAt: null })
+        .where(
+          inArray(
+            schema.notifyQueue.id,
+            claimed.map((c) => c.id),
+          ),
+        );
+    }
+    if (!told) continue;
+    try {
       // P103 (owner 2026-11-17): History says when someone was told, and how. One entry for
       // each client the files are of (a person may see several), so each client's History has
       // its own. No address or number: History reaches staff limited to some clients.
@@ -136,16 +152,8 @@ export async function flush(ctx: Ctx): Promise<number> {
         );
       }
     } catch (err) {
-      ctx.log.error({ err, identityId }, 'new-files notice failed; will retry');
-      await ctx.db
-        .update(schema.notifyQueue)
-        .set({ sentAt: null })
-        .where(
-          inArray(
-            schema.notifyQueue.id,
-            claimed.map((c) => c.id),
-          ),
-        );
+      // The message went out: it is not sent again because History could not be written.
+      ctx.log.error({ err, identityId }, 'new-files notice sent, but not written to History');
     }
   }
   return sent;

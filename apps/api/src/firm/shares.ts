@@ -295,6 +295,7 @@ export async function createOutsideShare(
     detail: {
       shareId: id,
       to: email,
+      channel: 'email',
       files: files.length,
       days: input.days,
       canDownload: input.canDownload,
@@ -553,7 +554,7 @@ export function firmSharesRouter(ctx: Ctx, staff: boolean): Router {
       await ctx.db.delete(schema.fileShareCode).where(eq(schema.fileShareCode.shareId, share.id));
       await record(ctx.db, 'outside_share_resent', actorOf(req), {
         clientId: share.clientId,
-        detail: { shareId: share.id, to: share.recipientEmail },
+        detail: { shareId: share.id, to: share.recipientEmail, channel: 'email' },
       });
       res.json({ ok: true });
     }),

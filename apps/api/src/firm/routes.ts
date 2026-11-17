@@ -63,6 +63,16 @@ import { firmUploadsRouter } from './uploads';
 
 export const INVITE_DAYS = 7;
 
+/** Who an invitation is for, as History keeps it (it cannot be changed later, and reaches Vibe
+ *  Files' feed): the name typed, unless what was typed is itself an address or a number, and
+ *  then the contact, masked. */
+function invitedWords(name: string, contact: string): string {
+  const typed = name.trim();
+  return typed && !typed.includes('@') && !/^[+\d\s().-]{7,}$/.test(typed)
+    ? typed
+    : maskContact(contact);
+}
+
 const Uuid = z.string().uuid();
 const ClientSchema = z.object({
   clientCode: z.string().trim().max(64).default(''),
@@ -586,7 +596,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
             replaced: replaced.map((x) => x.id),
             copied: true,
             channel: 'a copied link',
-            invitedName: input.name || maskContact(sendTo),
+            invitedName: invitedWords(input.name, sendTo),
           },
         });
         res.status(201).json({ invitationId: inv.id, expiresAt, link });
@@ -613,7 +623,7 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           replaced: replaced.map((x) => x.id),
           // P103: how the invitation went out, and who it is for (no person yet).
           channel: email ? 'email' : 'text',
-          invitedName: input.name || maskContact(sendTo),
+          invitedName: invitedWords(input.name, sendTo),
         },
       });
       res.status(201).json({ invitationId: inv.id, expiresAt });
@@ -890,6 +900,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           identityId: done.identityId,
           detail: {
             accessRequestId: id,
+            // P103: they are told by a message to the contact they confirmed.
+            channel: done.to.includes('@') ? 'email' : 'text',
             ...(check
               ? { check: { method: check.method, matched: check.matched, note: check.note } }
               : {}),

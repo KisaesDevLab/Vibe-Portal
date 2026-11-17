@@ -22,6 +22,7 @@ import {
   Routes,
   useLocation,
   useNavigate,
+  useSearchParams,
   useParams,
 } from 'react-router-dom';
 import {
@@ -389,7 +390,7 @@ export function StaffHome(): JSX.Element {
               </>
             }
           />
-          <Route path="history" element={<History />} />
+          <Route path="history" element={<History admin={admin} />} />
           {admin && <Route path="settings" element={<Settings />} />}
           {admin && <Route path="log" element={<Log />} />}
           <Route path="*" element={<Navigate to="/staff" replace />} />
@@ -1013,6 +1014,8 @@ interface ClientEvent {
   check?: string | null;
   /** P103: how a message went out: email, text, email and text, a copied link. */
   channel?: string | null;
+  /** P103: the client's ID in Vibe Files. */
+  clientCode?: string | null;
 }
 
 /** What a row is about besides its file: the person, a secure link's recipient, how an
@@ -1057,7 +1060,7 @@ const DID: Record<string, string> = {
   storage_move: 'Move of stored files started',
   storage_moved: 'Stored files moved',
   storage_swept: 'Leftover stored files deleted',
-  storage_sweep_refused: 'Leftover check refused',
+  storage_sweep_refused: 'Leftover file check held back',
   storage_snapshot_failed: 'Database copy failed',
   fetch: 'Fetched an upload',
   upload_removed: 'Removed an upload',
@@ -1071,8 +1074,8 @@ const DID: Record<string, string> = {
   request_confirmed: 'Confirmed an access request',
   approve: 'Approved access',
   deny: 'Denied access',
-  disable: 'Turned off someone',
-  enable: 'Turned on someone',
+  disable: 'Turned off a person’s access to a client',
+  enable: 'Turned on a person’s access to a client',
   sign_in: 'Signed in',
   sign_out: 'Signed out',
   phone_added: 'Added a mobile number',
@@ -1088,10 +1091,10 @@ const DID: Record<string, string> = {
   outside_share_resent: 'Sent a secure link again',
   account_off: 'Account turned off',
   account_on: 'Account turned on',
-  person_updated: 'Details changed',
+  person_updated: 'Person’s details changed',
   contact_change_sent: 'Asked to confirm a new email or number',
   contact_changed: 'Confirmed a new email or number',
-  client_added: 'Client added',
+  client_added: 'Gave a person a client',
   sign_in_link_sent: 'Sign-in link sent',
   id_viewed: 'Looked at a photo ID',
   client_link_set: 'Portal link set',
@@ -2706,10 +2709,11 @@ const HISTORY_PAGE = 100;
 const CSV_MAX_ROWS = 20_000;
 const CSV_PAGE = 500;
 
-/** One CSV cell: quoted, and never a formula (a name that starts with = + - or @ is text). */
+/** One CSV cell: quoted, and never a formula (a name that starts with = + - or @ is text). A
+ *  mobile number (+1 555…) is left as it is: it is no formula, and the mark would show. */
 function csvCell(v: string): string {
-  const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
-  return `"${safe.replace(/"/g, '""')}"`;
+  const formula = /^[=+\-@\t\r]/.test(v) && !/^\+\d[\d\s().-]*$/.test(v);
+  return `"${(formula ? `'${v}` : v).replace(/"/g, '""')}"`;
 }
 
 /** yyyy-mm-dd hh:mm:ss in this computer's time, as a spreadsheet takes a date. */
@@ -2719,20 +2723,96 @@ function csvWhen(iso: string): string {
   return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
 }
 
+/** What only admins have in History (as the API keeps it from the others): not offered to them
+ *  under What, where choosing one would always show nothing. */
+const ADMIN_ONLY_KINDS = new Set([
+  'staff_sign_in',
+  'staff_sso',
+  'settings_updated',
+  'staff_added',
+  'staff_on',
+  'staff_off',
+  'staff_reset',
+  'staff_access',
+  'firm_key_created',
+  'firm_key_revoked',
+  'storage_b2_saved',
+  'storage_b2_removed',
+  'storage_vf_saved',
+  'storage_vf_removed',
+  'storage_move',
+  'storage_moved',
+  'storage_swept',
+  'storage_sweep_refused',
+  'storage_snapshot_failed',
+]);
+
+/** Every entry that is a message the portal sent someone (the What chooser's "Any message
+ *  sent"). */
+const MESSAGE_KINDS = [
+  'file_notice',
+  'invite',
+  'approve',
+  'client_added',
+  'sign_in_link_sent',
+  'contact_change_sent',
+  'upload_notice',
+  'outside_share',
+  'outside_share_resent',
+  'outside_code_sent',
+].join(',');
+
+const HISTORY_FILTERS = ['from', 'to', 'what', 'who', 'client', 'file', 'about'] as const;
+type HistoryFilter = Record<(typeof HISTORY_FILTERS)[number], string>;
+const NO_FILTERS: HistoryFilter = {
+  from: '',
+  to: '',
+  what: '',
+  who: '',
+  client: '',
+  file: '',
+  about: '',
+};
+
 /**
  * P103 (owner 2026-11-17: "add a filter for each column and add a column for client and file
  * name… send it to CSV"): everything that happened, newest first, in words. Each column
  * narrows the list, in the whole history and not only the rows read so far; the filters are
  * kept in the address. Download CSV gives the rows the filters leave.
  */
-function History(): JSX.Element {
-  const [from, setFrom] = useUrlState('from');
-  const [to, setTo] = useUrlState('to');
-  const [kind, setKind] = useUrlState('what');
-  const [whoTyped, who, setWho] = useUrlSearch('who');
-  const [clientTyped, client, setClient] = useUrlSearch('client');
-  const [fileTyped, file, setFile] = useUrlSearch('file');
-  const [aboutTyped, about, setAbout] = useUrlSearch('about');
+function History({ admin }: { admin: boolean }): JSX.Element {
+  const [params, setParams] = useSearchParams();
+  // What the boxes show (at once), and what the list is asked for (a moment after the last
+  // key). One place holds all seven, and one write puts them in the address: seven separate
+  // writes in one click would each start from the same address and undo one another.
+  const [typed, setTyped] = useState<HistoryFilter>(() => {
+    const f = { ...NO_FILTERS };
+    for (const k of HISTORY_FILTERS) f[k] = params.get(k) ?? '';
+    return f;
+  });
+  const [asked, setAsked] = useState<HistoryFilter>(typed);
+  const apply = useCallback(
+    (f: HistoryFilter): void => {
+      setAsked(f);
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          for (const k of HISTORY_FILTERS) {
+            if (f[k].trim()) next.set(k, f[k].trim());
+            else next.delete(k);
+          }
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
+  useEffect(() => {
+    const t = window.setTimeout(() => apply(typed), 300);
+    return () => window.clearTimeout(t);
+  }, [typed, apply]);
+  const set = (k: keyof HistoryFilter, v: string): void => setTyped((f) => ({ ...f, [k]: v }));
   // A day is this computer's day: from its first moment to the first moment of the next.
   const dayStart = (day: string, add = 0): string | null => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
@@ -2741,18 +2821,19 @@ function History(): JSX.Element {
     return Number.isNaN(d.getTime()) ? null : d.toISOString();
   };
   const query = [
-    ['from', dayStart(from)],
-    ['to', dayStart(to, 1)],
-    ['kind', kind],
-    ['who', who],
-    ['client', client],
-    ['file', file],
-    ['about', about],
+    ['from', dayStart(asked.from)],
+    ['to', dayStart(asked.to, 1)],
+    ['kind', asked.what],
+    ['who', asked.who.trim()],
+    ['client', asked.client.trim()],
+    ['file', asked.file.trim()],
+    ['about', asked.about.trim()],
   ]
     .filter((x): x is [string, string] => Boolean(x[1]))
     .map(([k, v]) => `&${k}=${encodeURIComponent(v)}`)
     .join('');
   const filtered = query !== '';
+  const anyTyped = HISTORY_FILTERS.some((k) => typed[k] !== '');
   const path = `/v1/history?limit=${HISTORY_PAGE}${query}`;
   const load = useLoad<{ events: ClientEvent[] }>(path);
   // Older pages, fetched as asked for (P57).
@@ -2761,19 +2842,28 @@ function History(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
   const [csvNote, setCsvNote] = useState('');
+  // The list the page shows now: an answer to an earlier one is not added to it.
+  const current = useRef(path);
+  current.current = path;
   const first = load.data?.events ?? [];
   useEffect(() => {
     setOlder([]);
     setMore(first.length === HISTORY_PAGE);
   }, [load.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setOlder([]);
+    setCsvNote('');
+  }, [path]);
   const rows = [...first, ...older];
   const showOlder = async (): Promise<void> => {
     const last = rows[rows.length - 1];
     if (!last) return;
+    const asking = path;
     setBusy(true);
     setProblem('');
     try {
-      const r = await staffApi<{ events: ClientEvent[] }>(`${path}&before=${last.id}`);
+      const r = await staffApi<{ events: ClientEvent[] }>(`${asking}&before=${last.id}`);
+      if (current.current !== asking) return;
       setOlder((o) => [...o, ...r.events]);
       setMore(r.events.length === HISTORY_PAGE);
     } catch (err) {
@@ -2791,23 +2881,30 @@ function History(): JSX.Element {
     try {
       const all: ClientEvent[] = [];
       let before = '';
+      // More than one file holds were there to read.
+      let cut = false;
       for (;;) {
         const r = await staffApi<{ events: ClientEvent[] }>(
           `/v1/history?limit=${CSV_PAGE}${query}${before}`,
         );
         all.push(...r.events);
         const last = r.events[r.events.length - 1];
-        if (r.events.length < CSV_PAGE || !last || all.length >= CSV_MAX_ROWS) break;
+        if (r.events.length < CSV_PAGE || !last) break;
+        if (all.length >= CSV_MAX_ROWS) {
+          cut = true;
+          break;
+        }
         before = `&before=${last.id}`;
         setCsvNote(`Reading the history… ${all.length} rows so far.`);
       }
       const lines = [
-        ['When', 'What', 'Who', 'Client', 'File', 'About'],
+        ['When (this computer’s time)', 'What', 'Who', 'Client', 'Client ID', 'File', 'About'],
         ...all.map((e) => [
           csvWhen(e.at),
           what(e),
           e.who,
           e.client ?? '',
+          e.clientCode ?? '',
           e.file ?? '',
           aboutOf(e),
         ]),
@@ -2823,9 +2920,10 @@ function History(): JSX.Element {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      // Not at once: some browsers have not begun to read the file yet.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
       setCsvNote(
-        all.length >= CSV_MAX_ROWS
+        cut
           ? `The file has the newest ${all.length} rows, the most one file holds. Narrow the dates for the rest.`
           : `The file has ${all.length} ${all.length === 1 ? 'row' : 'rows'}.`,
       );
@@ -2836,20 +2934,17 @@ function History(): JSX.Element {
       setBusy(false);
     }
   };
-  const kinds = Object.entries(DID).sort((x, y) => x[1].localeCompare(y[1]));
+  const kinds = Object.entries(DID)
+    .filter(([k]) => admin || !ADMIN_ONLY_KINDS.has(k))
+    .sort((x, y) => x[1].localeCompare(y[1]));
   const clear = (): void => {
-    setFrom('');
-    setTo('');
-    setKind('');
-    setWho('');
-    setClient('');
-    setFile('');
-    setAbout('');
+    setTyped(NO_FILTERS);
+    apply(NO_FILTERS);
   };
   return (
     <Card title="History">
       <p style={{ marginTop: 0 }}>
-        Newest first: sign-ins, invitations, sharing, client views and downloads, uploads, notices
+        Newest first: sign-ins, invitations, sharing, client views and downloads, uploads, messages
         sent, and secure links sent outside. Each box below narrows the list by its column, in the
         whole history.
       </p>
@@ -2863,8 +2958,8 @@ function History(): JSX.Element {
             label="From (day)"
             name="historyFrom"
             type="date"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
+            value={typed.from}
+            onChange={(e) => set('from', e.target.value)}
           />
         </div>
         <div style={{ flex: '0 1 150px' }}>
@@ -2872,13 +2967,14 @@ function History(): JSX.Element {
             label="To (day)"
             name="historyTo"
             type="date"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
+            value={typed.to}
+            onChange={(e) => set('to', e.target.value)}
           />
         </div>
         <div style={{ flex: '1 1 200px' }}>
-          <Select label="What" value={kind} onChange={(e) => setKind(e.target.value)}>
+          <Select label="What" value={typed.what} onChange={(e) => set('what', e.target.value)}>
             <option value="">Everything</option>
+            <option value={MESSAGE_KINDS}>Any message sent (email or text)</option>
             {kinds.map(([k, words]) => (
               <option key={k} value={k}>
                 {words}
@@ -2890,36 +2986,36 @@ function History(): JSX.Element {
           <Input
             label="Who"
             name="historyWho"
-            value={whoTyped}
-            onChange={(e) => setWho(e.target.value)}
+            value={typed.who}
+            onChange={(e) => set('who', e.target.value)}
           />
         </div>
         <div style={{ flex: '1 1 160px' }}>
           <Input
             label="Client (name or ID)"
             name="historyClient"
-            value={clientTyped}
-            onChange={(e) => setClient(e.target.value)}
+            value={typed.client}
+            onChange={(e) => set('client', e.target.value)}
           />
         </div>
         <div style={{ flex: '1 1 160px' }}>
           <Input
             label="File"
             name="historyFile"
-            value={fileTyped}
-            onChange={(e) => setFile(e.target.value)}
+            value={typed.file}
+            onChange={(e) => set('file', e.target.value)}
           />
         </div>
         <div style={{ flex: '1 1 160px' }}>
           <Input
-            label="About"
+            label="About (a person, or “by email”)"
             name="historyAbout"
-            value={aboutTyped}
-            onChange={(e) => setAbout(e.target.value)}
+            value={typed.about}
+            onChange={(e) => set('about', e.target.value)}
           />
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <Button variant="secondary" disabled={!filtered && !whoTyped} onClick={clear}>
+          <Button variant="secondary" disabled={!filtered && !anyTyped} onClick={clear}>
             Clear filters
           </Button>
           <Button variant="secondary" disabled={busy || !load.data} onClick={() => void download()}>
@@ -2929,7 +3025,10 @@ function History(): JSX.Element {
       </div>
       <Status load={load} what="the history" />
       <Problem text={problem} />
-      {csvNote && <p role="status">{csvNote}</p>}
+      {/* Always on the page, so a screen reader hears its words when they come. */}
+      <p role="status" style={{ margin: csvNote ? undefined : 0 }}>
+        {csvNote}
+      </p>
       {load.data && rows.length === 0 && (
         <p>{filtered ? 'Nothing matches these filters.' : 'Nothing has happened yet.'}</p>
       )}

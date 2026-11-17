@@ -39,7 +39,7 @@ describe('a client history (P65)', () => {
     expect(events.find((e) => e.kind === 'invite')).toEqual(
       expect.objectContaining({
         who: 'Vibe Files (THGR18C-XA003\\kurt)',
-        person: 'mary@example.test',
+        person: 'm***@example.test',
         channel: 'email',
       }),
     );

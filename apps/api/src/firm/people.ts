@@ -405,9 +405,10 @@ export function staffPeopleRouter(ctx: Ctx): Router {
           target: [schema.clientAccess.identityId, schema.clientAccess.clientId],
           set: { active: true, roleLabel: input.roleLabel, invitedBy: by.name },
         });
-      await record(ctx.db, 'client_added', by, { clientId: client.id, identityId: who.id });
       // Told where they asked to hear from the portal; nothing for a turned-off account.
       let told = false;
+      /** P103: how they were told, for History: the ways that went through. */
+      const went: string[] = [];
       if (who.status === 'active' && who.notify !== 'none') {
         const firm = await firmName(ctx);
         const to = [
@@ -429,11 +430,19 @@ export function staffPeopleRouter(ctx: Ctx): Router {
               ),
             );
             told = true;
+            went.push(email ? 'email' : 'text');
           } catch (err) {
             ctx.log.error({ err, channel: email ? 'email' : 'sms' }, 'client added notice failed');
           }
         }
       }
+      // Written once the notices were tried (the access itself is given above, whatever
+      // becomes of them): History says how the person was told, or that they were not.
+      await record(ctx.db, 'client_added', by, {
+        clientId: client.id,
+        identityId: who.id,
+        detail: { channel: went.length ? went.join(' and ') : 'no notice' },
+      });
       res.status(201).json({ ok: true, told });
     }),
   );
@@ -526,7 +535,7 @@ export function staffPeopleRouter(ctx: Ctx): Router {
         identityId: who.id,
         // Masked: History reaches staff limited to their clients and Vibe Files' feed, and the
         // contact is not confirmed (it may be someone else's).
-        detail: { field, to: maskContact(value) },
+        detail: { field, to: maskContact(value), channel: field === 'email' ? 'email' : 'text' },
       });
       res.json({ ok: true });
     }),

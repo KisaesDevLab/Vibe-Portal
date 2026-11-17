@@ -316,7 +316,7 @@ export function sharedRouter(ctx: Ctx): Router {
         );
       await record(ctx.db, 'outside_code_sent', recipient(s), {
         clientId: s.clientId,
-        detail: { shareId: s.id },
+        detail: { shareId: s.id, channel: 'email' },
       });
       res.json({ ok: true, emailMasked: maskContact(s.recipientEmail) });
     }),

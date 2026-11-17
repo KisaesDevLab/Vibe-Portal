@@ -163,7 +163,7 @@ describe('the History page (P103)', () => {
       .events as (Row & { channel: string | null })[];
     expect(hers.some((e) => e.kind === 'file_notice')).toBe(true);
     expect(hers.find((e) => e.kind === 'invite')).toEqual(
-      expect.objectContaining({ channel: 'email', person: 'mary@example.test' }),
+      expect.objectContaining({ channel: 'email', person: 'm***@example.test' }),
     );
     // Found by how it was sent, under About.
     expect((await history(boss, '&about=email')).some((e) => e.kind === 'file_notice')).toBe(true);

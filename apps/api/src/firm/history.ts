@@ -56,6 +56,8 @@ export interface HistoryRow {
   recipient: string | null;
   /** The client it was on (a person's activity spans their clients). */
   client: string | null;
+  /** P103: the client's ID in Vibe Files, for the CSV. */
+  clientCode: string | null;
   /** An approval: how staff checked who was asking (Addendum 01, layer B), in words. */
   check: string | null;
   /** P103: how a message went out: 'email', 'text', 'email and text', 'a copied link'. */
@@ -96,7 +98,7 @@ export async function historyRows(
   const f = opts.filter;
   // Who did it, in the words the row gives (below), so what is typed is found as it is read.
   const whoWords = sql<string>`CASE ${schema.events.actorKind}
-    WHEN 'client' THEN coalesce(nullif(${actorPerson.name}, ''), ${actorPerson.email}, ${actorPerson.phone}, 'a client')
+    WHEN 'client' THEN coalesce(nullif(${actorPerson.name}, ''), nullif(${actorPerson.email}, ''), nullif(${actorPerson.phone}, ''), 'a client')
     WHEN 'system' THEN CASE WHEN ${schema.events.actor} = ${FOLLOW_ACTOR} THEN ${schema.events.actor} ELSE 'the portal' END
     WHEN 'firm_key' THEN 'Vibe Files (' || ${schema.events.actor} || ')'
     ELSE ${schema.events.actor} END`;
@@ -126,7 +128,8 @@ export async function historyRows(
               ilike(sql`${schema.events.detail}->>'to'`, likeText(f.about)),
               ilike(sql`${schema.events.detail}->>'invited'`, likeText(f.about)),
               ilike(sql`${schema.events.detail}->>'invitedName'`, likeText(f.about)),
-              ilike(sql`${schema.events.detail}->>'channel'`, likeText(f.about)),
+              // As the column words it: "by email", "by text".
+              ilike(sql`'by ' || (${schema.events.detail}->>'channel')`, likeText(f.about)),
             )
           : undefined,
       )
@@ -147,6 +150,7 @@ export async function historyRows(
       file: schema.files.name,
       upload: schema.uploads.name,
       client: schema.clients.displayName,
+      clientCode: schema.clients.clientCode,
       detail: schema.events.detail,
     })
     .from(schema.events)
@@ -193,6 +197,7 @@ export async function historyRows(
       file: e.file ?? e.upload ?? null,
       recipient: typeof d['to'] === 'string' ? d['to'] : null,
       client: e.client ?? null,
+      clientCode: e.clientCode ?? null,
       check: opts.check && e.kind === 'approve' ? checkOf(d['check']) : null,
       channel: typeof d['channel'] === 'string' ? d['channel'] : null,
     };
