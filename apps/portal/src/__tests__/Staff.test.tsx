@@ -1803,4 +1803,70 @@ describe('the preview of a client portal (P77)', () => {
     const img = (await screen.findByAltText('Return.png')) as HTMLImageElement;
     expect(img.getAttribute('src')).toBe(`/api/staff/v1/clients/${id}/preview/files/f1/content`);
   });
+
+  it('is seen as one person, chosen in the bar or by the address (P92)', async () => {
+    const id = CLIENT.id;
+    const file = {
+      id: 'f1',
+      name: 'Return.png',
+      size: 10,
+      contentType: 'image/png',
+      taxYear: 2025,
+      sharedAt: '2026-11-09T15:00:00Z',
+      updatedAt: null,
+      isNew: false,
+      preview: 'image',
+    };
+    const persons = [
+      { identityId: 'p1', name: 'Mary Smith' },
+      { identityId: 'p2', name: 'Joe Smith' },
+    ];
+    const body = { firmName: 'Example CPA', client: { id, name: 'Smith, John', active: true } };
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/preview`]: {
+        body: { ...body, people: 2, persons, as: null, link: null, files: [file] },
+      },
+      [`/v1/clients/${id}/preview?as=p2`]: {
+        body: {
+          ...body,
+          people: 2,
+          persons,
+          as: persons[1],
+          link: null,
+          files: [{ ...file, isNew: true }],
+        },
+      },
+    });
+    at(`/staff/preview/${id}`);
+    const pick = (await screen.findByLabelText('View as')) as HTMLSelectElement;
+    expect(pick.value).toBe('');
+    expect(screen.queryByText('New')).toBeNull();
+    fireEvent.change(pick, { target: { value: 'p2' } });
+    expect(
+      await screen.findByText('Preview of Smith, John’s portal as Joe Smith sees it.'),
+    ).toBeTruthy();
+    expect(screen.getByText('Signed in as Joe Smith.')).toBeTruthy();
+    expect(screen.getByText('New')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Return.png' }));
+    const img = (await screen.findByAltText('Return.png')) as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe(
+      `/api/staff/v1/clients/${id}/preview/files/f1/content?as=p2`,
+    );
+    cleanup();
+
+    // Straight from the client's staff page: its People list links each person so.
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}`]: { body: CLIENT },
+      [`/v1/clients/${id}/users`]: { body: { users: [USER], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+    });
+    at(`/staff/clients/${id}`);
+    const link = await screen.findByRole('link', {
+      name: 'See the portal as John Smith does (opens in a new tab)',
+    });
+    expect(link.getAttribute('href')).toBe(`/staff/preview/${id}?as=${USER.identityId}`);
+  });
 });

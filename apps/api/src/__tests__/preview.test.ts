@@ -93,6 +93,59 @@ describe('the preview of a client portal (P77)', () => {
     await staff.get(`${preview(CLIENT)}/files/${nobody}/content`).expect(404);
   });
 
+  it('seen as one person: only the files shared with them, with their New marks (P92)', async () => {
+    const mary = await w.member('mary@example.test');
+    const joe = await w.member('joe@example.test');
+    const farmer = await w.member('farmer@example.test', OTHER);
+    const both = await share(CLIENT, 'Return.pdf');
+    const hers = await share(CLIENT, 'W-2.pdf');
+    const his = await share(CLIENT, 'K-1.pdf');
+    await show(both, { [mary.id]: true, [joe.id]: true });
+    await show(hers, { [mary.id]: true });
+    await show(his, { [joe.id]: true });
+    // Mary opens one herself: no longer new for her, still new for Joe.
+    await mary.agent.get(`/api/portal/files/${both}/content`).expect(200);
+
+    const all = (await staff.get(preview(CLIENT)).expect(200)).body;
+    expect(all.files).toHaveLength(3);
+    expect(all.as).toBeNull();
+    expect(all.persons.map((p: { identityId: string }) => p.identityId).sort()).toEqual(
+      [mary.id, joe.id].sort(),
+    );
+    // Nobody's view: nothing is marked new.
+    expect(all.files.every((f: { isNew: boolean }) => !f.isNew)).toBe(true);
+
+    const asMary = (await staff.get(`${preview(CLIENT)}?as=${mary.id}`).expect(200)).body;
+    expect(asMary.as.identityId).toBe(mary.id);
+    const news = Object.fromEntries(
+      asMary.files.map((f: { name: string; isNew: boolean }) => [f.name, f.isNew]),
+    );
+    expect(news).toEqual({ 'Return.pdf': false, 'W-2.pdf': true });
+    const asJoe = (await staff.get(`${preview(CLIENT)}?as=${joe.id}`).expect(200)).body;
+    expect(
+      Object.fromEntries(
+        asJoe.files.map((f: { name: string; isNew: boolean }) => [f.name, f.isNew]),
+      ),
+    ).toEqual({ 'Return.pdf': true, 'K-1.pdf': true });
+
+    // A file opens in a person's view only when it is shared with that person, and the
+    // opening is the staff member's: it stays new for them.
+    await staff.get(`${preview(CLIENT)}/files/${his}/content?as=${mary.id}`).expect(404);
+    await staff.get(`${preview(CLIENT)}/files/${hers}/content?as=${mary.id}`).expect(200);
+    const mine = (await mary.agent.get('/api/portal/files').expect(200)).body.files;
+    expect(mine.find((f: { id: string }) => f.id === hers).isNew).toBe(true);
+
+    // Someone of another client, a made-up id, or a person turned off for this client: not found.
+    await staff.get(`${preview(CLIENT)}?as=${farmer.id}`).expect(404);
+    await staff.get(`${preview(CLIENT)}?as=not-an-id`).expect(404);
+    await staff
+      .patch(`/api/staff/v1/clients/${CLIENT}/users/${joe.id}`)
+      .send({ active: false })
+      .expect(200);
+    await staff.get(`${preview(CLIENT)}?as=${joe.id}`).expect(404);
+    await staff.get(`${preview(CLIENT)}/files/${his}/content?as=${joe.id}`).expect(404);
+  });
+
   it('a file of another client is not in this preview', async () => {
     const mary = await w.member('mary@example.test', OTHER);
     const theirs = await share(OTHER, 'Farm.pdf');

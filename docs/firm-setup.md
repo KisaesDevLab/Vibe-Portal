@@ -461,6 +461,11 @@ shared with them, so the preview lists the files someone at the client can see. 
 open; nothing downloads, and opening a file here does not count as the client having seen it (it
 is in History as yours).
 
+To see it as **one person** does, press **View as** beside them under **People with access**, or
+choose them under **View as** at the top of the preview. The preview then lists only the files
+shared with that person, each marked **New** where they have not opened it yet. It is still read
+only, and opening a file there still does not count as their opening it.
+
 ## When something is wrong
 
 | What you see                                                                 | What to check                                                                                                                                                                           |

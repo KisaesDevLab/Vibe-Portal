@@ -612,6 +612,18 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                 >
                   {u.active ? 'Turn off' : 'Turn on'}
                 </Button>
+                {/* P92: this person's portal for this client, read only, in a new tab. */}
+                {u.active && (
+                  <a
+                    href={`/staff/preview/${id}?as=${u.identityId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ marginLeft: 8, whiteSpace: 'nowrap' }}
+                    aria-label={`See the portal as ${label(u)} does (opens in a new tab)`}
+                  >
+                    View as
+                  </a>
+                )}
               </td>
             </tr>
           ))}
