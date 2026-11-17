@@ -2841,6 +2841,7 @@ function Person(): JSX.Element {
   const [changing, setChanging] = useState<'email' | 'phone' | null>(null);
   const [contact, setContact] = useState('');
   const [adding, setAdding] = useState({ clientId: '', roleLabel: '' });
+  const [clientFind, setClientFind] = useState('');
   const d = load.data;
   // Only when what is saved changes: another action reloads the page and must not wipe edits.
   const savedName = d?.person.name;
@@ -2880,6 +2881,14 @@ function Person(): JSX.Element {
   };
   const has = new Set(d.clients.filter((c) => c.active).map((c) => c.id));
   const canAdd = (all.data?.clients ?? []).filter((c) => c.active && !has.has(c.id));
+  // P99: a firm has hundreds of clients: the list is narrowed by a name or client ID typed
+  // above it. The one chosen stays in the list whatever is typed.
+  const findWords = clientFind.toLowerCase().split(/\s+/).filter(Boolean);
+  const offered = canAdd.filter(
+    (c) =>
+      c.id === adding.clientId ||
+      findWords.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
+  );
   const notifyOptions = (Object.keys(NOTIFY_WORDS) as (keyof typeof NOTIFY_WORDS)[]).filter(
     (k) =>
       k === 'none' ||
@@ -3105,6 +3114,7 @@ function Person(): JSX.Element {
             }).then((r) => {
               if (!r) return;
               setAdding({ clientId: '', roleLabel: '' });
+              setClientFind('');
               setNote(
                 (r as { told?: boolean }).told
                   ? `${name} added. ${who} was told.`
@@ -3117,18 +3127,43 @@ function Person(): JSX.Element {
           <span style={{ fontSize: 13 }}>
             They can see it at once, and are told by email or text.
           </span>
+          <Input
+            label="Find a client (name or client ID)"
+            name="addClientFind"
+            value={clientFind}
+            onChange={(e) => {
+              const typed = e.target.value;
+              setClientFind(typed);
+              // Only one client left: it is the one meant.
+              const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
+              const left = canAdd.filter((c) =>
+                words.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
+              );
+              if (words.length && left.length === 1 && left[0]) {
+                setAdding({ ...adding, clientId: left[0].id });
+              }
+            }}
+          />
           <Select
             label="Client"
             value={adding.clientId}
             onChange={(e) => setAdding({ ...adding, clientId: e.target.value })}
           >
-            <option value="">Choose a client</option>
-            {canAdd.map((c) => (
+            <option value="">
+              {findWords.length
+                ? `Choose a client (${offered.length} of ${canAdd.length} match)`
+                : 'Choose a client'}
+            </option>
+            {offered.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.displayName}
+                {c.clientCode ? ` (${c.clientCode})` : ''}
               </option>
             ))}
           </Select>
+          {findWords.length > 0 && offered.length === 0 && (
+            <span role="status">No client matches. Clients they already see are not listed.</span>
+          )}
           <Input
             label="Role (optional, e.g. Spouse)"
             name="addRole"

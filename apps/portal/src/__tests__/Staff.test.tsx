@@ -1297,8 +1297,18 @@ describe('staff page', () => {
     const pick = (await screen.findByLabelText('Client')) as HTMLSelectElement;
     expect(Array.from(pick.options).map((o) => o.text)).toEqual([
       'Choose a client',
-      'Smith Farms LLC',
+      'Smith Farms LLC (1002)',
     ]);
+    // A name or client ID typed above narrows the list; one left is chosen by itself.
+    fireEvent.change(screen.getByLabelText('Find a client (name or client ID)'), {
+      target: { value: 'zzz' },
+    });
+    expect(Array.from(pick.options).map((o) => o.text)).toEqual(['Choose a client (0 of 1 match)']);
+    expect(screen.getByText(/^No client matches\./)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Find a client (name or client ID)'), {
+      target: { value: 'farm' },
+    });
+    expect(pick.value).toBe('c2');
     fireEvent.change(pick, { target: { value: 'c2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add client' }));
     expect(await screen.findByText('Smith Farms LLC added. Mary Smith was told.')).toBeTruthy();
