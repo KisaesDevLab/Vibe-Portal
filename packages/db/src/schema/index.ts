@@ -295,6 +295,20 @@ export const portalInvitation = pgTable('portal_invitation', {
   createdAt: ts('created_at').notNull().defaultNow(),
 });
 
+/** P98: files chosen for someone invited who has not accepted yet: shown to them when they do. */
+export const invitationFile = pgTable(
+  'invitation_file',
+  {
+    invitationId: uuid('invitation_id')
+      .notNull()
+      .references(() => portalInvitation.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id').notNull(),
+    chosenAt: ts('chosen_at').notNull().defaultNow(),
+    chosenBy: text('chosen_by').notNull().default(''),
+  },
+  (t) => [primaryKey({ columns: [t.invitationId, t.fileId] })],
+);
+
 export const accessRequest = pgTable('access_request', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),

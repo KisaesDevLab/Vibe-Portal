@@ -1578,6 +1578,82 @@ describe('staff page', () => {
     ],
   };
 
+  it('client page: files are chosen for someone invited; People lists who is waiting (P98)', async () => {
+    const id = CLIENT.id;
+    const waiting = {
+      invitationId: 'i1',
+      name: 'Jane Smith',
+      email: 'jane@example.test',
+      phone: null,
+      roleLabel: 'Spouse',
+      expiresAt: '2026-11-20T10:00:00Z',
+      status: 'invited',
+    };
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [], invitations: [waiting] } },
+      [`/v1/files?clientId=${id}`]: {
+        body: {
+          files: [
+            portalFile('f1', 'Return 2025.pdf'),
+            { ...(portalFile('f2', 'Return 2024.pdf') as object), invites: ['i1'] },
+          ],
+        },
+      },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      'PUT /v1/files/f1/visibility': { body: { ok: true } },
+      'PUT /v1/files/f2/visibility': { body: { ok: true } },
+      '/v1/people/list?q=': {
+        body: {
+          people: [],
+          more: false,
+          invited: [{ ...waiting, clientId: id, clientName: 'Smith, John' }],
+        },
+      },
+    });
+    at(`/staff/clients/${id}`);
+    // Already chosen for her: said on the file's row, and it can be taken back.
+    expect(
+      await screen.findByText(/Jane Smith \(invited: sees it once they accept\)/),
+    ).toBeTruthy();
+    // Nobody has accepted yet, and a file can still be given to the one invited.
+    fireEvent.click(screen.getByLabelText('Select Return 2025.pdf'));
+    expect((screen.getByLabelText('Jane Smith (invited)') as HTMLInputElement).checked).toBe(true);
+    const show = screen.getByRole('button', { name: 'Show to them' }) as HTMLButtonElement;
+    expect(show.disabled).toBe(false);
+    fireEvent.click(show);
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'PUT' && c.path === '/v1/files/f1/visibility')?.body,
+      ).toEqual({ users: {}, invites: { i1: true } }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Return 2024.pdf from Jane Smith' }));
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'PUT' && c.path === '/v1/files/f2/visibility')?.body,
+      ).toEqual({ invites: { i1: false } }),
+    );
+    cleanup();
+
+    // The People page: nobody can sign in yet, and it says who was invited and for which client.
+    serve({
+      '/auth/me': ME,
+      '/v1/people/list?q=': {
+        body: {
+          people: [],
+          more: false,
+          invited: [{ ...waiting, clientId: id, clientName: 'Smith, John' }],
+        },
+      },
+    });
+    at('/staff/people');
+    expect(await screen.findByRole('heading', { name: 'Invited, not accepted yet' })).toBeTruthy();
+    expect(screen.getByText('jane@example.test')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Smith, John' }).getAttribute('href')).toBe(
+      `/staff/clients/${id}`,
+    );
+  });
+
   it('client page: the selected files go out together in one secure link (P97)', async () => {
     const id = CLIENT.id;
     const calls = serve({

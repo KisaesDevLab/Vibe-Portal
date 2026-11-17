@@ -474,6 +474,36 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         })
         .returning({ id: schema.portalInvitation.id });
       if (!inv) throw new Error('invitation insert returned nothing');
+      // P98: the files chosen for the invitation(s) it replaces go with it (Resend).
+      if (replaced.length) {
+        const kept = await ctx.db
+          .select({
+            fileId: schema.invitationFile.fileId,
+            chosenAt: schema.invitationFile.chosenAt,
+            chosenBy: schema.invitationFile.chosenBy,
+          })
+          .from(schema.invitationFile)
+          .where(
+            inArray(
+              schema.invitationFile.invitationId,
+              replaced.map((x) => x.id),
+            ),
+          );
+        const seen = new Set<string>();
+        const rows = kept.filter((k) => !seen.has(k.fileId) && seen.add(k.fileId));
+        if (rows.length) {
+          await ctx.db
+            .insert(schema.invitationFile)
+            .values(rows.map((k) => ({ ...k, invitationId: inv.id })))
+            .onConflictDoNothing();
+        }
+        await ctx.db.delete(schema.invitationFile).where(
+          inArray(
+            schema.invitationFile.invitationId,
+            replaced.map((x) => x.id),
+          ),
+        );
+      }
       const firm = await firmName(ctx);
       const link = `${ctx.portalUrl}/invite#t=${token}`;
       deliver(
@@ -512,6 +542,10 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
         )
         .returning({ id: schema.portalInvitation.id });
       if (!rows.length) throw new HttpError(404, 'not_found');
+      // P98: the files chosen for it are chosen for nobody now.
+      await ctx.db
+        .delete(schema.invitationFile)
+        .where(eq(schema.invitationFile.invitationId, invitationId));
       await record(ctx.db, 'invite_revoked', actorOf(req), {
         clientId,
         detail: { invitationId },

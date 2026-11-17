@@ -526,6 +526,17 @@ On a client's page, under **People with access**, an invitation still waiting ha
 the link sent before stops working. **Delete** takes the invitation away, and its link stops
 working. Both ask first. An invitation that expired stays listed until it is resent or deleted.
 
+**Files for someone who has not accepted yet.** Under **Files on the portal**, tick the files,
+and in the bar that appears tick the invited person under **For:** (their name, with
+**(invited)**), then press **Show to them**. The file's row then says it is chosen for them.
+They are told nothing of the files yet; when they accept the invitation, the files are on their
+page at once, marked **New**. The choices follow a **Resend**; **Delete** drops them, and a file
+removed from the portal meanwhile is left out.
+
+**People** lists only those who can sign in, so someone invited is not among them until they
+accept. Below the list, **Invited, not accepted yet** names each invitation still waiting and
+its client, with a link to the client's page, where it is resent, deleted, or given files.
+
 ## When something is wrong
 
 | What you see                                                                 | What to check                                                                                                                                                                           |

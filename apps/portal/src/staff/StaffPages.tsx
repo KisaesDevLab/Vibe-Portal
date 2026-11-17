@@ -779,6 +779,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
       <ClientFiles
         load={files}
         people={people.data?.users ?? []}
+        invited={people.data?.invitations ?? []}
         label={label}
         busy={busy}
         act={act}
@@ -1054,9 +1055,13 @@ function ClientFiles({
   act,
   onChanged,
   onSend,
+  invited,
 }: {
   load: Load<{ files: SharedFile[] }>;
   people: PortalUser[];
+  /** P98: invitations not accepted yet: files can be chosen for them, to be theirs when they
+   *  accept. */
+  invited: Invitation[];
   label: (u: PortalUser) => string;
   busy: boolean;
   act: (path: string, init: { method?: string; body?: unknown }) => Promise<unknown>;
@@ -1077,8 +1082,12 @@ function ClientFiles({
   const [problem, setProblem] = useState('');
   const all = load.data?.files ?? [];
   const activePeople = people.filter((p) => p.active);
-  // Everyone with access, until the staff member narrows it.
-  const chosen = who ?? new Set(activePeople.map((p) => p.identityId));
+  const invitedLabel = (i: Invitation): string => i.name || i.email || i.phone || 'someone invited';
+  // An invitation's place among the choices (people are there by their own id).
+  const inviteKey = (i: Invitation): string => `invite:${i.invitationId}`;
+  // Everyone with access and everyone invited, until the staff member narrows it.
+  const chosen =
+    who ?? new Set([...activePeople.map((p) => p.identityId), ...invited.map(inviteKey)]);
   const years = [...new Set(all.map((f) => f.taxYear))].sort((a, b) => (b ?? 0) - (a ?? 0));
   // A year not among the files (an old link) is every year, so the list is never stuck empty.
   const year =
@@ -1141,7 +1150,16 @@ function ClientFiles({
     many((f) =>
       staffApi(`/v1/files/${f.fileId}/visibility`, {
         method: 'PUT',
-        body: { users: Object.fromEntries([...chosen].map((i) => [i, visible])) },
+        body: {
+          users: Object.fromEntries(
+            [...chosen].filter((i) => !i.startsWith('invite:')).map((i) => [i, visible]),
+          ),
+          invites: Object.fromEntries(
+            [...chosen]
+              .filter((i) => i.startsWith('invite:'))
+              .map((i) => [i.slice('invite:'.length), visible]),
+          ),
+        },
       }),
     );
   const off = busy || working;
@@ -1166,7 +1184,33 @@ function ClientFiles({
         </small>
       </td>
       <td style={td}>
-        {f.users.filter((x) => x.visible).length === 0 && 'nobody'}
+        {f.users.filter((x) => x.visible).length === 0 &&
+          (f.invites ?? []).length === 0 &&
+          'nobody'}
+        {/* P98: chosen for someone invited: theirs when they accept. */}
+        {(f.invites ?? []).map((invitationId) => {
+          const i = invited.find((x) => x.invitationId === invitationId);
+          const name = i ? invitedLabel(i) : 'someone invited';
+          return (
+            <span key={invitationId} style={{ display: 'inline-flex', gap: 4, marginRight: 8 }}>
+              {name} (invited: sees it once they accept)
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={off}
+                aria-label={`Hide ${f.name} from ${name}`}
+                onClick={() =>
+                  void act(`/v1/files/${f.fileId}/visibility`, {
+                    method: 'PUT',
+                    body: { invites: { [invitationId]: false } },
+                  })
+                }
+              >
+                Hide
+              </Button>
+            </span>
+          );
+        })}
         {f.users
           .filter((x) => x.visible)
           .map((x) => {
@@ -1277,7 +1321,7 @@ function ClientFiles({
           <strong>
             {picked.size} {picked.size === 1 ? 'file' : 'files'} selected
           </strong>
-          {activePeople.length > 0 && (
+          {activePeople.length + invited.length > 0 && (
             <fieldset
               style={{
                 display: 'flex',
@@ -1304,7 +1348,27 @@ function ClientFiles({
                   {label(p)}
                 </label>
               ))}
+              {invited.map((i) => (
+                <label key={i.invitationId} style={{ display: 'inline-flex', gap: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={chosen.has(inviteKey(i))}
+                    onChange={(e) => {
+                      const next = new Set(chosen);
+                      if (e.target.checked) next.add(inviteKey(i));
+                      else next.delete(inviteKey(i));
+                      setWho(next);
+                    }}
+                  />
+                  {invitedLabel(i)} (invited)
+                </label>
+              ))}
             </fieldset>
+          )}
+          {invited.length > 0 && (
+            <small style={{ color: tokens.color.textMuted }}>
+              Someone invited sees the files chosen for them once they accept the invitation.
+            </small>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Button
@@ -2583,6 +2647,18 @@ function Log(): JSX.Element {
   );
 }
 
+/** P98: someone invited who has not accepted: not a person of the portal yet. */
+interface InvitedRow {
+  invitationId: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  expiresAt: string;
+  status: 'invited' | 'expired';
+  clientId: string;
+  clientName: string;
+}
+
 interface PersonRow {
   identityId: string;
   name: string;
@@ -2600,7 +2676,7 @@ const personLabel = (p: { name: string; email: string | null; phone: string | nu
 function People(): JSX.Element {
   const [typed, q, setTyped] = useUrlSearch();
   const path = `/v1/people/list?q=${encodeURIComponent(q)}`;
-  const load = useLoad<{ people: PersonRow[]; more: boolean }>(path);
+  const load = useLoad<{ people: PersonRow[]; more: boolean; invited?: InvitedRow[] }>(path);
   const [later, setLater] = useState<PersonRow[]>([]);
   const [more, setMore] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -2642,7 +2718,11 @@ function People(): JSX.Element {
       <Status load={load} what="the people" />
       <Problem text={problem} />
       {load.data && rows.length === 0 && (
-        <p>{q ? 'Nobody matches.' : 'Nobody is on the portal yet.'}</p>
+        <p>
+          {q
+            ? 'Nobody who can sign in matches.'
+            : 'Nobody can sign in to the portal yet: someone invited is listed here once they accept.'}
+        </p>
       )}
       <Table head={['Name', 'Email / phone', 'Clients', 'Last sign-in']}>
         {rows.map((p) => (
@@ -2679,6 +2759,35 @@ function People(): JSX.Element {
             Show more
           </Button>
         </div>
+      )}
+      {(load.data?.invited ?? []).length > 0 && (
+        <section aria-labelledby="invited-heading" style={{ marginTop: 16 }}>
+          <h3 id="invited-heading" style={{ margin: '0 0 4px', fontSize: 16 }}>
+            Invited, not accepted yet
+          </h3>
+          <p style={{ marginTop: 0 }}>
+            They are listed above once they accept. Until then, resend or delete the invitation, and
+            choose files for them, on the client’s page.
+          </p>
+          <Table head={['Name', 'Email / phone', 'Client', 'Invitation']}>
+            {(load.data?.invited ?? []).map((i) => (
+              <tr key={i.invitationId}>
+                <td style={td}>{i.name || '—'}</td>
+                <td style={{ ...td, overflowWrap: 'anywhere' }}>
+                  {[i.email, i.phone].filter(Boolean).join(', ')}
+                </td>
+                <td style={td}>
+                  <Link className="client-name" to={`/staff/clients/${i.clientId}`}>
+                    {i.clientName}
+                  </Link>
+                </td>
+                <td style={td}>
+                  {i.status === 'expired' ? 'expired' : `waiting until ${when(i.expiresAt)}`}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        </section>
       )}
     </Card>
   );
