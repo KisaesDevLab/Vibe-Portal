@@ -5,7 +5,12 @@
 // head; for each client whose segment changed since it last looked, it compares the client's
 // such files with the documents there, and replaces the portal's copy of one whose content (or
 // name) changed: it counts as new again for the people who see it, who are told as for any
-// update. A document deleted, or taken out of B2, in Vibe Files keeps its copy on the portal.
+// update.
+//
+// P95 (owner 2026-11-17): the update marks the file new and sends no notice; and a document
+// deleted, or taken out of B2, in Vibe Files leaves the portal too: its copy is removed, as
+// staff removing it would. Only when the client's segment is there and no longer has the
+// document: a client that is not in the manifest at all (a bucket set up anew) loses nothing.
 // Only files added from B2 follow it: one shared from Vibe Files is Vibe Files' to replace.
 
 import { Readable } from 'node:stream';
@@ -17,7 +22,7 @@ import { schema } from '@vibe-portal/db';
 import { uploadLimit, type Ctx } from '../context';
 import { FOLLOW_ACTOR } from '../firm/history';
 import type { Actor } from '../lib/events';
-import { replaceContent } from './replace';
+import { removeFile, replaceContent } from './replace';
 import { firmRow, vfSource } from './storage';
 import { cleanName, contentTypeOf } from './types';
 import { content, oneAtATime, readHead, readSegment, segmentKey, VfError } from './vf-bucket';
@@ -45,12 +50,14 @@ export function followProblem(): string | null {
 export interface Followed {
   /** Files whose copy on the portal was replaced. */
   updated: number;
+  /** Files taken off the portal: their document left B2. */
+  removed: number;
   /** Files that could not be compared or replaced this time (tried again at the next look). */
   failed: number;
 }
 
 export async function followB2(ctx: Ctx): Promise<Followed> {
-  const out: Followed = { updated: 0, failed: 0 };
+  const out: Followed = { updated: 0, removed: 0, failed: 0 };
   if (running) return out;
   running = true;
   try {
@@ -113,11 +120,20 @@ export async function followB2(ctx: Ctx): Promise<Followed> {
         const docs = await readSegment(src.bucket, src.access, key);
         for (const f of due) {
           const doc = docs.get(f.docId);
-          const name = doc ? cleanName(doc.name) : f.name;
-          // Gone from B2, the same as the portal's, or too large for it: nothing to do until
-          // the client's segment changes again.
-          if (!doc || (doc.sha256 === f.sha256 && name === f.name) || doc.size > limit) {
-            if (doc && doc.size > limit) {
+          // No longer in B2 (deleted in the cabinet, or taken out of B2): off the portal too.
+          // Not if Vibe Files or staff changed the file meanwhile.
+          if (!doc) {
+            if (await removeFile(ctx, f, ACTOR, { from: 'b2' }, { sha256: f.sha256 })) {
+              out.removed += 1;
+            }
+            compared.delete(f.id);
+            continue;
+          }
+          const name = cleanName(doc.name);
+          // The same as the portal's, or too large for it: nothing to do until the client's
+          // segment changes again.
+          if ((doc.sha256 === f.sha256 && name === f.name) || doc.size > limit) {
+            if (doc.size > limit) {
               ctx.log.warn(
                 { fileId: f.id },
                 'a changed document in B2 is too large for the portal',
@@ -162,7 +178,8 @@ export async function followB2(ctx: Ctx): Promise<Followed> {
                 name,
                 ACTOR,
                 { from: 'b2' },
-                { onlyIf: f.sha256 },
+                // New for those who see it; nobody is sent a notice (P95).
+                { onlyIf: f.sha256, quiet: true },
               );
               if (!ok) await ctx.blobs.remove(put.blobKey);
               return ok;

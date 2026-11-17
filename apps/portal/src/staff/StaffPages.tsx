@@ -1161,7 +1161,9 @@ function ClientFiles({
           {f.contentUpdatedAt
             ? `Updated ${when(f.contentUpdatedAt)}`
             : `Shared ${when(f.sharedAt)} by ${f.sharedBy}`}
-          {f.fromB2 ? ' · Added from B2: updated by itself when it changes there' : ''}
+          {f.fromB2
+            ? ' · Added from B2: updated by itself when it changes there, removed when it leaves B2'
+            : ''}
         </small>
       </td>
       <td style={td}>
@@ -1495,7 +1497,7 @@ function CabinetFileList({
           <p>
             {`${count} ${count === 1 ? 'document' : 'documents'} in B2, ${here} on the portal. `}
             {canAdd
-              ? 'Add to portal puts a copy of a document on the portal, shown to nobody until you choose who sees it under Files. The copy is updated by itself when Vibe Files pushes a changed version to B2. '
+              ? 'Add to portal puts a copy of a document on the portal, shown to nobody until you choose who sees it under Files. The copy is updated by itself when Vibe Files pushes a changed version to B2, and removed from the portal when the document is deleted in Vibe Files or taken out of B2. '
               : 'Only the names are here: share a document from Vibe Files to put it on the portal. '}
             {load.data.listedAt && (
               <small style={{ color: tokens.color.textMuted }}>
@@ -4041,12 +4043,12 @@ function Storage(): JSX.Element {
                 <strong>Vibe Files’ documents in B2</strong>
                 <span style={{ fontSize: 13 }}>
                   The portal can put a document Vibe Files has in B2 on the portal: a client’s page
-                  then has <strong>Add to portal</strong> on its documents in B2, and a document
-                  added that way is updated by itself when Vibe Files pushes a changed version. Vibe
-                  Files encrypts what it sends to B2, so the portal needs Vibe Files’ sync
-                  passphrase. With it, this appliance can open every document Vibe Files has in the
-                  bucket. The passphrase is checked and not kept; the key it opens is kept here,
-                  encrypted.
+                  then has <strong>Add to portal</strong> on its documents in B2. A document added
+                  that way is updated by itself when Vibe Files pushes a changed version, and
+                  removed from the portal when it leaves B2. Vibe Files encrypts what it sends to
+                  B2, so the portal needs Vibe Files’ sync passphrase. With it, this appliance can
+                  open every document Vibe Files has in the bucket. The passphrase is checked and
+                  not kept; the key it opens is kept here, encrypted.
                 </span>
                 <span>
                   {d.vibeFiles

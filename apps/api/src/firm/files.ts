@@ -20,9 +20,8 @@ import { schema } from '@vibe-portal/db';
 
 import { uploadLimit, type Ctx } from '../context';
 import { TooLarge } from '../files/blobs';
-import { dropMarksOfFile } from '../files/marks';
 import { drop, enqueue } from '../files/notify-queue';
-import { replaceContent } from '../files/replace';
+import { removeFile, replaceContent } from '../files/replace';
 import { cleanName, contentTypeOf } from '../files/types';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError, notForStaff, queryWithText } from '../lib/http';
@@ -263,21 +262,8 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
     '/:id',
     h(async (req, res) => {
       const id = fileId(req);
-      const now = ctx.now();
-      const actor = actorOf(req);
       const before = await liveFile(req, id);
-      const [gone] = await ctx.db
-        .update(schema.files)
-        .set({ removedAt: now, removedBy: actor.name, blobKey: null, dekWrapped: null })
-        .where(and(eq(schema.files.id, id), isNull(schema.files.removedAt)))
-        .returning({ clientId: schema.files.clientId });
-      if (!gone) throw new HttpError(404, 'not_found');
-      // D9: removed from the portal means gone from its disk too; the cabinet keeps the original.
-      if (before.blobKey) await ctx.blobs.remove(before.blobKey);
-      // Watermarked copies in secure links were made from the old content (P49).
-      await dropMarksOfFile(ctx, id);
-      await drop(ctx.db, id, null, now);
-      await record(ctx.db, 'remove', actor, { clientId: gone.clientId, fileId: id });
+      if (!(await removeFile(ctx, before, actorOf(req)))) throw new HttpError(404, 'not_found');
       res.json({ ok: true });
     }),
   );

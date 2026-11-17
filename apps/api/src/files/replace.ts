@@ -10,7 +10,7 @@ import type { Ctx } from '../context';
 import { record, type Actor } from '../lib/events';
 import type { Stored } from './blobs';
 import { dropMarksOfFile } from './marks';
-import { enqueue } from './notify-queue';
+import { drop, enqueue } from './notify-queue';
 import { contentTypeOf } from './types';
 
 /**
@@ -22,7 +22,8 @@ import { contentTypeOf } from './types';
  * (the portal following B2 took a while to fetch the new one; Vibe Files may have replaced
  * the file meanwhile, and its version is not written over). `opts.fromB2`: whether the file
  * follows the bucket from now on (false when Vibe Files replaced it: it is then Vibe Files'
- * to replace).
+ * to replace). `opts.quiet`: marked new for those who see it, but nobody is sent a notice
+ * (P95, owner 2026-11-17: an update the portal made by itself from B2).
  */
 export async function replaceContent(
   ctx: Ctx,
@@ -31,7 +32,7 @@ export async function replaceContent(
   name: string,
   actor: Actor,
   detail: Record<string, unknown> = {},
-  opts: { onlyIf?: string; fromB2?: boolean } = {},
+  opts: { onlyIf?: string; fromB2?: boolean; quiet?: boolean } = {},
 ): Promise<boolean> {
   const now = ctx.now();
   const id = before.id;
@@ -65,13 +66,15 @@ export async function replaceContent(
       .set({ viewedAt: null })
       .where(and(eq(schema.fileVisibility.fileId, id), eq(schema.fileVisibility.visible, true)))
       .returning({ identityId: schema.fileVisibility.identityId });
-    await enqueue(
-      tx,
-      seen.map((s) => s.identityId),
-      id,
-      'updated',
-      now,
-    );
+    if (!opts.quiet) {
+      await enqueue(
+        tx,
+        seen.map((s) => s.identityId),
+        id,
+        'updated',
+        now,
+      );
+    }
     return true;
   });
   if (!done) return false;
@@ -82,6 +85,45 @@ export async function replaceContent(
     clientId: before.clientId,
     fileId: id,
     detail: { name, size: stored.size, ...detail },
+  });
+  return true;
+}
+
+/**
+ * Takes a file off the portal: its row is kept as removed, its stored content deleted (D9: the
+ * cabinet keeps the original), watermarked copies and waiting notices dropped. False when it
+ * was removed already, or (`onlyIf`) is no longer a file that follows B2 with that content.
+ */
+export async function removeFile(
+  ctx: Ctx,
+  before: { id: string; blobKey: string | null },
+  actor: Actor,
+  detail: Record<string, unknown> = {},
+  onlyIf?: { sha256: string },
+): Promise<boolean> {
+  const now = ctx.now();
+  const id = before.id;
+  const [gone] = await ctx.db
+    .update(schema.files)
+    .set({ removedAt: now, removedBy: actor.name, blobKey: null, dekWrapped: null })
+    .where(
+      and(
+        eq(schema.files.id, id),
+        isNull(schema.files.removedAt),
+        onlyIf ? eq(schema.files.fromB2, true) : undefined,
+        onlyIf ? eq(schema.files.sha256, onlyIf.sha256) : undefined,
+      ),
+    )
+    .returning({ clientId: schema.files.clientId });
+  if (!gone) return false;
+  if (before.blobKey) await ctx.blobs.remove(before.blobKey);
+  // Watermarked copies in secure links were made from the old content (P49).
+  await dropMarksOfFile(ctx, id);
+  await drop(ctx.db, id, null, now);
+  await record(ctx.db, 'remove', actor, {
+    clientId: gone.clientId,
+    fileId: id,
+    ...(Object.keys(detail).length ? { detail } : {}),
   });
   return true;
 }
