@@ -36,9 +36,9 @@ import { schema } from '@vibe-portal/db';
 
 import { uploadLimit, type Ctx } from '../context';
 import { TooLarge } from '../files/blobs';
-import { b2Settings, firmRow, openB2, vfAccess } from '../files/storage';
+import { firmRow, vfSource } from '../files/storage';
 import { cleanName, contentTypeOf } from '../files/types';
-import { content, find, VfError } from '../files/vf-bucket';
+import { content, find, oneAtATime, VfError } from '../files/vf-bucket';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError, notForStaff } from '../lib/http';
 
@@ -363,15 +363,6 @@ const VF_STATUS: Record<VfError['code'], number> = {
   vf_damaged: 502,
 };
 
-/** One document at a time is read from the bucket and opened: each is held whole in memory,
- *  and opening it keeps the server busy, so two staff pressing Add wait their turn. */
-let adding: Promise<unknown> = Promise.resolve();
-function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
-  const run = adding.then(job, job);
-  adding = run.catch(() => undefined);
-  return run;
-}
-
 /**
  * POST /clients/:id/cabinet-files/:docId (staff, P91): puts one listed document on the portal.
  * Read from the bucket as it is now (not from the list): one deleted or taken out of B2 since
@@ -402,11 +393,9 @@ export function cabinetAdd(ctx: Ctx): RequestHandler {
       res.json({ fileId: existing.id, existing: true });
       return;
     }
-    const f = await firmRow(ctx);
-    const access = vfAccess(ctx, f);
-    const s = b2Settings(ctx, f);
-    if (!access || !s) throw new HttpError(409, 'vf_not_set_up');
-    const bucket = openB2(ctx, s);
+    const src = vfSource(ctx, await firmRow(ctx));
+    if (!src) throw new HttpError(409, 'vf_not_set_up');
+    const { access, bucket } = src;
     const limit = await uploadLimit(ctx);
     let stored;
     let name;
@@ -457,6 +446,8 @@ export function cabinetAdd(ctx: Ctx): RequestHandler {
           updatedAt: ctx.now(),
           sharedBy: actor.name,
           taxYear,
+          // P94: follows the bucket from now on (files/vf-follow.ts).
+          fromB2: true,
         })
         .returning({ id: schema.files.id });
     } catch (err) {

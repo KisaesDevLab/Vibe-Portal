@@ -205,8 +205,9 @@ export function staffPreviewRouter(ctx: Ctx): Router {
           record(ctx.db, 'preview_view', actorOf(req), {
             clientId: f.clientId,
             fileId: f.id,
-            // Whose view it was opened in; the opening is the staff member's.
-            ...(as ? { detail: { as } } : {}),
+            // Whose view it was opened in (History names them); the opening is the staff
+            // member's.
+            ...(as ? { identityId: as, detail: { as } } : {}),
           }),
       );
     }),

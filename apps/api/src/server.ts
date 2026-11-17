@@ -18,6 +18,7 @@ import { flush } from './files/notify-queue';
 import { purgeUploads } from './firm/uploads';
 import { purgeMarks } from './files/marks';
 import { snapshotIfDue } from './files/snapshot';
+import { followB2, FOLLOW_EVERY_MS } from './files/vf-follow';
 import { applyStorage, resumeInterrupted, runMove, sweep } from './files/storage';
 import { normalizeEmail } from './lib/contact';
 import { purgeStale } from './lib/housekeeping';
@@ -157,6 +158,10 @@ async function main(): Promise<void> {
   setInterval(() => {
     flush(ctx).catch((err: unknown) => log.error({ err }, 'notification flush failed'));
   }, 60_000).unref();
+  // P94: files added from Vibe Files' part of the B2 bucket follow the bucket.
+  setInterval(() => {
+    followB2(ctx).catch((err: unknown) => log.warn({ err }, 'following B2 failed'));
+  }, FOLLOW_EVERY_MS).unref();
   // P8: fetched client uploads leave the portal after the keep period.
   setInterval(() => {
     purgeUploads(ctx).catch((err: unknown) => log.error({ err }, 'upload purge failed'));

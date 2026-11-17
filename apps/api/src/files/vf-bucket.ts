@@ -25,6 +25,7 @@ import { chacha20poly1305, xchacha20poly1305 } from '@noble/ciphers/chacha';
 import argon2 from 'argon2';
 import { z } from 'zod';
 
+import type { B2Settings } from './b2';
 import { VfTooBig, type Bucket } from './objects';
 
 /** The most the portal reads of cabinet.json, and of one manifest object (HEAD, a client's
@@ -43,6 +44,9 @@ export interface VfAccess {
   cabinetId: string;
   /** Key id -> the 32-byte firm sync key, hex. */
   keys: Record<string, string>;
+  /** P94: Vibe Files' own bucket and a key that reads it, when it is not the bucket the portal
+   *  keeps its files in (one with Object Lock, which the portal cannot use for its own). */
+  b2?: B2Settings;
 }
 
 /** What went wrong, by a code the staff page has words for. */
@@ -266,16 +270,8 @@ export interface VfDocument {
   objectKey: string;
 }
 
-/**
- * The document as the bucket has it now: read from the manifest at this moment, not from the
- * list Vibe Files sent. `vf_gone` when the client or the document is no longer there.
- */
-export async function find(
-  bucket: Bucket,
-  access: VfAccess,
-  clientId: string,
-  docId: string,
-): Promise<VfDocument> {
+/** The manifest's head as the bucket has it now; null when nothing was pushed. */
+export async function readHead(bucket: Bucket, access: VfAccess): Promise<VfHead | null> {
   let head;
   try {
     head = await json(bucket, access, 'manifest/HEAD', Head);
@@ -286,26 +282,72 @@ export async function find(
     if (err instanceof VfError && err.code === 'vf_damaged') throw new VfError('vf_key', 'HEAD');
     throw err;
   }
-  if (!head) throw new VfError('vf_gone', 'nothing pushed');
+  return head;
+}
+
+export type VfHead = z.infer<typeof Head>;
+
+/** The key (below the cabinet) of the client's segment the head names; null when the client
+ *  has none in the bucket. It changes whenever anything of the client's does. */
+export function segmentKey(head: VfHead, clientId: string): string | null {
   const client = Object.keys(head.segments).find((c) => c.toLowerCase() === clientId.toLowerCase());
-  if (!client || !ID.test(client)) throw new VfError('vf_gone', 'client');
+  if (!client || !ID.test(client)) return null;
   const writer = head.segment_writers[client] ?? '';
   if (writer && !ID.test(writer)) throw new VfError('vf_format', 'segment writer');
-  const rev = head.segments[client];
-  const key = `manifest/clients/${client}/${rev}${writer ? `-${writer}` : ''}`;
+  return `manifest/clients/${client}/${head.segments[client]}${writer ? `-${writer}` : ''}`;
+}
+
+/** The client's documents in the bucket by id, from the segment at `key`; one deleted in the
+ *  cabinet is left out. */
+export async function readSegment(
+  bucket: Bucket,
+  access: VfAccess,
+  key: string,
+): Promise<Map<string, VfDocument>> {
   const seg = await json(bucket, access, key, Segment);
   if (!seg) throw new VfError('vf_missing', key);
-  const d = seg.documents.find((x) => x.doc_id === docId);
-  if (!d || d.deleted_at) throw new VfError('vf_gone', 'document');
-  const path = d.rel_path.replace(/\\/g, '/');
-  return {
-    docId: d.doc_id,
-    name: path.slice(path.lastIndexOf('/') + 1),
-    sha256: d.hash,
-    size: d.size,
-    taxYear: d.tax_year ?? null,
-    objectKey: `objects/${d.object.slice(0, 2)}/${d.object}`,
-  };
+  const out = new Map<string, VfDocument>();
+  for (const d of seg.documents) {
+    if (d.deleted_at) continue;
+    const path = d.rel_path.replace(/\\/g, '/');
+    out.set(d.doc_id, {
+      docId: d.doc_id,
+      name: path.slice(path.lastIndexOf('/') + 1),
+      sha256: d.hash,
+      size: d.size,
+      taxYear: d.tax_year ?? null,
+      objectKey: `objects/${d.object.slice(0, 2)}/${d.object}`,
+    });
+  }
+  return out;
+}
+
+/**
+ * The document as the bucket has it now: read from the manifest at this moment, not from the
+ * list Vibe Files sent. `vf_gone` when the client or the document is no longer there.
+ */
+export async function find(
+  bucket: Bucket,
+  access: VfAccess,
+  clientId: string,
+  docId: string,
+): Promise<VfDocument> {
+  const head = await readHead(bucket, access);
+  if (!head) throw new VfError('vf_gone', 'nothing pushed');
+  const key = segmentKey(head, clientId);
+  if (!key) throw new VfError('vf_gone', 'client');
+  const d = (await readSegment(bucket, access, key)).get(docId);
+  if (!d) throw new VfError('vf_gone', 'document');
+  return d;
+}
+
+/** One document at a time is read from the bucket and opened: each is held whole in memory,
+ *  and opening it keeps the server busy, so two at once wait their turn. */
+let busy: Promise<unknown> = Promise.resolve();
+export function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
+  const run = busy.then(job, job);
+  busy = run.catch(() => undefined);
+  return run;
 }
 
 /** The document's content, checked against the hash the manifest gives for it. */

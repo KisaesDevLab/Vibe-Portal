@@ -107,7 +107,7 @@ export function staffSay(err: unknown): string {
     vf_wrong_passphrase:
       'That is not the sync passphrase of the Vibe Files cabinet in this bucket.',
     vf_not_set_up:
-      'The portal cannot read Vibe Files’ documents yet: an admin enters Vibe Files’ sync passphrase under Settings › Storage.',
+      'The portal cannot read Vibe Files’ documents: an admin enters Vibe Files’ sync passphrase, and the bucket they are in, under Settings › Storage.',
     vf_key:
       'Vibe Files’ sync key changed since the passphrase was entered here. An admin enters it again under Settings › Storage.',
     vf_gone:

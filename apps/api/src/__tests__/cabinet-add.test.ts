@@ -6,16 +6,18 @@
 // VF_PORTAL_FIXTURE set to that folder), so the portal's reader is checked against the real
 // format, not against its own idea of it.
 
-import { createHash } from 'node:crypto';
+import { createHash, hkdfSync, randomBytes } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
+import { xchacha20poly1305 } from '@noble/ciphers/chacha';
 import { schema } from '@vibe-portal/db';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { MemoryObjects } from '../files/objects';
-import { content, find, unlock, VfError } from '../files/vf-bucket';
+import { followB2, forgetCompared } from '../files/vf-follow';
+import { content, find, open, unlock, VfError, type VfAccess } from '../files/vf-bucket';
 import { createSetupLink } from '../staff/auth';
 import { totpCode } from '../staff/credentials';
 import { world, type World } from './harness';
@@ -129,6 +131,74 @@ describe('reading Vibe Files’ part of the bucket (P91)', () => {
   });
 });
 
+/** Seals as Vibe Files does (the reader above is checked against Vibe Files' own sealing):
+ *  for what Vibe Files would push next, which the fixture does not hold. */
+function seal(access: VfAccess, plain: Buffer, key: string): Buffer {
+  const [keyId, firm] = Object.entries(access.keys)[0]!;
+  const k = Buffer.from(
+    hkdfSync(
+      'sha256',
+      Buffer.from(firm, 'hex'),
+      Buffer.from('vibe-files sync v1'),
+      Buffer.from('content'),
+      32,
+    ),
+  );
+  const nonce = randomBytes(24);
+  const id = Buffer.from(keyId, 'utf8');
+  const len = Buffer.alloc(2);
+  len.writeUInt16LE(id.length);
+  return Buffer.concat([
+    Buffer.from('VF1\0', 'latin1'),
+    len,
+    id,
+    nonce,
+    xchacha20poly1305(k, nonce, Buffer.from(key, 'utf8')).encrypt(plain),
+  ]);
+}
+
+/** Vibe Files pushes a changed version of one document: a new object, a new segment for the
+ *  client, a new head. */
+function pushChange(
+  bucket: MemoryObjects,
+  access: VfAccess,
+  clientId: string,
+  docId: string,
+  body: string,
+  rename?: string,
+): void {
+  const at = (k: string): string => `${access.cabinetId}/${k}`;
+  const head = JSON.parse(
+    open(access, bucket.vfItems.get(at('manifest/HEAD'))!, 'manifest/HEAD').toString(),
+  ) as {
+    rev: number;
+    segments: Record<string, number>;
+    segment_writers: Record<string, string>;
+  };
+  const old = `manifest/clients/${clientId}/${head.segments[clientId]}-${head.segment_writers[clientId]}`;
+  const seg = JSON.parse(open(access, bucket.vfItems.get(at(old))!, old).toString()) as {
+    segment_rev: number;
+    documents: { doc_id: string; rel_path: string; hash: string; object: string; size: number }[];
+  };
+  const plain = Buffer.from(body);
+  const d = seg.documents.find((x) => x.doc_id === docId)!;
+  d.hash = createHash('sha256').update(plain).digest('hex');
+  d.object = createHash('sha256').update(`name ${d.hash}`).digest('hex');
+  d.size = plain.length;
+  if (rename) d.rel_path = d.rel_path.replace(/[^/]+$/, rename);
+  const object = `objects/${d.object.slice(0, 2)}/${d.object}`;
+  bucket.vfItems.set(at(object), seal(access, plain, object));
+  head.rev += 1;
+  head.segments[clientId] = head.rev;
+  seg.segment_rev = head.rev;
+  const next = `manifest/clients/${clientId}/${head.rev}-${head.segment_writers[clientId]}`;
+  bucket.vfItems.set(at(next), seal(access, Buffer.from(JSON.stringify(seg)), next));
+  bucket.vfItems.set(
+    at('manifest/HEAD'),
+    seal(access, Buffer.from(JSON.stringify(head)), 'manifest/HEAD'),
+  );
+}
+
 const B2 = {
   endpoint: 'https://s3.us-west-004.backblazeb2.com',
   bucket: 'example-cpa-portal',
@@ -218,7 +288,13 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       .put('/api/staff/v1/settings/storage/vibe-files')
       .send({ passphrase: EXPECT.passphrase })
       .expect(200);
-    expect(saved.body.vibeFiles).toEqual({ cabinetId: EXPECT.cabinetId });
+    expect(saved.body.vibeFiles).toEqual({
+      cabinetId: EXPECT.cabinetId,
+      own: false,
+      endpoint: 's3.us-west-004.backblazeb2.com',
+      bucket: B2.bucket,
+      keyId: B2.keyId,
+    });
     // Neither the passphrase nor the key goes back to the page or into History.
     expect(JSON.stringify(saved.body)).not.toContain(EXPECT.passphrase);
     const events = await w.t.db.select().from(schema.events);
@@ -298,6 +374,135 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     const off = await boss.delete('/api/staff/v1/settings/storage/vibe-files').expect(200);
     expect(off.body.vibeFiles).toBeNull();
     expect((await add(boss, EXPECT.deletedDocId)).body).toEqual({ error: 'vf_not_set_up' });
+  });
+
+  it('reads a bucket of Vibe Files’ own (one with Object Lock), with no bucket for the portal (P94)', async () => {
+    const boss = await admin();
+    await listed();
+    // Object Lock: the portal would refuse it for its own files; it is only read here.
+    bucket.locked = true;
+    const own = { ...B2, bucket: 'example-cpa-vibe-files' };
+    const bad = await boss
+      .put('/api/staff/v1/settings/storage/vibe-files')
+      .send({
+        passphrase: EXPECT.passphrase,
+        bucket: { ...own, endpoint: 'https://s3.amazonaws.com' },
+      });
+    expect(bad.body).toEqual({ error: 'b2_endpoint' });
+    // A space pasted after the passphrase: taken as typed first, then without it.
+    const saved = await boss
+      .put('/api/staff/v1/settings/storage/vibe-files')
+      .send({ passphrase: `${EXPECT.passphrase} `, bucket: own })
+      .expect(200);
+    expect(saved.body.vibeFiles).toEqual({
+      cabinetId: EXPECT.cabinetId,
+      own: true,
+      endpoint: 's3.us-west-004.backblazeb2.com',
+      bucket: own.bucket,
+      keyId: own.keyId,
+    });
+    expect(JSON.stringify(saved.body)).not.toContain(own.appKey);
+    // Nothing was written to Vibe Files' bucket: no test file, no mark of the portal's.
+    expect(bucket.items.size).toBe(0);
+    expect(bucket.noteItems.size).toBe(0);
+    expect(saved.body.b2.hasKey).toBe(false);
+    await add(boss, W2.docId).expect(201);
+
+    // The portal's own bucket set up, changed and removed since: Vibe Files' stays.
+    bucket.locked = false;
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    await boss
+      .put('/api/staff/v1/settings/storage/b2')
+      .send({ ...B2, bucket: 'example-cpa-other' })
+      .expect(200);
+    await boss.delete('/api/staff/v1/settings/storage/b2').expect(200);
+    const after = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect(after.body.vibeFiles.bucket).toBe(own.bucket);
+    const kinds = (await w.t.db.select().from(schema.events)).map((e) => e.kind);
+    expect(kinds).not.toContain('storage_vf_removed');
+  });
+
+  it('a file added from B2 is replaced by itself when the bucket has a changed version (P94)', async () => {
+    forgetCompared();
+    const boss = await admin();
+    await listed();
+    await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);
+    await boss
+      .put('/api/staff/v1/settings/storage/vibe-files')
+      .send({ passphrase: EXPECT.passphrase })
+      .expect(200);
+    const mary = await w.member('mary@example.test', ANDERSON.id);
+    const fileId = (await add(boss, W2.docId).expect(201)).body.fileId as string;
+    await boss
+      .put(`/api/staff/v1/files/${fileId}/visibility`)
+      .send({ users: { [mary.id]: true } })
+      .expect(200);
+    // Mary opens it: no longer new for her.
+    await mary.agent.get(`/api/portal/files/${fileId}/content`).expect(200);
+    const hers = async (): Promise<{ name: string; isNew: boolean; size: number }> =>
+      (await mary.agent.get('/api/portal/files').expect(200)).body.files[0];
+    expect((await hers()).isNew).toBe(false);
+
+    // Nothing changed in the bucket: nothing is replaced, and a second look reads nothing more.
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+
+    // Vibe Files pushes a corrected W-2 under a new name.
+    const access = await unlock(bucket, EXPECT.passphrase);
+    pushChange(
+      bucket,
+      access,
+      ANDERSON.id,
+      W2.docId,
+      'w2 2025 corrected',
+      'W-2 Northwind corrected.pdf',
+    );
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+    expect(await hers()).toEqual(
+      expect.objectContaining({ name: 'W-2 Northwind corrected.pdf', isNew: true, size: 17 }),
+    );
+    const got = await mary.agent.get(`/api/portal/files/${fileId}/content`).expect(200);
+    expect(Buffer.from(got.body as Buffer).toString('utf8') || got.text).toContain(
+      'w2 2025 corrected',
+    );
+    const replaced = (await w.t.db.select().from(schema.events)).filter(
+      (e) => e.kind === 'replace',
+    );
+    expect(replaced).toHaveLength(1);
+    expect(replaced[0]).toEqual(
+      expect.objectContaining({ actorKind: 'system', actor: 'Vibe Files’ B2', fileId }),
+    );
+    // The old stored copy is gone: one blob for one file.
+    expect((await w.t.db.select().from(schema.files)).filter((f) => f.blobKey)).toHaveLength(1);
+    // Looked at again with nothing new: nothing happens.
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    expect(
+      (await w.t.db.select().from(schema.events)).filter((e) => e.kind === 'replace'),
+    ).toHaveLength(1);
+
+    // A file shared from Vibe Files itself does not follow the bucket: Vibe Files replaces it.
+    const [row] = await w.t.db.select().from(schema.files);
+    await w.t.db.update(schema.files).set({ fromB2: false });
+    pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 2025 corrected again');
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
+    await w.t.db.update(schema.files).set({ fromB2: true });
+
+    // The changed object damaged in the bucket: not taken, said in the log, tried again.
+    forgetCompared();
+    const doc = await find(bucket, access, ANDERSON.id, W2.docId);
+    const key = `${EXPECT.cabinetId}/${doc.objectKey}`;
+    const good = bucket.vfItems.get(key)!;
+    const broken = Buffer.from(good);
+    broken[broken.length - 1]! ^= 1;
+    bucket.vfItems.set(key, broken);
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 1 });
+    expect((await w.t.db.select().from(schema.files))[0]!.sha256).toBe(row!.sha256);
+    bucket.vfItems.set(key, good);
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, failed: 0 });
+
+    // Removed from the portal: it follows nothing any more.
+    await boss.delete(`/api/staff/v1/files/${fileId}`).expect(200);
+    pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 2025 once more');
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, failed: 0 });
   });
 
   it('refuses a document larger than the portal takes, before fetching it', async () => {

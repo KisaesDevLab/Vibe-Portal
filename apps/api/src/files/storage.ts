@@ -60,6 +60,17 @@ export function vfAccess(ctx: Ctx, f: FirmRow): VfAccess | null {
   ) as VfAccess;
 }
 
+/**
+ * Where Vibe Files' documents are read from (P91), with the keys that open them: Vibe Files'
+ * own bucket when one was given (P94), else the bucket the portal keeps its files in. Null
+ * when the passphrase was not entered, or there is no bucket to read.
+ */
+export function vfSource(ctx: Ctx, f: FirmRow): { access: VfAccess; bucket: Bucket } | null {
+  const access = vfAccess(ctx, f);
+  const s = access?.b2 ?? b2Settings(ctx, f);
+  return access && s ? { access, bucket: openB2(ctx, s) } : null;
+}
+
 export function openB2(ctx: Ctx, s: B2Settings): Bucket {
   return ctx.openB2 ? ctx.openB2(s) : new B2Objects(s);
 }
@@ -465,7 +476,21 @@ export async function storageState(ctx: Ctx) {
     move: f.storageMove,
     note: f.storageNote,
     /** P91: the cabinet of Vibe Files whose documents in this bucket the portal can open. */
-    vibeFiles: f.vfSyncEnc ? { cabinetId: vfAccess(ctx, f)?.cabinetId ?? '' } : null,
+    vibeFiles: vfState(ctx, f),
+  };
+}
+
+/** What Settings > Storage shows of Vibe Files' documents: never a key. */
+function vfState(ctx: Ctx, f: FirmRow) {
+  const access = vfAccess(ctx, f);
+  if (!access) return null;
+  return {
+    cabinetId: access.cabinetId,
+    /** A bucket of Vibe Files' own (P94), not the one the portal's files are in. */
+    own: access.b2 !== undefined,
+    endpoint: access.b2?.endpoint ?? f.b2Endpoint,
+    bucket: access.b2?.bucket ?? f.b2Bucket,
+    keyId: access.b2?.keyId ?? f.b2KeyId,
   };
 }
 

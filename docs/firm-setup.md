@@ -263,17 +263,23 @@ What to know:
 
 ### Adding a document in B2 to the portal from the staff page (optional)
 
-Where the portal and Vibe Files' B2 sync use **the same bucket**, staff can put a document from
-the list on the portal without going to Vibe Files. It needs Vibe Portal 0.3.16 or later; Vibe
-Files needs nothing newer than the 0.1.38 the list itself needs.
+Staff can put a document from the list on the portal without going to Vibe Files: the portal
+reads it from the B2 bucket Vibe Files' sync uses. It needs Vibe Portal 0.3.17 or later (0.3.16
+where the portal keeps its own files in that same bucket); Vibe Files needs nothing newer than
+the 0.1.38 the list itself needs.
 
-1. On the staff page, **Settings › Storage**, set up the B2 bucket if it is not (the bucket Vibe
-   Files' B2 sync uses; files need not be moved to it). The bucket must be without Object Lock
-   (the portal refuses one with it), and the application key must reach the whole bucket, not
-   one folder of it. The portal keeps to its own folders there (`blobs/` and `portal/`) and
-   only reads Vibe Files' (`vf/`).
-2. Under **Vibe Files' documents in this bucket**, enter Vibe Files' **sync passphrase** and
-   press **Check and save**. The portal checks it against the bucket.
+1. On the staff page, **Settings › Storage**, under **Vibe Files' documents in B2**, say where
+   Vibe Files' documents are:
+   - **In a bucket of Vibe Files' own** (the usual case, and the only one for a bucket with
+     **Object Lock**): enter that bucket's **endpoint**, **name**, a **key ID** and its
+     **application key**. The portal only reads this bucket, so make the key in Backblaze for
+     this bucket alone, allowed to **read and list files** and nothing more. The key must reach
+     the whole bucket, not one folder of it.
+   - **In the bucket above**, where the portal keeps its own files in the same bucket as Vibe
+     Files (possible only without Object Lock). The portal keeps to its own folders there
+     (`blobs/` and `portal/`) and only reads Vibe Files' (`vf/`).
+2. Enter Vibe Files' **sync passphrase** and press **Check and save the passphrase**. The
+   portal checks it against the bucket.
 3. On a client's page, each document under **Documents in B2 (from Vibe Files)** that is not on
    the portal has **Add to portal**. The portal reads the document from the bucket and keeps
    its own copy.
@@ -288,9 +294,10 @@ What to know:
   Vibe Files works as before either way.
 - The passphrase itself is not kept. The key it opens is, encrypted with the portal's own key,
   as the bucket's application key is. **Remove** takes it off the portal again; documents
-  already added stay. Changing or removing the bucket under **Settings › Storage** forgets it
-  too (History says so): enter the passphrase again for the new bucket.
-- Like the bucket's application key, the saved key is in the portal's backups and in the hourly
+  already added stay (and no longer follow the bucket). Where Vibe Files' documents are read
+  from the portal's own bucket, changing or removing that bucket forgets the key too (History
+  says so): enter the passphrase again for the new bucket.
+- Like the portal's own bucket key, the saved key (and the key of Vibe Files' bucket) is in the portal's backups and in the hourly
   database copy sent to the bucket, encrypted with the portal's own key. **Remove** does not
   reach copies already made, and a restore from one made before it brings the key back: press
   **Remove** again after such a restore.
@@ -299,8 +306,16 @@ What to know:
 - A document larger than the portal's largest upload is refused.
 - Vibe Files finds a document added this way as one it shared itself: Browse marks it, and
   sharing it again from Vibe Files does not add it twice.
-- A document changed in the cabinet after it was added is not changed on the portal by this:
-  share it again from Vibe Files, or remove it from the portal and add it again.
+- **A document added this way follows B2.** When it changes in the cabinet and Vibe Files
+  pushes the new version to B2, the portal replaces its copy by itself, within about 10
+  minutes: the people who see it get it marked **New** and are told as for any updated file,
+  without anyone at the firm looking first. A new name in the cabinet follows too. History
+  says **Replaced a file**, by **Vibe Files' B2**. To stop one following, remove it
+  from the portal and share it from Vibe Files instead.
+- A document deleted, or taken out of B2, in Vibe Files keeps its copy on the portal until
+  staff remove it there.
+- Only documents added with **Add to portal** follow B2. One shared from Vibe Files changes on
+  the portal when someone shares it again from Vibe Files, as before.
 - If Vibe Files' sync key is ever changed, **Add to portal** says so: enter the passphrase
   again under **Settings › Storage**.
 

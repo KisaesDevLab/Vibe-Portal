@@ -7,7 +7,9 @@
 //   GET    /api/staff/v1/settings/storage
 //   PUT    /api/staff/v1/settings/storage/b2     { endpoint, bucket, keyId, appKey? }  checked first
 //   DELETE /api/staff/v1/settings/storage/b2     only while no file is on B2
-//   PUT    /api/staff/v1/settings/storage/vibe-files  { passphrase }  Vibe Files' sync passphrase
+//   PUT    /api/staff/v1/settings/storage/vibe-files  { passphrase, bucket? }  Vibe Files' sync
+//          passphrase; `bucket` { endpoint, bucket, keyId, appKey } when Vibe Files' documents
+//          are in a bucket of its own (P94), read only
 //   DELETE /api/staff/v1/settings/storage/vibe-files
 //   POST   /api/staff/v1/settings/storage/test   checks the saved bucket and key
 //   POST   /api/staff/v1/settings/storage/move   { to: 'b2' | 'local' }  runs in the background
@@ -32,6 +34,7 @@ import {
   openB2,
   runMove,
   storageState,
+  vfAccess,
 } from '../files/storage';
 import { forgetBucket, snapshotIfDue } from '../files/snapshot';
 import { unlock, VfError } from '../files/vf-bucket';
@@ -48,8 +51,19 @@ const B2Schema = z.object({
   appKey: z.string().trim().min(1).max(200).optional(),
 });
 const MoveSchema = z.object({ to: z.enum(['b2', 'local']) });
-/** Not trimmed: a passphrase is taken as typed. */
-const VfSchema = z.object({ passphrase: z.string().min(1).max(1000) });
+/** Not trimmed here: a passphrase is taken as typed first (Vibe Files takes it so). */
+const VfSchema = z.object({
+  passphrase: z.string().min(1).max(1000),
+  /** Vibe Files' own bucket (P94); left out, the bucket the portal's files are in. */
+  bucket: z
+    .object({
+      endpoint: z.string().trim().max(200),
+      bucket: z.string().trim().max(63),
+      keyId: z.string().trim().min(1).max(100),
+      appKey: z.string().trim().min(1).max(200),
+    })
+    .optional(),
+});
 
 const actor = (req: Request): Actor => ({
   kind: 'staff',
@@ -101,9 +115,12 @@ export function storageRouter(ctx: Ctx): Router {
       const appKey = input.appKey ?? saved?.appKey;
       if (!appKey) throw new HttpError(400, 'b2_app_key');
       const next: B2Settings = { endpoint, bucket: input.bucket, keyId: input.keyId, appKey };
-      // Another bucket: Vibe Files' key was checked against the old one, so it is forgotten.
+      // Another bucket: Vibe Files' key was checked against the old one, so it is forgotten
+      // (not when Vibe Files' documents are read from a bucket of its own, P94).
       const forgetVf =
-        f.vfSyncEnc !== null && (endpoint !== f.b2Endpoint || input.bucket !== f.b2Bucket);
+        vfAccess(ctx, f) !== null &&
+        vfAccess(ctx, f)?.b2 === undefined &&
+        (endpoint !== f.b2Endpoint || input.bucket !== f.b2Bucket);
       try {
         await checkBucket(openB2(ctx, next), f.installId);
       } catch (err) {
@@ -157,11 +174,11 @@ export function storageRouter(ctx: Ctx): Router {
         b2Bucket: '',
         b2KeyId: '',
         b2AppKeyEnc: null,
-        vfSyncEnc: null,
+        ...(vfAccess(ctx, f)?.b2 ? {} : { vfSyncEnc: null }),
         updatedAt: ctx.now(),
       });
       await record(ctx.db, 'storage_b2_removed', actor(req));
-      if (f.vfSyncEnc) {
+      if (f.vfSyncEnc && !vfAccess(ctx, f)?.b2) {
         await record(ctx.db, 'storage_vf_removed', actor(req), { detail: { because: 'bucket' } });
       }
       res.json(await storageState(ctx));
@@ -175,13 +192,38 @@ export function storageRouter(ctx: Ctx): Router {
   r.put(
     '/vibe-files',
     h(async (req, res) => {
-      const { passphrase } = body(VfSchema, req);
+      const input = body(VfSchema, req);
+      const { passphrase } = input;
       const f = await firmRow(ctx);
-      const s = b2Settings(ctx, f);
+      // Vibe Files' own bucket, only read (so one with Object Lock will do, and a key that
+      // may only read): no test file is written to it and no mark left in it.
+      let own: B2Settings | undefined;
+      if (input.bucket) {
+        const at = parseEndpoint(input.bucket.endpoint);
+        if (!at) throw new HttpError(400, 'b2_endpoint');
+        if (!validBucket(input.bucket.bucket)) throw new HttpError(400, 'b2_bucket');
+        own = { ...input.bucket, endpoint: at.host };
+      }
+      const s = own ?? b2Settings(ctx, f);
       if (!s) throw new HttpError(400, 'b2_not_set_up');
       let access;
       try {
-        access = await unlock(openB2(ctx, s), passphrase);
+        const bucket = openB2(ctx, s);
+        try {
+          access = await unlock(bucket, passphrase);
+        } catch (err) {
+          // As typed first; then without a space pasted before or after it.
+          const trimmed = passphrase.trim();
+          if (
+            !(err instanceof VfError && err.code === 'vf_wrong_passphrase') ||
+            !trimmed ||
+            trimmed === passphrase
+          ) {
+            throw err;
+          }
+          access = await unlock(bucket, trimmed);
+        }
+        if (own) access = { ...access, b2: own };
       } catch (err) {
         // The cabinet's own key file is not one the portal knows how to open.
         if (err instanceof VfError) {
@@ -201,11 +243,15 @@ export function storageRouter(ctx: Ctx): Router {
           vfSyncEnc: Buffer.from(ctx.keyring.wrap(Buffer.from(JSON.stringify(access), 'utf8'))),
           updatedAt: ctx.now(),
         })
-        .where(and(eq(schema.firm.b2Endpoint, s.endpoint), eq(schema.firm.b2Bucket, s.bucket)))
+        .where(
+          own
+            ? undefined
+            : and(eq(schema.firm.b2Endpoint, s.endpoint), eq(schema.firm.b2Bucket, s.bucket)),
+        )
         .returning({ id: schema.firm.id });
       if (!kept.length) throw new HttpError(409, 'vf_bucket_changed');
       await record(ctx.db, 'storage_vf_saved', actor(req), {
-        detail: { cabinetId: access.cabinetId },
+        detail: { cabinetId: access.cabinetId, bucket: s.bucket, own: own !== undefined },
       });
       res.json(await storageState(ctx));
     }),

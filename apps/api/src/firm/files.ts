@@ -22,6 +22,7 @@ import { uploadLimit, type Ctx } from '../context';
 import { TooLarge } from '../files/blobs';
 import { dropMarksOfFile } from '../files/marks';
 import { drop, enqueue } from '../files/notify-queue';
+import { replaceContent } from '../files/replace';
 import { cleanName, contentTypeOf } from '../files/types';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError, notForStaff, queryWithText } from '../lib/http';
@@ -187,46 +188,10 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       }
       const stored = await store(req, q.sha256);
       const name = q.name ? cleanName(q.name) : before.name;
-      const now = ctx.now();
-      const actor = actorOf(req);
-      const visibleTo = await ctx.db.transaction(async (tx) => {
-        const [updated] = await tx
-          .update(schema.files)
-          .set({
-            name,
-            contentType: contentTypeOf(name),
-            size: stored.size,
-            sha256: stored.sha256,
-            blobKey: stored.blobKey,
-            dekWrapped: stored.dekWrapped,
-            contentUpdatedAt: now,
-            updatedAt: now,
-          })
-          .where(and(eq(schema.files.id, id), isNull(schema.files.removedAt)))
-          .returning({ id: schema.files.id });
-        if (!updated) return null;
-        // P20: counts as new again for everyone who sees it.
-        const seen = await tx
-          .update(schema.fileVisibility)
-          .set({ viewedAt: null })
-          .where(and(eq(schema.fileVisibility.fileId, id), eq(schema.fileVisibility.visible, true)))
-          .returning({ identityId: schema.fileVisibility.identityId });
-        const users = seen.map((s) => s.identityId);
-        await enqueue(tx, users, id, 'updated', now);
-        return users;
-      });
-      if (!visibleTo) {
+      if (!(await replaceContent(ctx, before, stored, name, actorOf(req)))) {
         await ctx.blobs.remove(stored.blobKey);
         throw new HttpError(404, 'not_found');
       }
-      if (before.blobKey) await ctx.blobs.remove(before.blobKey);
-      // Watermarked copies in secure links were made from the old content (P49).
-      await dropMarksOfFile(ctx, id);
-      await record(ctx.db, 'replace', actor, {
-        clientId: before.clientId,
-        fileId: id,
-        detail: { name, size: stored.size },
-      });
       res.json({ ok: true });
     }),
   );

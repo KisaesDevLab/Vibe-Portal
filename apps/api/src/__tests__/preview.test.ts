@@ -132,6 +132,11 @@ describe('the preview of a client portal (P77)', () => {
     // opening is the staff member's: it stays new for them.
     await staff.get(`${preview(CLIENT)}/files/${his}/content?as=${mary.id}`).expect(404);
     await staff.get(`${preview(CLIENT)}/files/${hers}/content?as=${mary.id}`).expect(200);
+    // History says whose view it was opened in.
+    const opened = (
+      await staff.get(`/api/staff/v1/clients/${CLIENT}/history`).expect(200)
+    ).body.events.find((e: { kind: string }) => e.kind === 'preview_view');
+    expect(opened.person).toBe('mary@example.test');
     const mine = (await mary.agent.get('/api/portal/files').expect(200)).body.files;
     expect(mine.find((f: { id: string }) => f.id === hers).isNew).toBe(true);
 
