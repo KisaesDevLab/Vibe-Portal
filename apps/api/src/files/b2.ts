@@ -22,7 +22,16 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 
-import { checkKey, checkNote, NotFound, OBJECT_KEY, type Bucket, type Listed } from './objects';
+import {
+  checkKey,
+  checkNote,
+  checkVfKey,
+  NotFound,
+  OBJECT_KEY,
+  VfTooBig,
+  type Bucket,
+  type Listed,
+} from './objects';
 
 export interface B2Settings {
   /** The bucket's S3 endpoint, as B2 shows it: s3.<region>.backblazeb2.com */
@@ -38,6 +47,8 @@ const BUCKET = /^[A-Za-z0-9-]{6,63}$/;
 const PREFIX = 'blobs/';
 /** The portal's own notes (its mark on the bucket, database snapshots), apart from files. */
 const NOTES = 'portal/';
+/** Vibe Files' own part of the bucket (P91). Only ever read. */
+const VF = 'vf/';
 
 /** The endpoint's host and region, or null unless it is a Backblaze S3 endpoint. */
 export function parseEndpoint(endpoint: string): { host: string; region: string } | null {
@@ -224,5 +235,55 @@ export class B2Objects implements Bucket {
 
   async removeNote(name: string): Promise<void> {
     await this.removeAll(`${NOTES}${checkNote(name)}`);
+  }
+
+  async vfCabinets(): Promise<string[]> {
+    // The folders right below "vf/", not the objects in them (there may be very many).
+    const ids: string[] = [];
+    let token: string | undefined;
+    do {
+      const page = await this.s3.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: VF,
+          Delimiter: '/',
+          ContinuationToken: token,
+        }),
+      );
+      for (const p of page.CommonPrefixes ?? []) {
+        if (p.Prefix?.startsWith(VF)) ids.push(p.Prefix.slice(VF.length).replace(/\/$/, ''));
+      }
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+    return ids;
+  }
+
+  async vfGet(key: string, maxBytes: number): Promise<Buffer | null> {
+    let body: Readable;
+    try {
+      const out = await this.s3.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: `${VF}${checkVfKey(key)}` }),
+      );
+      body = out.Body as Readable;
+      // By the length B2 gives, before a byte is read; and again as it is read, below.
+      if ((out.ContentLength ?? 0) > maxBytes) {
+        body.destroy();
+        throw new VfTooBig(key);
+      }
+    } catch (err) {
+      if (missing(err)) return null;
+      throw err;
+    }
+    const parts: Buffer[] = [];
+    let n = 0;
+    for await (const c of body) {
+      n += (c as Buffer).length;
+      if (n > maxBytes) {
+        body.destroy();
+        throw new VfTooBig(key);
+      }
+      parts.push(c as Buffer);
+    }
+    return Buffer.concat(parts);
   }
 }

@@ -62,6 +62,29 @@ export interface Bucket extends ObjectStore {
   notes(prefix: string): AsyncIterable<{ name: string; size: number; modified: Date }>;
   /** Removes the note with every version of it. */
   removeNote(name: string): Promise<void>;
+  /** Vibe Files' cabinets in this bucket (P91): the ids right below "vf/". Read only. */
+  vfCabinets(): Promise<string[]>;
+  /** One object of Vibe Files' (its key below "vf/"), whole; null when there is none. One
+   *  larger than `maxBytes` is not read: VfTooBig. The portal never writes or deletes there. */
+  vfGet(key: string, maxBytes: number): Promise<Buffer | null>;
+}
+
+/** An object under "vf/" larger than its reader allows: not held in memory. Anyone who can
+ *  write to the bucket could have put it there. */
+export class VfTooBig extends Error {
+  constructor(key: string) {
+    super(`object too large: ${key}`);
+  }
+}
+
+/** A key below "vf/": a cabinet id, then Vibe Files' own key, with nothing a bucket could
+ *  misread. */
+const VF_KEY = /^[A-Za-z0-9-]{1,64}(\/[A-Za-z0-9._-]{1,200}){1,6}$/;
+export function checkVfKey(key: string): string {
+  if (!VF_KEY.test(key) || key.split('/').some((p) => p === '.' || p === '..')) {
+    throw new Error('bad Vibe Files key');
+  }
+  return key;
 }
 
 export function checkKey(key: string): string {
@@ -225,5 +248,20 @@ export class MemoryObjects implements Bucket {
   async removeNote(name: string): Promise<void> {
     this.check();
     this.noteItems.delete(checkNote(name));
+  }
+
+  /** Vibe Files' objects, by key below "vf/" (tests fill it). */
+  readonly vfItems = new Map<string, Buffer>();
+
+  async vfCabinets(): Promise<string[]> {
+    this.check();
+    return [...new Set([...this.vfItems.keys()].map((k) => k.slice(0, k.indexOf('/'))))];
+  }
+
+  async vfGet(key: string, maxBytes: number): Promise<Buffer | null> {
+    this.check();
+    const b = this.vfItems.get(checkVfKey(key)) ?? null;
+    if (b && b.length > maxBytes) throw new VfTooBig(key);
+    return b;
   }
 }

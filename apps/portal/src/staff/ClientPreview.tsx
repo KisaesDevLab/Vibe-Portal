@@ -5,9 +5,13 @@
 // bar, the client's name, its link (P76), its files. Files open view only; nothing downloads,
 // is shared, sent or removed. A person sees only the files shared with them: the preview lists
 // those someone at the client can see, and says so.
+//
+// P92 (owner 2026-11-17): "View as" in the bar, or `?as=<identityId>` in the address (the
+// client's staff page links each person so), shows one person's portal: the files shared with
+// that person alone, with their New marks. Opening a file here still changes nothing they see.
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { Button, Download, EmptyState, Eye, ShareIcon, ThemeToggle } from '@vibe/ui';
 
 import { ApiError } from '../api';
@@ -24,6 +28,9 @@ interface Preview {
   firmName: string;
   client: { id: string; name: string; active: boolean };
   people: number;
+  /** P92: the client's people, and the one the preview is seen as (null: everyone's files). */
+  persons?: { identityId: string; name: string }[];
+  as?: { identityId: string; name: string } | null;
   link: { url: string; message: string; button: string } | null;
   files: PortalFile[];
 }
@@ -32,6 +39,9 @@ const NOT_HERE = 'Not in the preview';
 
 export function ClientPreview(): JSX.Element {
   const { id = '' } = useParams();
+  const [params, setParams] = useSearchParams();
+  const as = params.get('as') ?? '';
+  const asQuery = as ? `?as=${encodeURIComponent(as)}` : '';
   const [data, setData] = useState<Preview | null>(null);
   const [error, setError] = useState('');
   const [viewing, setViewing] = useState<PortalFile | null>(null);
@@ -41,42 +51,97 @@ export function ClientPreview(): JSX.Element {
   const notHere = (what: string): void => setPressed(`${what} does nothing in the preview.`);
 
   useEffect(() => {
-    staffApi<Preview>(`/v1/clients/${encodeURIComponent(id)}/preview`)
-      .then(setData)
+    // Nothing of the view before stays up while another is read (its files are not this one's).
+    setData(null);
+    setViewing(null);
+    setError('');
+    let current = true;
+    staffApi<Preview>(`/v1/clients/${encodeURIComponent(id)}/preview${asQuery}`)
+      .then((d) => {
+        if (current) setData(d);
+      })
       .catch((err: unknown) => {
+        if (!current) return;
         setError(
           err instanceof ApiError && err.status === 401
             ? 'Your staff session has ended. Sign in on the staff page, then open the preview again.'
-            : staffSay(err),
+            : asQuery && err instanceof ApiError && err.status === 404 && err.code === 'not_found'
+              ? 'That person cannot sign in to this client now: their access to it, or their whole account, is turned off.'
+              : staffSay(err),
         );
       });
-  }, [id]);
+    return () => {
+      current = false;
+    };
+  }, [id, asQuery]);
 
   useEffect(() => {
-    if (data) document.title = `Preview: ${data.client.name} · ${data.firmName}`;
+    if (data) {
+      document.title = `Preview: ${data.as ? `${data.as.name} at ` : ''}${data.client.name} · ${data.firmName}`;
+    }
   }, [data]);
 
-  if (!data) {
+  if (!data || error) {
     return (
       <main id="main-content" tabIndex={-1} className="p-page">
-        {error ? <p role="alert">{error}</p> : <p role="status">Loading the preview…</p>}
+        {error ? (
+          <>
+            <p role="alert">{error}</p>
+            {as && (
+              <Button variant="secondary" size="sm" onClick={() => setParams({})}>
+                Preview the client instead
+              </Button>
+            )}
+          </>
+        ) : (
+          <p role="status">Loading the preview…</p>
+        )}
       </main>
     );
   }
+  const person = data.as ?? null;
 
   const content = (f: PortalFile): string =>
-    `/api/staff/v1/clients/${encodeURIComponent(id)}/preview/files/${encodeURIComponent(f.id)}/content`;
+    `/api/staff/v1/clients/${encodeURIComponent(id)}/preview/files/${encodeURIComponent(f.id)}/content${asQuery}`;
   const shown = data.files.filter((f) => f.name.toLowerCase().includes(q.trim().toLowerCase()));
   return (
     <>
       <div className="p-preview-bar" role="note">
         <div className="p-preview-inner">
-          <p>
-            <strong>Preview of {data.client.name}’s portal.</strong> Read only: files open, other
-            buttons do nothing. It lists the files someone at this client can see ({data.people}{' '}
-            {data.people === 1 ? 'person' : 'people'}); each person sees only the files shared with
-            them.
-          </p>
+          {person ? (
+            <p>
+              <strong>
+                Preview of {data.client.name}’s portal as {person.name} sees it.
+              </strong>{' '}
+              Read only: files open, other buttons do nothing. It lists the files shared with{' '}
+              {person.name}. Opening one here does not count as their opening it.
+            </p>
+          ) : (
+            <p>
+              <strong>Preview of {data.client.name}’s portal.</strong> Read only: files open, other
+              buttons do nothing. It lists the files someone at this client can see ({data.people}{' '}
+              {data.people === 1 ? 'person' : 'people'}); each person sees only the files shared
+              with them.
+            </p>
+          )}
+          {(data.persons?.length ?? 0) > 0 && (
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span>View as</span>
+              <select
+                name="as"
+                style={{ maxWidth: '100%', minWidth: 0 }}
+                value={person?.identityId ?? ''}
+                onChange={(e) => setParams(e.target.value ? { as: e.target.value } : {})}
+              >
+                <option value="">Everyone at this client</option>
+                {(data.persons ?? []).map((p) => (
+                  <option key={p.identityId} value={p.identityId}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <p role="status" style={{ flex: pressed ? '1 1 100%' : '0 0 0', fontWeight: 600 }}>
             {pressed}
           </p>
@@ -108,7 +173,7 @@ export function ClientPreview(): JSX.Element {
         <div className="p-intro">
           <div style={{ minWidth: 0 }}>
             <h1>{data.client.name}</h1>
-            <p className="p-sub">Signed in as (the person’s name).</p>
+            <p className="p-sub">Signed in as {person ? person.name : '(the person’s name)'}.</p>
           </div>
         </div>
         {data.link && <ClientLinkBanner link={data.link} />}
@@ -155,7 +220,9 @@ export function ClientPreview(): JSX.Element {
                   body={
                     q.trim()
                       ? 'Try another search.'
-                      : 'No file here is shared with anyone at this client yet.'
+                      : person
+                        ? `No file is shared with ${person.name} yet.`
+                        : 'No file here is shared with anyone at this client yet.'
                   }
                 />
               ) : (
@@ -166,6 +233,7 @@ export function ClientPreview(): JSX.Element {
                       bare
                       icon={<FileTile name={f.name} contentType={f.contentType} />}
                       title={f.name}
+                      badge={f.isNew ? <Badge tone="accent">New</Badge> : undefined}
                       meta={
                         <>
                           {f.updatedAt
@@ -232,6 +300,7 @@ export function ClientPreview(): JSX.Element {
             title="Each person sees the files they sent."
             body={
               <>
+                {person ? `What ${person.name} sent is not shown here. ` : ''}
                 Their uploads are on the client’s staff page, with a{' '}
                 <Badge>Waiting for the firm</Badge> or <Badge tone="success">Received</Badge> mark
                 on the portal.

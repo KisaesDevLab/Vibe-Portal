@@ -40,6 +40,8 @@ const ADMIN_KINDS: EventKind[] = [
   'firm_key_revoked',
   'storage_b2_saved',
   'storage_b2_removed',
+  'storage_vf_saved',
+  'storage_vf_removed',
   'storage_move',
   'storage_moved',
   'storage_swept',

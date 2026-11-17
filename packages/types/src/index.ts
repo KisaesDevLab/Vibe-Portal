@@ -77,6 +77,9 @@ export const EVENT_KINDS = [
   // Where stored files live (P51): the B2 bucket set or removed, a move asked for and its end.
   'storage_b2_saved',
   'storage_b2_removed',
+  // P91: Vibe Files' sync passphrase entered or removed on Settings > Storage.
+  'storage_vf_saved',
+  'storage_vf_removed',
   'storage_move',
   'storage_moved',
   'storage_swept',

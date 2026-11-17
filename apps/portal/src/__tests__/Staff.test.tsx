@@ -336,6 +336,69 @@ describe('staff page', () => {
     );
   });
 
+  it('client page: a waiting invitation can be resent or deleted', async () => {
+    const id = CLIENT.id;
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/clients': { body: { clients: [CLIENT] } },
+      [`/v1/clients/${id}/users`]: {
+        body: {
+          users: [],
+          invitations: [
+            {
+              invitationId: 'i1',
+              name: 'Jane Smith',
+              email: 'jane@example.test',
+              phone: null,
+              roleLabel: 'Spouse',
+              expiresAt: '2026-11-20T10:00:00Z',
+              status: 'expired',
+            },
+          ],
+        },
+      },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      [`POST /v1/clients/${id}/invites`]: { status: 201, body: { invitationId: 'i2' } },
+      [`DELETE /v1/clients/${id}/invites/i1`]: { body: { ok: true } },
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    at(`/staff/clients/${id}`);
+    const resend = await screen.findByRole('button', {
+      name: 'Resend the invitation to jane@example.test',
+    });
+    // Not confirmed: nothing is sent.
+    fireEvent.click(resend);
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(resend);
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'POST' && c.path.endsWith('/invites'))?.body).toEqual({
+        email: 'jane@example.test',
+        name: 'Jane Smith',
+        roleLabel: 'Spouse',
+      }),
+    );
+    expect((await screen.findByRole('status')).textContent).toBe(
+      'A new invitation was sent to jane@example.test.',
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Delete the invitation to jane@example.test' }),
+    );
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === 'DELETE' && c.path === `/v1/clients/${id}/invites/i1`),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(
+        'The invitation to jane@example.test was deleted.',
+      ),
+    );
+  });
+
   it('approves an access request for the chosen client', async () => {
     const calls = serve({
       '/auth/me': ME,
@@ -502,6 +565,51 @@ describe('staff page', () => {
       expect(calls.some((c) => c.method === 'DELETE' && c.path === '/v1/files/f1')).toBe(true),
     );
     expect(reads()).toBe(1);
+  });
+
+  it('adds a document in B2 to the portal where the portal can read the bucket (P91)', async () => {
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${CLIENT.id}`]: {
+        body: { ...CLIENT, cabinetListed: true, cabinetFiles: 2 },
+      },
+      [`/v1/clients/${CLIENT.id}/users`]: { body: { users: [], invitations: [] } },
+      [`/v1/files?clientId=${CLIENT.id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${CLIENT.id}`]: { body: { shares: [] } },
+      [`/v1/clients/${CLIENT.id}/cabinet-files`]: {
+        body: {
+          listedAt: '2026-11-15T10:00:00Z',
+          canAdd: true,
+          files: [
+            {
+              docId: 'd2',
+              path: 'Income Tax/2025/W-2.pdf',
+              size: 100,
+              taxYear: 2025,
+              fileId: null,
+            },
+            { docId: 'd3', path: 'EIN letter.pdf', size: 5, taxYear: null, fileId: null },
+          ],
+        },
+      },
+      [`POST /v1/clients/${CLIENT.id}/cabinet-files/d2`]: { status: 201, body: { fileId: 'f9' } },
+      [`POST /v1/clients/${CLIENT.id}/cabinet-files/d3`]: {
+        status: 409,
+        body: { error: 'vf_gone' },
+      },
+    });
+    at(`/staff/clients/${CLIENT.id}`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add W-2.pdf to the portal' }));
+    expect(
+      await screen.findByText(
+        'W-2.pdf is on the portal now, shown to nobody yet: choose who sees it under Files.',
+      ),
+    ).toBeTruthy();
+    // The client's files are read again: they say what is on the portal.
+    expect(calls.filter((c) => c.path === `/v1/files?clientId=${CLIENT.id}`).length).toBe(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add EIN letter.pdf to the portal' }));
+    expect(await screen.findByText(/That document is no longer in B2/)).toBeTruthy();
   });
 
   it('reads no list for a client Vibe Files has sent none for, or that has nothing in B2 (P90)', async () => {
@@ -1757,5 +1865,142 @@ describe('the preview of a client portal (P77)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Return.png' }));
     const img = (await screen.findByAltText('Return.png')) as HTMLImageElement;
     expect(img.getAttribute('src')).toBe(`/api/staff/v1/clients/${id}/preview/files/f1/content`);
+  });
+
+  it('is seen as one person, chosen in the bar or by the address (P92)', async () => {
+    const id = CLIENT.id;
+    const file = {
+      id: 'f1',
+      name: 'Return.png',
+      size: 10,
+      contentType: 'image/png',
+      taxYear: 2025,
+      sharedAt: '2026-11-09T15:00:00Z',
+      updatedAt: null,
+      isNew: false,
+      preview: 'image',
+    };
+    const persons = [
+      { identityId: 'p1', name: 'Mary Smith' },
+      { identityId: 'p2', name: 'Joe Smith' },
+    ];
+    const body = { firmName: 'Example CPA', client: { id, name: 'Smith, John', active: true } };
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/preview`]: {
+        body: { ...body, people: 2, persons, as: null, link: null, files: [file] },
+      },
+      [`/v1/clients/${id}/preview?as=p2`]: {
+        body: {
+          ...body,
+          people: 2,
+          persons,
+          as: persons[1],
+          link: null,
+          files: [{ ...file, isNew: true }],
+        },
+      },
+    });
+    at(`/staff/preview/${id}`);
+    const pick = (await screen.findByLabelText('View as')) as HTMLSelectElement;
+    expect(pick.value).toBe('');
+    expect(screen.queryByText('New')).toBeNull();
+    fireEvent.change(pick, { target: { value: 'p2' } });
+    expect(
+      await screen.findByText('Preview of Smith, John’s portal as Joe Smith sees it.'),
+    ).toBeTruthy();
+    expect(screen.getByText('Signed in as Joe Smith.')).toBeTruthy();
+    expect(screen.getByText('New')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Return.png' }));
+    const img = (await screen.findByAltText('Return.png')) as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe(
+      `/api/staff/v1/clients/${id}/preview/files/f1/content?as=p2`,
+    );
+    cleanup();
+
+    // Straight from the client's staff page: its People list links each person so.
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}`]: { body: CLIENT },
+      [`/v1/clients/${id}/users`]: { body: { users: [USER], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+    });
+    at(`/staff/clients/${id}`);
+    const link = await screen.findByRole('link', {
+      name: 'View as John Smith (opens in a new tab)',
+    });
+    expect(link.getAttribute('href')).toBe(`/staff/preview/${id}?as=${USER.identityId}`);
+    cleanup();
+
+    // Someone whose whole account is turned off signs in to nothing: no View as, and it says why.
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}`]: { body: CLIENT },
+      [`/v1/clients/${id}/users`]: {
+        body: { users: [{ ...USER, accountOff: true }], invitations: [] },
+      },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+    });
+    at(`/staff/clients/${id}`);
+    expect(await screen.findByText('Account turned off')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /^View as/ })).toBeNull();
+    cleanup();
+
+    // A person turned off since the link was made: said in words of its own, with a way on.
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/preview?as=gone`]: { status: 404, body: { error: 'not_found' } },
+      [`/v1/clients/${id}/preview`]: {
+        body: { ...body, people: 2, persons, as: null, link: null, files: [file] },
+      },
+    });
+    at(`/staff/preview/${id}?as=gone`);
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'That person cannot sign in to this client now: their access to it, or their whole account, is turned off.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Preview the client instead' }));
+    expect(await screen.findByText(/Preview of Smith, John’s portal\./)).toBeTruthy();
+  });
+
+  it('settings: Vibe Files’ sync passphrase is entered, said saved, and removed (P91)', async () => {
+    const state = {
+      storage: 'local',
+      bothInUse: false,
+      b2: {
+        endpoint: 's3.us-west-004.backblazeb2.com',
+        bucket: 'example',
+        keyId: 'k',
+        hasKey: true,
+      },
+      move: null,
+      note: null,
+      vibeFiles: null,
+    };
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/settings/storage': { body: state },
+      'PUT /v1/settings/storage/vibe-files': {
+        body: { ...state, vibeFiles: { cabinetId: 'cab-1' } },
+      },
+      'DELETE /v1/settings/storage/vibe-files': { body: state },
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    at('/staff/settings');
+    const box = await screen.findByLabelText('Vibe Files’ sync passphrase');
+    const save = screen.getByRole('button', { name: 'Check and save the passphrase' });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(box, { target: { value: 'correct horse battery staple' } });
+    fireEvent.click(save);
+    expect(
+      await screen.findByText(
+        'Saved. A client’s page now has Add to portal on its documents in B2.',
+      ),
+    ).toBeTruthy();
+    expect(calls.find((c) => c.method === 'PUT' && c.path.endsWith('/vibe-files'))?.body).toEqual({
+      passphrase: 'correct horse battery staple',
+    });
+    expect((box as HTMLInputElement).value).toBe('');
   });
 });

@@ -37,7 +37,9 @@ Owner decisions, 2026-11-09 (Q&A):
 - **Staff work mainly in Vibe Files**, through the firm API. A **small staff web page** (D13) covers
   the jobs that need no cabinet access, for staff away from a Vibe Files PC: invites, client users,
   access requests, client uploads, and hiding or removing files already shared. Sharing a *new*
-  file is only done from Vibe Files, because only Vibe Files reaches the cabinet. A file already
+  file is done from Vibe Files, which alone reaches the cabinet; or (P91, 2026-11-17) from the
+  staff page for a document Vibe Files has put in the B2 bucket the portal also uses, once an
+  admin entered Vibe Files' sync passphrase. A file already
   on the portal can be sent from the staff page to **someone outside the client** (a lender, a
   lawyer) by a secure link, as Time & Billing's secure share (P49).
 - **The cabinet is the source of truth.** The portal holds a *copy* of each shared file. The

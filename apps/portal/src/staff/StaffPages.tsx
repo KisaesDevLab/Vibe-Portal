@@ -531,6 +531,8 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
   const [inv, setInv] = useState({ email: '', phone: '', name: '', roleLabel: '' });
   /** The invite form, shown only after "Invite someone" is pressed (P54). */
   const [inviting, setInviting] = useState(false);
+  /** What Resend or Delete on a waiting invitation did. */
+  const [invNote, setInvNote] = useState('');
   const label = (u: PortalUser): string => u.name || u.email || u.phone || '?';
   const head = useLoad<ClientRow>(`/v1/clients/${id}`);
   const uploads = useLoad<{ uploads: UploadRow[] }>(`/v1/uploads?clientId=${id}`);
@@ -612,6 +614,23 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                 >
                   {u.active ? 'Turn off' : 'Turn on'}
                 </Button>
+                {/* P92: this person's portal for this client, read only, in a new tab. */}
+                {u.active && !u.accountOff && (
+                  <a
+                    href={`/staff/preview/${id}?as=${u.identityId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ marginLeft: 8, whiteSpace: 'nowrap' }}
+                  >
+                    View as
+                    <span className="visually-hidden"> {label(u)} (opens in a new tab)</span>
+                  </a>
+                )}
+                {u.active && u.accountOff && (
+                  <span style={{ marginLeft: 8, color: tokens.color.textMuted }}>
+                    Account turned off
+                  </span>
+                )}
               </td>
             </tr>
           ))}
@@ -626,21 +645,71 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                   : `invited until ${when(i.expiresAt)}`}
               </td>
               <td style={td}>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  aria-label={`Withdraw the invitation to ${i.email ?? i.phone ?? ''}`}
-                  onClick={() =>
-                    void act(`/v1/clients/${id}/invites/${i.invitationId}`, { method: 'DELETE' })
-                  }
-                >
-                  Withdraw
-                </Button>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {/* A new invitation to the same contact replaces this one: a new link, and
+                      the full time to accept it again. */}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={`Resend the invitation to ${i.email ?? i.phone ?? ''}`}
+                    onClick={() => {
+                      const to = i.email ?? i.phone ?? '';
+                      if (
+                        !window.confirm(
+                          i.status === 'expired'
+                            ? `Send ${to} a new invitation?`
+                            : `Send ${to} a new invitation? The link they have now stops working.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setInvNote('');
+                      const again = {
+                        ...(i.email ? { email: i.email } : {}),
+                        ...(i.phone ? { phone: i.phone } : {}),
+                        name: i.name,
+                        roleLabel: i.roleLabel,
+                      };
+                      void act(`/v1/clients/${id}/invites`, { body: again }).then((r) => {
+                        if (r) setInvNote(`A new invitation was sent to ${to}.`);
+                      });
+                    }}
+                  >
+                    Resend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={`Delete the invitation to ${i.email ?? i.phone ?? ''}`}
+                    onClick={() => {
+                      const to = i.email ?? i.phone ?? '';
+                      if (
+                        !window.confirm(
+                          `Delete the invitation to ${to}? The link they were sent stops working.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setInvNote('');
+                      void act(`/v1/clients/${id}/invites/${i.invitationId}`, {
+                        method: 'DELETE',
+                      }).then((r) => {
+                        if (r) setInvNote(`The invitation to ${to} was deleted.`);
+                        // Accepted or deleted meanwhile: the list is read again.
+                        else people.reload();
+                      });
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </td>
             </tr>
           ))}
         </Table>
+        {invNote && <p role="status">{invNote}</p>}
         {!inviting && (
           <div style={{ marginTop: 12 }}>
             <Button variant="secondary" onClick={() => setInviting(true)}>
@@ -724,7 +793,16 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
         }}
       />
       <ClientUploads load={uploads} />
-      <ClientCabinetFiles clientId={id} head={head.data} shared={files.data?.files} />
+      <ClientCabinetFiles
+        clientId={id}
+        head={head.data}
+        shared={files.data?.files}
+        onAdded={() => {
+          files.reload();
+          head.reload();
+          history.reload();
+        }}
+      />
       {sentNote && <p role="status">{sentNote}</p>}
       {sending && files.data && (
         <Reveal>
@@ -810,7 +888,7 @@ const DID: Record<string, string> = {
   upload_filed: 'Upload filed in Vibe Files',
   upload_dismissed: 'Upload dismissed in Vibe Files',
   invite: 'Invited someone',
-  invite_revoked: 'Withdrew an invitation',
+  invite_revoked: 'Deleted an invitation',
   invite_accepted: 'Accepted an invitation',
   request: 'Asked for access',
   request_confirmed: 'Confirmed an access request',
@@ -843,6 +921,8 @@ const DID: Record<string, string> = {
   client_link_removed: 'Portal link removed',
   preview_view: 'Opened a file in the portal preview',
   cabinet_lists_cleared: 'Lists of documents in B2 cleared',
+  storage_vf_saved: 'Entered Vibe Files’ sync passphrase',
+  storage_vf_removed: 'Removed Vibe Files’ sync passphrase',
 };
 
 /** What happened on one client (P65), or what one person did and had done (P66), newest first. */
@@ -1327,15 +1407,21 @@ function ClientUploads({ load }: { load: Load<{ uploads: UploadRow[] }> }): JSX.
  * only: the portal holds no content of them, so none opens from here. The list is read only
  * when the client has documents in it; which of them are on the portal comes from the client's
  * files already on the page (`shared`), so nothing is read again when a file is removed.
+ *
+ * P91: where an admin entered Vibe Files' sync passphrase (Settings > Storage), a document not
+ * on the portal has Add to portal: the portal reads it from the bucket and keeps its own copy,
+ * shown to nobody until staff choose who sees it under Files.
  */
 function ClientCabinetFiles({
   clientId,
   head,
   shared,
+  onAdded,
 }: {
   clientId: string;
   head: ClientRow | null;
   shared: SharedFile[] | undefined;
+  onAdded: () => void;
 }): JSX.Element | null {
   if (!head) return null;
   return (
@@ -1352,7 +1438,7 @@ function ClientCabinetFiles({
         <p>None of this client’s documents are in B2.</p>
       )}
       {head.cabinetListed && head.cabinetFiles > 0 && (
-        <CabinetFileList clientId={clientId} shared={shared} />
+        <CabinetFileList clientId={clientId} shared={shared} onAdded={onAdded} />
       )}
     </Card>
   );
@@ -1361,11 +1447,18 @@ function ClientCabinetFiles({
 function CabinetFileList({
   clientId,
   shared,
+  onAdded,
 }: {
   clientId: string;
   shared: SharedFile[] | undefined;
+  onAdded: () => void;
 }): JSX.Element {
   const load = useLoad<CabinetList>(`/v1/clients/${clientId}/cabinet-files`);
+  // The client's files are read again (they say which documents are on the portal); the list
+  // itself is not.
+  const { actAt, busyAt, errorAt } = useAct(onAdded);
+  const [added, setAdded] = useState('');
+  const canAdd = load.data?.canAdd === true;
   const [typed, q, setTyped] = useUrlSearch('bq');
   const all = load.data?.files;
   const rows = useMemo(() => {
@@ -1399,7 +1492,9 @@ function CabinetFileList({
         <>
           <p>
             {`${count} ${count === 1 ? 'document' : 'documents'} in B2, ${here} on the portal. `}
-            Only the names are here: share a document from Vibe Files to put it on the portal.{' '}
+            {canAdd
+              ? 'Add to portal puts a copy of a document on the portal, shown to nobody until you choose who sees it under Files. '
+              : 'Only the names are here: share a document from Vibe Files to put it on the portal. '}
             {load.data.listedAt && (
               <small style={{ color: tokens.color.textMuted }}>
                 List last changed {when(load.data.listedAt)}.
@@ -1412,6 +1507,7 @@ function CabinetFileList({
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
           />
+          {added && <p role="status">{added}</p>}
           {rows.length === 0 && <p>No document matches.</p>}
           {rows.length > 0 && (
             <Table head={['Document', 'Folder', 'Tax year', 'Size', 'On the portal']}>
@@ -1425,7 +1521,40 @@ function CabinetFileList({
                     </td>
                     <td style={td}>{f.taxYear ?? ''}</td>
                     <td style={td}>{sizeText(f.size)}</td>
-                    <td style={td}>{onPortal.has(f.docId) ? 'Yes' : ''}</td>
+                    <td style={td}>
+                      {onPortal.has(f.docId) ? (
+                        'Yes'
+                      ) : canAdd ? (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={busyAt !== null}
+                            aria-label={`Add ${f.path.slice(cut + 1)} to the portal`}
+                            onClick={() => {
+                              setAdded('');
+                              void actAt(f.docId)(
+                                `/v1/clients/${clientId}/cabinet-files/${encodeURIComponent(f.docId)}`,
+                                { method: 'POST' },
+                              ).then((r) => {
+                                if (!r) return;
+                                const name = f.path.slice(cut + 1);
+                                setAdded(
+                                  (r as { existing?: boolean }).existing
+                                    ? `${name} was already on the portal: see who it is shown to under Files.`
+                                    : `${name} is on the portal now, shown to nobody yet: choose who sees it under Files.`,
+                                );
+                              });
+                            }}
+                          >
+                            {busyAt === f.docId ? 'Adding…' : 'Add to portal'}
+                          </Button>
+                          <Problem text={errorAt(f.docId)} />
+                        </>
+                      ) : (
+                        ''
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -3148,7 +3277,7 @@ function Settings(): JSX.Element {
               onChange={(e) => setForm({ ...form, accentColor: e.target.value })}
             />
             <Input
-              label="Largest file clients may send, and Vibe Files may share (MB, at most 95)"
+              label="Largest file clients may send, and the firm may share (MB, at most 95)"
               name="limit"
               type="number"
               min={1}
@@ -3620,6 +3749,8 @@ interface StorageData {
   storage: 'local' | 'b2';
   bothInUse: boolean;
   b2: { endpoint: string; bucket: string; keyId: string; hasKey: boolean };
+  /** P91: the Vibe Files cabinet in this bucket whose documents the portal can open. */
+  vibeFiles?: { cabinetId: string } | null;
   move: {
     to: 'local' | 'b2';
     state: 'requested' | 'running' | 'done' | 'failed' | 'interrupted';
@@ -3648,6 +3779,8 @@ function Storage(): JSX.Element {
   const { act, actAt, busy, busyAt, error, errorAt } = useAct(s.reload);
   const [b2, setB2] = useState({ endpoint: '', bucket: '', keyId: '', appKey: '' });
   const [tested, setTested] = useState(false);
+  const [phrase, setPhrase] = useState('');
+  const [vfSaved, setVfSaved] = useState(false);
   const d = s.data;
   // Filled from what is saved when that changes, not on every reload (a move reloads every 2 s
   // and would wipe what the admin is typing).
@@ -3762,8 +3895,9 @@ function Storage(): JSX.Element {
           >
             <strong>Backblaze B2 bucket</strong>
             <span style={{ fontSize: 13 }}>
-              Use a bucket for the portal alone, and an application key limited to it that may read,
-              write, list and delete files. Saving checks the bucket with a small test file first.
+              Use a bucket for the portal alone, or the one Vibe Files’ B2 sync uses (each keeps to
+              its own folders in it), and an application key limited to it that may read, write,
+              list and delete files. Saving checks the bucket with a small test file first.
             </span>
             <Input
               label="Endpoint (on the bucket's page, e.g. s3.us-west-004.backblazeb2.com)"
@@ -3838,6 +3972,81 @@ function Storage(): JSX.Element {
             </div>
             {tested && <p role="status">The bucket works with the saved key.</p>}
           </form>
+          {d.b2.hasKey && (
+            <form
+              style={{ display: 'grid', gap: 8 }}
+              onSubmit={(e) => {
+                e.preventDefault();
+                setVfSaved(false);
+                void actAt('vf')('/v1/settings/storage/vibe-files', {
+                  method: 'PUT',
+                  body: { passphrase: phrase },
+                }).then((r) => {
+                  if (r) {
+                    setPhrase('');
+                    setVfSaved(true);
+                  }
+                });
+              }}
+            >
+              <strong>Vibe Files’ documents in this bucket</strong>
+              <span style={{ fontSize: 13 }}>
+                Where Vibe Files’ B2 sync uses this same bucket, the portal can put a document from
+                it on the portal: a client’s page then has <strong>Add to portal</strong> on its
+                documents in B2. Vibe Files encrypts what it sends to B2, so the portal needs Vibe
+                Files’ sync passphrase. With it, this appliance can open every document Vibe Files
+                has in the bucket. The passphrase is checked and not kept; the key it opens is kept
+                here, encrypted. Changing the bucket above forgets it.
+              </span>
+              <span>
+                {d.vibeFiles
+                  ? `The portal can open the documents of Vibe Files’ cabinet ${d.vibeFiles.cabinetId}.`
+                  : 'Not set up: the portal has only the names Vibe Files sends it.'}
+              </span>
+              <Input
+                label={
+                  d.vibeFiles
+                    ? 'Vibe Files’ sync passphrase (to enter it again)'
+                    : 'Vibe Files’ sync passphrase'
+                }
+                name="vfPassphrase"
+                type="password"
+                autoComplete="new-password"
+                value={phrase}
+                onChange={(e) => setPhrase(e.target.value)}
+              />
+              <Problem text={errorAt('vf')} />
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Button type="submit" disabled={busy || !phrase}>
+                  {busyAt === 'vf' ? 'Checking…' : 'Check and save the passphrase'}
+                </Button>
+                {d.vibeFiles && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay; no more can be added from B2.',
+                        )
+                      ) {
+                        setVfSaved(false);
+                        void actAt('vf')('/v1/settings/storage/vibe-files', { method: 'DELETE' });
+                      }
+                    }}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+              {vfSaved && (
+                <p role="status">
+                  Saved. A client’s page now has Add to portal on its documents in B2.
+                </p>
+              )}
+            </form>
+          )}
           {d.b2.hasKey && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {(d.storage !== 'b2' || d.bothInUse) && (

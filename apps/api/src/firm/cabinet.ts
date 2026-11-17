@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: PolyForm-Small-Business-1.0.0
 //
-// The documents Vibe Files sent to its B2 bucket, as a list for the staff page (P90). The portal
-// cannot read that bucket (Vibe Files encrypts it with a key no server holds), so Vibe Files
+// The documents Vibe Files sent to its B2 bucket, as a list for the staff page (P90). Vibe Files
 // sends the list itself: each document's place in the client's folder, its size and tax year.
 // No content. A client that has none on the portal yet is made by its first list.
+//
+// P91: where Vibe Files and the portal use the same bucket and an admin entered Vibe Files'
+// sync passphrase (Settings > Storage), staff can put a listed document on the portal: the
+// portal reads it from Vibe Files' part of the bucket (files/vf-bucket.ts) and keeps its own
+// copy, as if Vibe Files had added it. Shown to nobody until staff choose who sees it.
 //
 //   GET    /api/firm/v1/cabinet                    what the portal holds, for Vibe Files to compare
 //   PUT    /api/firm/v1/cabinet/:clientId          { clientCode, displayName, rev, headRev, hash, files }
 //   DELETE /api/firm/v1/cabinet/:clientId?headRev  a client gone from the cabinet: its list goes
 //   DELETE /api/firm/v1/cabinet                    Vibe Files stopped sending lists: all go
 //   GET    /api/{firm,staff}/v1/clients/:id/cabinet-files
+//   POST   /api/staff/v1/clients/:id/cabinet-files/:docId   puts it on the portal -> { fileId }
 //
 // Only Vibe Files writes. Several PCs may send, each from its own catalog, and one list is kept
 // (`kept: true` tells a sender its list was not taken):
@@ -21,12 +26,19 @@
 //     seen less of the bucket than the one that cleared it.
 // File names go to no log and no History entry.
 
+import { Readable } from 'node:stream';
+
 import express, { type Request, type RequestHandler, type Router } from 'express';
 import { and, asc, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
+import { generateKey } from '@vibe/crypto';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
-import type { Ctx } from '../context';
+import { uploadLimit, type Ctx } from '../context';
+import { TooLarge } from '../files/blobs';
+import { b2Settings, firmRow, openB2, vfAccess } from '../files/storage';
+import { cleanName, contentTypeOf } from '../files/types';
+import { content, find, VfError } from '../files/vf-bucket';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError, notForStaff } from '../lib/http';
 
@@ -332,7 +344,139 @@ export function cabinetFilesOf(ctx: Ctx): RequestHandler {
     res.json({
       // Null: Vibe Files has sent no list for this client.
       listedAt: c.hash === null ? null : c.listedAt,
+      // P91: the portal can read these documents (the sync passphrase was entered).
+      canAdd: (await firmRow(ctx)).vfSyncEnc !== null,
       files: rows,
     });
+  });
+}
+
+/** What reading Vibe Files' part of the bucket answers when it cannot give the document. */
+const VF_STATUS: Record<VfError['code'], number> = {
+  vf_no_cabinet: 409,
+  vf_wrong_passphrase: 409,
+  // The key changed since the passphrase was entered: it is entered again.
+  vf_key: 409,
+  vf_gone: 409,
+  vf_missing: 409,
+  vf_format: 502,
+  vf_damaged: 502,
+};
+
+/** One document at a time is read from the bucket and opened: each is held whole in memory,
+ *  and opening it keeps the server busy, so two staff pressing Add wait their turn. */
+let adding: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(job: () => Promise<T>): Promise<T> {
+  const run = adding.then(job, job);
+  adding = run.catch(() => undefined);
+  return run;
+}
+
+/**
+ * POST /clients/:id/cabinet-files/:docId (staff, P91): puts one listed document on the portal.
+ * Read from the bucket as it is now (not from the list): one deleted or taken out of B2 since
+ * is refused. The copy is the portal's own, under the document's id, so Vibe Files finds it as
+ * a file it shared itself. Shown to nobody: who sees it is chosen as for any file.
+ */
+export function cabinetAdd(ctx: Ctx): RequestHandler {
+  return h(async (req, res) => {
+    const id = clientId(req);
+    const docId = req.params['docId'] ?? '';
+    const actor: Actor = { kind: 'staff', name: req.staff?.email ?? 'staff' };
+    const [client] = await ctx.db.select().from(schema.clients).where(eq(schema.clients.id, id));
+    if (!client) throw new HttpError(404, 'client_not_found');
+    if (!client.active) throw new HttpError(409, 'client_inactive');
+    const [listed] = await ctx.db
+      .select({ docId: schema.cabinetFile.docId })
+      .from(schema.cabinetFile)
+      .where(and(eq(schema.cabinetFile.clientId, id), eq(schema.cabinetFile.docId, docId)));
+    // Off the list since the page was read (Vibe Files sent a new one).
+    if (!listed) throw new HttpError(404, 'vf_unlisted');
+    const live = and(
+      eq(schema.files.clientId, id),
+      eq(schema.files.vfDocumentId, docId),
+      isNull(schema.files.removedAt),
+    );
+    const [existing] = await ctx.db.select({ id: schema.files.id }).from(schema.files).where(live);
+    if (existing) {
+      res.json({ fileId: existing.id, existing: true });
+      return;
+    }
+    const f = await firmRow(ctx);
+    const access = vfAccess(ctx, f);
+    const s = b2Settings(ctx, f);
+    if (!access || !s) throw new HttpError(409, 'vf_not_set_up');
+    const bucket = openB2(ctx, s);
+    const limit = await uploadLimit(ctx);
+    let stored;
+    let name;
+    let taxYear: number | null;
+    try {
+      const got = await oneAtATime(async () => {
+        const doc = await find(bucket, access, id, docId);
+        // The object opens in one piece, in memory: refused by its size before it is fetched.
+        if (doc.size > limit) throw new HttpError(413, 'vf_too_large');
+        const plain = await content(bucket, access, doc);
+        const dek = generateKey();
+        const put = await ctx.blobs.put(Readable.from([plain]), dek, limit);
+        if (put.sha256 !== doc.sha256) {
+          await ctx.blobs.remove(put.blobKey);
+          throw new VfError('vf_damaged', 'stored copy');
+        }
+        return { doc, put, dekWrapped: Buffer.from(ctx.keyring.wrap(dek)) };
+      });
+      name = cleanName(got.doc.name);
+      const year = got.doc.taxYear;
+      taxYear = year !== null && year >= 1990 && year <= 2100 ? year : null;
+      stored = { ...got.put, dekWrapped: got.dekWrapped };
+    } catch (err) {
+      if (err instanceof TooLarge) throw new HttpError(413, 'vf_too_large');
+      if (err instanceof VfError) {
+        // The code and the object's place in the bucket; never a file name.
+        ctx.log.warn({ reason: err.message }, 'a document in B2 could not be put on the portal');
+        throw new HttpError(VF_STATUS[err.code], err.code);
+      }
+      if (err instanceof HttpError) throw err;
+      ctx.log.error({ err }, 'reading a document from B2 failed');
+      throw new HttpError(502, 'vf_read_failed');
+    }
+    let row;
+    try {
+      [row] = await ctx.db
+        .insert(schema.files)
+        .values({
+          clientId: id,
+          vfDocumentId: docId,
+          name,
+          contentType: contentTypeOf(name),
+          size: stored.size,
+          sha256: stored.sha256,
+          blobKey: stored.blobKey,
+          dekWrapped: stored.dekWrapped,
+          sharedAt: ctx.now(),
+          updatedAt: ctx.now(),
+          sharedBy: actor.name,
+          taxYear,
+        })
+        .returning({ id: schema.files.id });
+    } catch (err) {
+      await ctx.blobs.remove(stored.blobKey);
+      // Added meanwhile, by Vibe Files or another staff member: theirs is kept.
+      if ((err as { code?: string }).code === '23505') {
+        const [now] = await ctx.db.select({ id: schema.files.id }).from(schema.files).where(live);
+        if (now) {
+          res.json({ fileId: now.id, existing: true });
+          return;
+        }
+      }
+      throw err;
+    }
+    if (!row) throw new Error('file insert returned nothing');
+    await record(ctx.db, 'file_added', actor, {
+      clientId: id,
+      fileId: row.id,
+      detail: { name, size: stored.size, vfDocumentId: docId, from: 'b2' },
+    });
+    res.status(201).json({ fileId: row.id });
   });
 }

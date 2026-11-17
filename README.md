@@ -138,7 +138,7 @@ sudo docker exec vibe-files-portal node_modules/.bin/tsx src/scripts/staff-setup
 ```
 
 More detail (backups, secure links to people outside a client, B2 storage, seeing the documents
-Vibe Files has in B2):
+Vibe Files has in B2 and adding one to the portal, seeing the portal as one person does):
 [docs/firm-setup.md](docs/firm-setup.md).
 
 ## For developers

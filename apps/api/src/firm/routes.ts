@@ -34,7 +34,7 @@ import { inScope, limitedTo, mustSee, requireAllClients } from '../staff/scope';
 import { storageSummary } from '../files/storage';
 import { VERSION } from '../version';
 import { setAccess, withdrawInvites } from './access';
-import { cabinetFilesOf, firmCabinetRouter } from './cabinet';
+import { cabinetAdd, cabinetFilesOf, firmCabinetRouter } from './cabinet';
 import { firmFilesRouter } from './files';
 import { historyRows, HistoryQuery } from './history';
 import { staffPeopleRouter } from './people';
@@ -124,9 +124,10 @@ export function firmRouter(ctx: Ctx): Router {
 }
 
 /**
- * The same API for the staff web page (D13), authorised by a staff session. Staff cannot share
- * new files or replace their content (only Vibe Files reaches the cabinet), and downloading an
- * upload never marks it fetched (P10): it still reaches Intake.
+ * The same API for the staff web page (D13), authorised by a staff session. Staff send no file
+ * of their own and replace no content: a new file comes from Vibe Files, or (P91) from Vibe
+ * Files' part of the bucket (firm/cabinet.ts). Downloading an upload never marks it fetched
+ * (P10): it still reaches Intake.
  */
 export function staffApi(ctx: Ctx, auth: RequestHandler): Router {
   return firmApi(ctx, auth, true);
@@ -229,6 +230,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
 
   // P90: the client's documents in Vibe Files' B2 bucket (names, no content).
   r.get('/clients/:id/cabinet-files', cabinetFilesOf(ctx));
+  // P91: staff put one of them on the portal, read from Vibe Files' part of the bucket.
+  if (staff) r.post('/clients/:id/cabinet-files/:docId', cabinetAdd(ctx));
 
   r.put(
     '/clients/:id',
@@ -336,6 +339,9 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
           roleLabel: schema.clientAccess.roleLabel,
           active: schema.clientAccess.active,
           lastSignInAt: schema.portalIdentity.lastSignInAt,
+          // P92: the whole account is turned off (they sign in to no client), whatever `active`
+          // says of this one.
+          accountOff: sql<boolean>`(${schema.portalIdentity.status} = 'disabled')`,
         })
         .from(schema.clientAccess)
         .innerJoin(
