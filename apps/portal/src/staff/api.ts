@@ -120,7 +120,12 @@ export function staffSay(err: unknown): string {
       'The portal cannot read what Vibe Files put in the bucket. Share it from Vibe Files instead.',
     vf_too_large:
       'That document is larger than the portal takes (Settings › Firm sets the largest file).',
-    vf_read_failed: 'The bucket could not be read right now. Try again.',
+    vf_read_failed:
+      'The bucket could not be read. Try again; if it keeps failing, an admin checks the application key under Settings › Storage.',
+    vf_unlisted:
+      'That document is no longer on the list Vibe Files sent for this client. Open the page again to see the list as it is now.',
+    vf_cabinet_format:
+      'The portal cannot open the key of the Vibe Files cabinet in this bucket: it is not in a form this version of the portal knows.',
     b2_in_use:
       'Files are stored in this bucket. Move them back to the appliance before changing the bucket or removing it.',
     move_running: 'A move is already under way.',
@@ -144,6 +149,10 @@ export function staffSay(err: unknown): string {
   // The portal's own reason (Object Lock, another portal's bucket, no room), in full.
   if ((code === 'b2_refused' || code === 'no_room') && err instanceof StaffApiError && err.detail) {
     return err.detail;
+  }
+  if (code === 'vf_bucket_unread') {
+    const why = err instanceof StaffApiError && err.detail ? ` B2 said: ${err.detail}` : '';
+    return `The portal could not read Vibe Files’ part of the bucket. The application key above must be allowed to read the whole bucket, not one folder of it.${why}`;
   }
   if (code === 'b2_check_failed') {
     const why = err instanceof StaffApiError && err.detail ? ` B2 said: ${err.detail}` : '';
@@ -219,6 +228,8 @@ export interface PortalUser {
   roleLabel: string;
   active: boolean;
   lastSignInAt: string | null;
+  /** P92: their whole account is turned off, whatever `active` says of this client. */
+  accountOff?: boolean;
   /** P62: every client this person can see (absent from older servers). */
   clients?: { id: string; name: string }[];
 }

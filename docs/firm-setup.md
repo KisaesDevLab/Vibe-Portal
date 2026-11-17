@@ -265,10 +265,13 @@ What to know:
 
 Where the portal and Vibe Files' B2 sync use **the same bucket**, staff can put a document from
 the list on the portal without going to Vibe Files. It needs Vibe Portal 0.3.16 or later; Vibe
-Files needs no update.
+Files needs nothing newer than the 0.1.38 the list itself needs.
 
 1. On the staff page, **Settings › Storage**, set up the B2 bucket if it is not (the bucket Vibe
-   Files' B2 sync uses; files need not be moved to it).
+   Files' B2 sync uses; files need not be moved to it). The bucket must be without Object Lock
+   (the portal refuses one with it), and the application key must reach the whole bucket, not
+   one folder of it. The portal keeps to its own folders there (`blobs/` and `portal/`) and
+   only reads Vibe Files' (`vf/`).
 2. Under **Vibe Files' documents in this bucket**, enter Vibe Files' **sync passphrase** and
    press **Check and save**. The portal checks it against the bucket.
 3. On a client's page, each document under **Documents in B2 (from Vibe Files)** that is not on
@@ -285,7 +288,12 @@ What to know:
   Vibe Files works as before either way.
 - The passphrase itself is not kept. The key it opens is, encrypted with the portal's own key,
   as the bucket's application key is. **Remove** takes it off the portal again; documents
-  already added stay.
+  already added stay. Changing or removing the bucket under **Settings › Storage** forgets it
+  too (History says so): enter the passphrase again for the new bucket.
+- Like the bucket's application key, the saved key is in the portal's backups and in the hourly
+  database copy sent to the bucket, encrypted with the portal's own key. **Remove** does not
+  reach copies already made, and a restore from one made before it brings the key back: press
+  **Remove** again after such a restore.
 - The document is read as the bucket has it at that moment. One deleted, or taken out of B2, in
   Vibe Files since the list was sent is refused, and says so.
 - A document larger than the portal's largest upload is refused.
@@ -293,7 +301,8 @@ What to know:
   sharing it again from Vibe Files does not add it twice.
 - A document changed in the cabinet after it was added is not changed on the portal by this:
   share it again from Vibe Files, or remove it from the portal and add it again.
-- If Vibe Files' sync passphrase is changed, enter the new one here.
+- If Vibe Files' sync key is ever changed, **Add to portal** says so: enter the passphrase
+  again under **Settings › Storage**.
 
 ## Storing files in Backblaze B2 (optional)
 
@@ -301,7 +310,9 @@ Shared files and client uploads are kept on the appliance unless you move them t
 They are encrypted on the appliance first, so B2 only ever holds files it cannot read.
 
 1. In Backblaze, make a **private bucket for the portal alone**, without Object Lock, and an
-   **application key** limited to that bucket that may read, write, list and delete files.
+   **application key** limited to that bucket that may read, write, list and delete files. (The
+   bucket Vibe Files' B2 sync uses will do as well, if it has no Object Lock: each keeps to its
+   own folders in it. See **Adding a document in B2 to the portal from the staff page**.)
 2. On the staff page, **Settings > Storage**: enter the bucket's **Endpoint** (on the bucket's
    page, like `s3.us-west-004.backblazeb2.com`), the **Bucket name**, the **Key ID** and the
    **Application key**, and press **Check and save**. The portal writes, reads and deletes a small
@@ -464,7 +475,16 @@ is in History as yours).
 To see it as **one person** does, press **View as** beside them under **People with access**, or
 choose them under **View as** at the top of the preview. The preview then lists only the files
 shared with that person, each marked **New** where they have not opened it yet. It is still read
-only, and opening a file there still does not count as their opening it.
+only, and opening a file there still does not count as their opening it. What the person sent to
+the firm is not shown there (it is on the client's page, under its uploads). Someone whose
+account is turned off has no **View as**: they sign in to nothing.
+
+## An invitation that was not accepted
+
+On a client's page, under **People with access**, an invitation still waiting has two buttons.
+**Resend** sends a new invitation to the same email or number: a new link, good for 7 days, and
+the link sent before stops working. **Delete** takes the invitation away, and its link stops
+working. Both ask first. An invitation that expired stays listed until it is resent or deleted.
 
 ## When something is wrong
 

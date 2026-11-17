@@ -247,8 +247,27 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     // own key cannot do this.
     const gone = await add(boss, EXPECT.deletedDocId);
     expect([gone.status, gone.body]).toEqual([409, { error: 'vf_gone' }]);
-    await add(boss, 'never-listed').expect(404);
+    expect((await add(boss, 'never-listed')).body).toEqual({ error: 'vf_unlisted' });
     await w.firm('post', `/clients/${ANDERSON.id}/cabinet-files/${W2.docId}`).expect(404);
+
+    // A staff member who is not an admin adds documents, and does not touch the passphrase.
+    // (Kept to their clients by the same guard as the rest of a client's page, P48.)
+    const users = await boss.get(`/api/staff/v1/clients/${ANDERSON.id}/users`).expect(200);
+    expect(users.body.users).toEqual([]);
+
+    // Another bucket: the key was checked against the old one, so it is forgotten, and said.
+    await boss
+      .put('/api/staff/v1/settings/storage/b2')
+      .send({ ...B2, bucket: 'example-cpa-other' })
+      .expect(200);
+    const moved = await boss.get('/api/staff/v1/settings/storage').expect(200);
+    expect(moved.body.vibeFiles).toBeNull();
+    const kinds = (await w.t.db.select().from(schema.events)).map((e) => e.kind);
+    expect(kinds).toContain('storage_vf_removed');
+    await boss
+      .put('/api/staff/v1/settings/storage/vibe-files')
+      .send({ passphrase: EXPECT.passphrase })
+      .expect(200);
 
     // The passphrase removed: nothing more is read.
     const off = await boss.delete('/api/staff/v1/settings/storage/vibe-files').expect(200);

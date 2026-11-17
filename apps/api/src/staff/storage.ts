@@ -100,6 +100,9 @@ export function storageRouter(ctx: Ctx): Router {
       const appKey = input.appKey ?? saved?.appKey;
       if (!appKey) throw new HttpError(400, 'b2_app_key');
       const next: B2Settings = { endpoint, bucket: input.bucket, keyId: input.keyId, appKey };
+      // Another bucket: Vibe Files' key was checked against the old one, so it is forgotten.
+      const forgetVf =
+        f.vfSyncEnc !== null && (endpoint !== f.b2Endpoint || input.bucket !== f.b2Bucket);
       try {
         await checkBucket(openB2(ctx, next), f.installId);
       } catch (err) {
@@ -111,10 +114,12 @@ export function storageRouter(ctx: Ctx): Router {
         b2Bucket: input.bucket,
         b2KeyId: input.keyId,
         b2AppKeyEnc: Buffer.from(ctx.keyring.wrap(Buffer.from(appKey, 'utf8'))),
-        // Another bucket: Vibe Files' key was checked against the old one (P91).
-        ...(endpoint !== f.b2Endpoint || input.bucket !== f.b2Bucket ? { vfSyncEnc: null } : {}),
+        ...(forgetVf ? { vfSyncEnc: null } : {}),
         updatedAt: ctx.now(),
       });
+      if (forgetVf) {
+        await record(ctx.db, 'storage_vf_removed', actor(req), { detail: { because: 'bucket' } });
+      }
       // A new key for the bucket in use takes over at once.
       if (inUse) await applyStorage(ctx);
       await record(ctx.db, 'storage_b2_saved', actor(req), {
@@ -155,6 +160,9 @@ export function storageRouter(ctx: Ctx): Router {
         updatedAt: ctx.now(),
       });
       await record(ctx.db, 'storage_b2_removed', actor(req));
+      if (f.vfSyncEnc) {
+        await record(ctx.db, 'storage_vf_removed', actor(req), { detail: { because: 'bucket' } });
+      }
       res.json(await storageState(ctx));
     }),
   );
@@ -174,8 +182,14 @@ export function storageRouter(ctx: Ctx): Router {
       try {
         access = await unlock(openB2(ctx, s), passphrase);
       } catch (err) {
-        if (err instanceof VfError) throw new HttpError(400, err.code);
-        refuse(ctx, res, err, 'reading Vibe Files’ documents');
+        // The cabinet's own key file is not one the portal knows how to open.
+        if (err instanceof VfError) {
+          throw new HttpError(400, err.code === 'vf_format' ? 'vf_cabinet_format' : err.code);
+        }
+        // B2 would not list or give Vibe Files' part of the bucket (a key limited to a folder,
+        // the network): not a fault of the passphrase.
+        ctx.log.warn({ reason: why(err) }, 'Vibe Files’ part of the bucket could not be read');
+        res.status(400).json({ error: 'vf_bucket_unread', detail: why(err) });
         return;
       }
       await ctx.db.update(schema.firm).set({

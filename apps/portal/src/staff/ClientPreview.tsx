@@ -51,17 +51,28 @@ export function ClientPreview(): JSX.Element {
   const notHere = (what: string): void => setPressed(`${what} does nothing in the preview.`);
 
   useEffect(() => {
+    // Nothing of the view before stays up while another is read (its files are not this one's).
+    setData(null);
     setViewing(null);
     setError('');
+    let current = true;
     staffApi<Preview>(`/v1/clients/${encodeURIComponent(id)}/preview${asQuery}`)
-      .then(setData)
+      .then((d) => {
+        if (current) setData(d);
+      })
       .catch((err: unknown) => {
+        if (!current) return;
         setError(
           err instanceof ApiError && err.status === 401
             ? 'Your staff session has ended. Sign in on the staff page, then open the preview again.'
-            : staffSay(err),
+            : asQuery && err instanceof ApiError && err.status === 404 && err.code === 'not_found'
+              ? 'That person cannot sign in to this client now: their access to it, or their whole account, is turned off.'
+              : staffSay(err),
         );
       });
+    return () => {
+      current = false;
+    };
   }, [id, asQuery]);
 
   useEffect(() => {
@@ -75,11 +86,7 @@ export function ClientPreview(): JSX.Element {
       <main id="main-content" tabIndex={-1} className="p-page">
         {error ? (
           <>
-            <p role="alert">
-              {as && !data
-                ? `${error} That person may no longer have access to this client.`
-                : error}
-            </p>
+            <p role="alert">{error}</p>
             {as && (
               <Button variant="secondary" size="sm" onClick={() => setParams({})}>
                 Preview the client instead
@@ -122,6 +129,7 @@ export function ClientPreview(): JSX.Element {
               <span>View as</span>
               <select
                 name="as"
+                style={{ maxWidth: '100%', minWidth: 0 }}
                 value={person?.identityId ?? ''}
                 onChange={(e) => setParams(e.target.value ? { as: e.target.value } : {})}
               >
@@ -292,6 +300,7 @@ export function ClientPreview(): JSX.Element {
             title="Each person sees the files they sent."
             body={
               <>
+                {person ? `What ${person.name} sent is not shown here. ` : ''}
                 Their uploads are on the client’s staff page, with a{' '}
                 <Badge>Waiting for the firm</Badge> or <Badge tone="success">Received</Badge> mark
                 on the portal.

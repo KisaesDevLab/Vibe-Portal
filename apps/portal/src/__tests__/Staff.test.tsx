@@ -1928,8 +1928,79 @@ describe('the preview of a client portal (P77)', () => {
     });
     at(`/staff/clients/${id}`);
     const link = await screen.findByRole('link', {
-      name: 'See the portal as John Smith does (opens in a new tab)',
+      name: 'View as John Smith (opens in a new tab)',
     });
     expect(link.getAttribute('href')).toBe(`/staff/preview/${id}?as=${USER.identityId}`);
+    cleanup();
+
+    // Someone whose whole account is turned off signs in to nothing: no View as, and it says why.
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}`]: { body: CLIENT },
+      [`/v1/clients/${id}/users`]: {
+        body: { users: [{ ...USER, accountOff: true }], invitations: [] },
+      },
+      [`/v1/files?clientId=${id}`]: { body: { files: [] } },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+    });
+    at(`/staff/clients/${id}`);
+    expect(await screen.findByText('Account turned off')).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /^View as/ })).toBeNull();
+    cleanup();
+
+    // A person turned off since the link was made: said in words of its own, with a way on.
+    serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/preview?as=gone`]: { status: 404, body: { error: 'not_found' } },
+      [`/v1/clients/${id}/preview`]: {
+        body: { ...body, people: 2, persons, as: null, link: null, files: [file] },
+      },
+    });
+    at(`/staff/preview/${id}?as=gone`);
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'That person cannot sign in to this client now: their access to it, or their whole account, is turned off.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Preview the client instead' }));
+    expect(await screen.findByText(/Preview of Smith, John’s portal\./)).toBeTruthy();
+  });
+
+  it('settings: Vibe Files’ sync passphrase is entered, said saved, and removed (P91)', async () => {
+    const state = {
+      storage: 'local',
+      bothInUse: false,
+      b2: {
+        endpoint: 's3.us-west-004.backblazeb2.com',
+        bucket: 'example',
+        keyId: 'k',
+        hasKey: true,
+      },
+      move: null,
+      note: null,
+      vibeFiles: null,
+    };
+    const calls = serve({
+      '/auth/me': ME,
+      '/v1/settings/storage': { body: state },
+      'PUT /v1/settings/storage/vibe-files': {
+        body: { ...state, vibeFiles: { cabinetId: 'cab-1' } },
+      },
+      'DELETE /v1/settings/storage/vibe-files': { body: state },
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    at('/staff/settings');
+    const box = await screen.findByLabelText('Vibe Files’ sync passphrase');
+    const save = screen.getByRole('button', { name: 'Check and save the passphrase' });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(box, { target: { value: 'correct horse battery staple' } });
+    fireEvent.click(save);
+    expect(
+      await screen.findByText(
+        'Saved. A client’s page now has Add to portal on its documents in B2.',
+      ),
+    ).toBeTruthy();
+    expect(calls.find((c) => c.method === 'PUT' && c.path.endsWith('/vibe-files'))?.body).toEqual({
+      passphrase: 'correct horse battery staple',
+    });
+    expect((box as HTMLInputElement).value).toBe('');
   });
 });

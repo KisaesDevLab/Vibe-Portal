@@ -381,7 +381,8 @@ export function cabinetAdd(ctx: Ctx): RequestHandler {
       .select({ docId: schema.cabinetFile.docId })
       .from(schema.cabinetFile)
       .where(and(eq(schema.cabinetFile.clientId, id), eq(schema.cabinetFile.docId, docId)));
-    if (!listed) throw new HttpError(404, 'not_found');
+    // Off the list since the page was read (Vibe Files sent a new one).
+    if (!listed) throw new HttpError(404, 'vf_unlisted');
     const live = and(
       eq(schema.files.clientId, id),
       eq(schema.files.vfDocumentId, docId),

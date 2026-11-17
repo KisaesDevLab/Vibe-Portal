@@ -615,16 +615,21 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                   {u.active ? 'Turn off' : 'Turn on'}
                 </Button>
                 {/* P92: this person's portal for this client, read only, in a new tab. */}
-                {u.active && (
+                {u.active && !u.accountOff && (
                   <a
                     href={`/staff/preview/${id}?as=${u.identityId}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ marginLeft: 8, whiteSpace: 'nowrap' }}
-                    aria-label={`See the portal as ${label(u)} does (opens in a new tab)`}
                   >
                     View as
+                    <span className="visually-hidden"> {label(u)} (opens in a new tab)</span>
                   </a>
+                )}
+                {u.active && u.accountOff && (
+                  <span style={{ marginLeft: 8, color: tokens.color.textMuted }}>
+                    Account turned off
+                  </span>
                 )}
               </td>
             </tr>
@@ -652,7 +657,9 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                       const to = i.email ?? i.phone ?? '';
                       if (
                         !window.confirm(
-                          `Send ${to} a new invitation? The link they have now stops working.`,
+                          i.status === 'expired'
+                            ? `Send ${to} a new invitation?`
+                            : `Send ${to} a new invitation? The link they have now stops working.`,
                         )
                       ) {
                         return;
@@ -690,6 +697,8 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                         method: 'DELETE',
                       }).then((r) => {
                         if (r) setInvNote(`The invitation to ${to} was deleted.`);
+                        // Accepted or deleted meanwhile: the list is read again.
+                        else people.reload();
                       });
                     }}
                   >
@@ -879,7 +888,7 @@ const DID: Record<string, string> = {
   upload_filed: 'Upload filed in Vibe Files',
   upload_dismissed: 'Upload dismissed in Vibe Files',
   invite: 'Invited someone',
-  invite_revoked: 'Withdrew an invitation',
+  invite_revoked: 'Deleted an invitation',
   invite_accepted: 'Accepted an invitation',
   request: 'Asked for access',
   request_confirmed: 'Confirmed an access request',
@@ -1447,7 +1456,7 @@ function CabinetFileList({
   const load = useLoad<CabinetList>(`/v1/clients/${clientId}/cabinet-files`);
   // The client's files are read again (they say which documents are on the portal); the list
   // itself is not.
-  const { actAt, busyAt, error, errorAt } = useAct(onAdded);
+  const { actAt, busyAt, errorAt } = useAct(onAdded);
   const [added, setAdded] = useState('');
   const canAdd = load.data?.canAdd === true;
   const [typed, q, setTyped] = useUrlSearch('bq');
@@ -1498,7 +1507,6 @@ function CabinetFileList({
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
           />
-          <Problem text={error} />
           {added && <p role="status">{added}</p>}
           {rows.length === 0 && <p>No document matches.</p>}
           {rows.length > 0 && (
@@ -1529,11 +1537,13 @@ function CabinetFileList({
                                 `/v1/clients/${clientId}/cabinet-files/${encodeURIComponent(f.docId)}`,
                                 { method: 'POST' },
                               ).then((r) => {
-                                if (r) {
-                                  setAdded(
-                                    `${f.path.slice(cut + 1)} is on the portal now, shown to nobody yet: choose who sees it under Files.`,
-                                  );
-                                }
+                                if (!r) return;
+                                const name = f.path.slice(cut + 1);
+                                setAdded(
+                                  (r as { existing?: boolean }).existing
+                                    ? `${name} was already on the portal: see who it is shown to under Files.`
+                                    : `${name} is on the portal now, shown to nobody yet: choose who sees it under Files.`,
+                                );
                               });
                             }}
                           >
@@ -3267,7 +3277,7 @@ function Settings(): JSX.Element {
               onChange={(e) => setForm({ ...form, accentColor: e.target.value })}
             />
             <Input
-              label="Largest file clients may send, and Vibe Files may share (MB, at most 95)"
+              label="Largest file clients may send, and the firm may share (MB, at most 95)"
               name="limit"
               type="number"
               min={1}
@@ -3770,6 +3780,7 @@ function Storage(): JSX.Element {
   const [b2, setB2] = useState({ endpoint: '', bucket: '', keyId: '', appKey: '' });
   const [tested, setTested] = useState(false);
   const [phrase, setPhrase] = useState('');
+  const [vfSaved, setVfSaved] = useState(false);
   const d = s.data;
   // Filled from what is saved when that changes, not on every reload (a move reloads every 2 s
   // and would wipe what the admin is typing).
@@ -3966,11 +3977,15 @@ function Storage(): JSX.Element {
               style={{ display: 'grid', gap: 8 }}
               onSubmit={(e) => {
                 e.preventDefault();
+                setVfSaved(false);
                 void actAt('vf')('/v1/settings/storage/vibe-files', {
                   method: 'PUT',
                   body: { passphrase: phrase },
                 }).then((r) => {
-                  if (r) setPhrase('');
+                  if (r) {
+                    setPhrase('');
+                    setVfSaved(true);
+                  }
                 });
               }}
             >
@@ -3981,7 +3996,7 @@ function Storage(): JSX.Element {
                 documents in B2. Vibe Files encrypts what it sends to B2, so the portal needs Vibe
                 Files’ sync passphrase. With it, this appliance can open every document Vibe Files
                 has in the bucket. The passphrase is checked and not kept; the key it opens is kept
-                here, encrypted.
+                here, encrypted. Changing the bucket above forgets it.
               </span>
               <span>
                 {d.vibeFiles
@@ -3996,14 +4011,14 @@ function Storage(): JSX.Element {
                 }
                 name="vfPassphrase"
                 type="password"
-                autoComplete="off"
+                autoComplete="new-password"
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
               />
               <Problem text={errorAt('vf')} />
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <Button type="submit" disabled={busy || !phrase}>
-                  {busyAt === 'vf' ? 'Checking…' : 'Check and save'}
+                  {busyAt === 'vf' ? 'Checking…' : 'Check and save the passphrase'}
                 </Button>
                 {d.vibeFiles && (
                   <Button
@@ -4016,7 +4031,8 @@ function Storage(): JSX.Element {
                           'Remove Vibe Files’ sync key from the portal? Documents already on the portal stay; no more can be added from B2.',
                         )
                       ) {
-                        void act('/v1/settings/storage/vibe-files', { method: 'DELETE' });
+                        setVfSaved(false);
+                        void actAt('vf')('/v1/settings/storage/vibe-files', { method: 'DELETE' });
                       }
                     }}
                   >
@@ -4024,6 +4040,11 @@ function Storage(): JSX.Element {
                   </Button>
                 )}
               </div>
+              {vfSaved && (
+                <p role="status">
+                  Saved. A client’s page now has Add to portal on its documents in B2.
+                </p>
+              )}
             </form>
           )}
           {d.b2.hasKey && (

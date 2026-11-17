@@ -144,6 +144,16 @@ describe('the preview of a client portal (P77)', () => {
       .expect(200);
     await staff.get(`${preview(CLIENT)}?as=${joe.id}`).expect(404);
     await staff.get(`${preview(CLIENT)}/files/${his}/content?as=${joe.id}`).expect(404);
+
+    // The whole account turned off: the client's People list says so (no View as), and the
+    // preview as that person is not found.
+    await staff.post(`/api/staff/v1/people/${mary.id}/turn-off`).expect(200);
+    const users = (await staff.get(`/api/staff/v1/clients/${CLIENT}/users`).expect(200)).body
+      .users as { identityId: string; active: boolean; accountOff: boolean }[];
+    expect(users.find((u) => u.identityId === mary.id)).toEqual(
+      expect.objectContaining({ active: true, accountOff: true }),
+    );
+    await staff.get(`${preview(CLIENT)}?as=${mary.id}`).expect(404);
   });
 
   it('a file of another client is not in this preview', async () => {
