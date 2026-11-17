@@ -31,7 +31,7 @@ import { B2Objects, type B2Settings } from './b2';
 import { NotFound, type Bucket, type ObjectStore } from './objects';
 import { snapshotIfDue } from './snapshot';
 import type { VfAccess } from './vf-bucket';
-import { followProblem } from './vf-follow';
+import { FOLLOW_ACTOR, followProblem } from './vf-follow';
 
 type FirmRow = typeof schema.firm.$inferSelect;
 type StorageMove = schema.StorageMove;
@@ -477,15 +477,26 @@ export async function storageState(ctx: Ctx) {
     move: f.storageMove,
     note: f.storageNote,
     /** P91: the cabinet of Vibe Files whose documents in this bucket the portal can open. */
-    vibeFiles: vfState(ctx, f),
+    vibeFiles: await vfState(ctx, f),
   };
 }
 
 /** What Settings > Storage shows of Vibe Files' documents: never a key. */
-function vfState(ctx: Ctx, f: FirmRow) {
+async function vfState(ctx: Ctx, f: FirmRow) {
   const access = vfAccess(ctx, f);
   if (!access) return null;
+  // P95: files the portal took off by itself in the last week, because their document left
+  // B2: nobody at the firm pressed anything, so the page says how many.
+  const since = new Date(ctx.now().getTime() - 7 * 86_400_000);
+  const rows = rowsOf<{ n: number }>(
+    await ctx.db.execute(
+      sql`SELECT count(*)::int AS n FROM events
+           WHERE kind = 'remove' AND actor_kind = 'system' AND actor = ${FOLLOW_ACTOR}
+             AND at >= ${since.toISOString()}::timestamptz`,
+    ),
+  );
   return {
+    removedLately: Number(rows[0]?.n ?? 0),
     cabinetId: access.cabinetId,
     /** A bucket of Vibe Files' own (P94), not the one the portal's files are in. */
     own: access.b2 !== undefined,

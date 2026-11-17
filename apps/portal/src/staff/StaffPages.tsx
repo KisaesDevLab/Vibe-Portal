@@ -1161,9 +1161,7 @@ function ClientFiles({
           {f.contentUpdatedAt
             ? `Updated ${when(f.contentUpdatedAt)}`
             : `Shared ${when(f.sharedAt)} by ${f.sharedBy}`}
-          {f.fromB2
-            ? ' · Added from B2: updated by itself when it changes there, removed when it leaves B2'
-            : ''}
+          {f.fromB2 ? ' · Added from B2: follows it' : ''}
         </small>
       </td>
       <td style={td}>
@@ -3763,6 +3761,8 @@ interface StorageData {
     keyId?: string;
     /** Why the bucket could not be read at the portal's last look for changed documents. */
     problem?: string | null;
+    /** P95: files the portal removed by itself in the last 7 days (their document left B2). */
+    removedLately?: number;
   } | null;
   move: {
     to: 'local' | 'b2';
@@ -4055,6 +4055,11 @@ function Storage(): JSX.Element {
                     ? `The portal can open the documents of Vibe Files’ cabinet ${d.vibeFiles.cabinetId}, in the bucket ${d.vibeFiles.bucket ?? ''}${d.vibeFiles.own ? ' (Vibe Files’ own, only read)' : ''}.`
                     : 'Not set up: the portal has only the names Vibe Files sends it.'}
                 </span>
+                {(d.vibeFiles?.removedLately ?? 0) > 0 && (
+                  <span>
+                    {`In the last 7 days the portal removed ${d.vibeFiles?.removedLately} ${d.vibeFiles?.removedLately === 1 ? 'file' : 'files'} by itself, because the document was deleted, moved to another client or taken out of B2 in Vibe Files. History lists each (Removed a file, by Vibe Files’ B2).`}
+                  </span>
+                )}
                 {d.vibeFiles?.problem && (
                   <Problem
                     text={staffSay(

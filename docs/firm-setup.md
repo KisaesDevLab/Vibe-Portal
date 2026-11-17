@@ -318,17 +318,25 @@ What to know:
   Vibe Files: it is then Vibe Files' to replace, as any file shared from there. To stop one
   following without that, remove it from the portal and share it from Vibe Files instead.
 - Documents added with 0.3.16 follow B2 from the update to 0.3.17 on. Removal with B2, and
-  updates without a notice, need 0.3.18.
+  updates without a notice, need 0.3.18. **At the update to 0.3.18**, a copy whose document
+  had already left B2 (which 0.3.17 kept) is removed too, within about 20 minutes.
 - If the portal cannot read the bucket (the key was removed in Backblaze, the sync key
   changed), nothing is updated, and **Settings › Storage** says so.
-- **A document that leaves B2 leaves the portal.** When it is deleted in Vibe Files, or taken
-  out of B2 (a change to **Sync › What goes to B2** can do that for many documents at once),
-  the portal removes its copy by itself within about 10 minutes, as if staff had removed it:
-  the client's people no longer see it, and secure links no longer give it. History says
-  **Removed a file**, by **Vibe Files' B2**. If that was a mistake, restore the document in
-  Vibe Files, push, and press **Add to portal** again; who saw it has to be chosen again.
-  Nothing is removed while the portal cannot read the bucket, or when a client is no longer
-  in the bucket at all.
+- **A document that leaves B2 leaves the portal.** The portal removes its copy by itself, as
+  if staff had removed it, when in Vibe Files the document is:
+  - **deleted** (alone, or with its folder);
+  - **taken out of B2** (Sync › **Remove the selected documents from B2…**); a change to the
+    rule under **What goes to B2** takes nothing out, so it removes nothing here;
+  - **moved to another client**: it is no longer this client's to see. Add it again from the
+    other client's page if it belongs on the portal there.
+
+  The client's people then no longer see it, and secure links no longer give it. History says
+  **Removed a file**, by **Vibe Files' B2**, and **Settings › Storage** says how many files
+  were removed this way in the last 7 days. The portal waits until a second look finds the
+  document still gone, so it takes 10 to 20 minutes. If it was a mistake, put the document
+  back in Vibe Files and push; once the client's list shows it again, press **Add to portal**
+  and choose again who sees it. Nothing is removed while the portal cannot read the bucket,
+  or when a client is no longer in the bucket at all.
 - Only documents added with **Add to portal** follow B2. One shared from Vibe Files changes on
   the portal when someone shares it again from Vibe Files, as before.
 - If Vibe Files' sync key is ever changed, **Add to portal** says so: enter the passphrase

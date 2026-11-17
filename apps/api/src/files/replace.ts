@@ -15,7 +15,7 @@ import { contentTypeOf } from './types';
 
 /**
  * Points the file at the new stored content. It counts as new again for everyone who sees it
- * (P20), and they are told as for any update. False when the file was removed meanwhile: the
+ * (P20), and they are told as for any update (unless `opts.quiet`). False when the file was removed meanwhile: the
  * new stored content is then the caller's to remove.
  *
  * `opts.onlyIf`: replaced only while the file's content is still the one with this SHA-256
@@ -116,9 +116,15 @@ export async function removeFile(
     )
     .returning({ clientId: schema.files.clientId });
   if (!gone) return false;
-  if (before.blobKey) await ctx.blobs.remove(before.blobKey);
-  // Watermarked copies in secure links were made from the old content (P49).
-  await dropMarksOfFile(ctx, id);
+  // The file is off the portal from here on, whatever fails below: History says so, and stored
+  // content whose delete failed is found by the daily sweep.
+  try {
+    if (before.blobKey) await ctx.blobs.remove(before.blobKey);
+    // Watermarked copies in secure links were made from the old content (P49).
+    await dropMarksOfFile(ctx, id);
+  } catch (err) {
+    ctx.log.error({ err, fileId: id }, 'a removed file’s stored content was not deleted');
+  }
   await drop(ctx.db, id, null, now);
   await record(ctx.db, 'remove', actor, {
     clientId: gone.clientId,

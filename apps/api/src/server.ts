@@ -160,7 +160,11 @@ async function main(): Promise<void> {
   }, 60_000).unref();
   // P94: files added from Vibe Files' part of the B2 bucket follow the bucket.
   setInterval(() => {
-    followB2(ctx).catch((err: unknown) => log.warn({ err }, 'following B2 failed'));
+    followB2(ctx)
+      .then((r) => {
+        if (r.updated || r.removed || r.failed) log.info(r, 'files added from B2 followed it');
+      })
+      .catch((err: unknown) => log.warn({ err }, 'following B2 failed'));
   }, FOLLOW_EVERY_MS).unref();
   // P8: fetched client uploads leave the portal after the keep period.
   setInterval(() => {

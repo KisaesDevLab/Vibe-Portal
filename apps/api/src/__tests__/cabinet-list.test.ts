@@ -321,17 +321,31 @@ describe('the list of documents in Vibe Files’ B2 bucket (P90)', () => {
       { hash: 'h' },
     );
     expect(JSON.stringify(big).length).toBeGreaterThan(200_000);
+    // A body refused before it is read: the answer is sent while the body is still coming, and
+    // the connection may be closed under the sender (ECONNRESET) before it reads the answer.
+    // That is the refusal too; asked again, the answer gets through.
+    const status = async (send: () => PromiseLike<{ status: number }>): Promise<number> => {
+      for (let i = 0; ; i += 1) {
+        try {
+          return (await send()).status;
+        } catch (err) {
+          if ((err as { code?: string }).code !== 'ECONNRESET' || i >= 5) throw err;
+        }
+      }
+    };
     // No key: refused for the key, the body never read (it is over what any other route takes).
-    const none = await request(w.app).put(`/api/firm/v1/cabinet/${NEW}`).send(big);
-    expect(none.status).toBe(401);
-    const upper = await request(w.app).put(`/API/Firm/V1/Cabinet/${NEW}`).send(big);
-    expect(upper.status).toBe(401);
+    expect(await status(() => request(w.app).put(`/api/firm/v1/cabinet/${NEW}`).send(big))).toBe(
+      401,
+    );
+    expect(await status(() => request(w.app).put(`/API/Firm/V1/Cabinet/${NEW}`).send(big))).toBe(
+      401,
+    );
     // The staff page's copy of the route takes no list at all.
     const a = await admin();
-    expect((await a.put(`/api/staff/v1/cabinet/${NEW}`).send(big)).status).toBe(413);
+    expect(await status(() => a.put(`/api/staff/v1/cabinet/${NEW}`).send(big))).toBe(413);
     // With the key it is taken; other firm routes keep their small limit.
     await w.firm('put', `/cabinet/${NEW}`).send(big).expect(200);
-    expect((await w.firm('put', `/clients/${NEW}`).send(big)).status).toBe(413);
+    expect(await status(() => w.firm('put', `/clients/${NEW}`).send(big))).toBe(413);
     // A place longer than the portal lists is refused by field.
     const long = await w
       .firm('put', `/cabinet/${NEW}`)

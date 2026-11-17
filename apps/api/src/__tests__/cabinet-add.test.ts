@@ -189,7 +189,10 @@ function pushChange(
     }[];
   };
   const d = seg.documents.find((x) => x.doc_id === docId)!;
-  if (body === null) {
+  if (body === null && rename === 'no entry') {
+    // Taken out of B2, or moved to another client: the segment no longer has it at all.
+    seg.documents = seg.documents.filter((x) => x.doc_id !== docId);
+  } else if (body === null) {
     d.deleted_at = '2026-11-17T12:00:00Z';
   } else {
     const plain = Buffer.from(body);
@@ -308,6 +311,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       bucket: B2.bucket,
       keyId: B2.keyId,
       problem: null,
+      removedLately: 0,
     });
     // Neither the passphrase nor the key goes back to the page or into History.
     expect(JSON.stringify(saved.body)).not.toContain(EXPECT.passphrase);
@@ -413,6 +417,7 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
       bucket: own.bucket,
       keyId: own.keyId,
       problem: null,
+      removedLately: 0,
     });
     expect(JSON.stringify(saved.body)).not.toContain(own.appKey);
     // The passphrase entered again for the same bucket: its saved key is kept; another bucket
@@ -597,6 +602,17 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
     await w.t.db.update(schema.files).set({ fromB2: true });
     forgetCompared();
+    // Not at the first look that finds it gone, nor a moment later: ten minutes on, if it is
+    // still gone.
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    // Back meanwhile (an older head for a moment, a delete undone): nothing is removed.
+    pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 back again');
+    w.later(10);
+    expect(await followB2(w.ctx)).toEqual({ updated: 1, removed: 0, failed: 0 });
+    pushChange(bucket, access, ANDERSON.id, W2.docId, null);
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    w.later(10);
     expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 1, failed: 0 });
     expect(
       (await boss.get(`/api/staff/v1/files?clientId=${ANDERSON.id}`).expect(200)).body.files,
@@ -619,6 +635,18 @@ describe('a document in B2 put on the portal from the staff page (P91)', () => {
     await boss.delete(`/api/staff/v1/files/${fileId2}`).expect(200);
     pushChange(bucket, access, ANDERSON.id, W2.docId, 'w2 2025 once more');
     expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+
+    // Added once more, then taken out of B2 (no entry at all, not a tombstone): removed the
+    // same way, and Settings counts both.
+    const fileId3 = (await add(boss, W2.docId).expect(201)).body.fileId as string;
+    expect(fileId3).not.toBe(fileId2);
+    pushChange(bucket, access, ANDERSON.id, W2.docId, null, 'no entry');
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 0, failed: 0 });
+    w.later(10);
+    expect(await followB2(w.ctx)).toEqual({ updated: 0, removed: 1, failed: 0 });
+    expect(
+      (await boss.get('/api/staff/v1/settings/storage').expect(200)).body.vibeFiles.removedLately,
+    ).toBe(2);
   });
 
   it('refuses a document larger than the portal takes, before fetching it', async () => {

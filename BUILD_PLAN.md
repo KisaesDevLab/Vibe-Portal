@@ -16,7 +16,7 @@ Owner decisions, 2026-11-09 (Q&A):
 | D6 | Jobs | Send files to clients; receive files from clients. Nothing else in v1. |
 | D7 | Vibe Files ↔ portal | The portal's HTTPS API, authenticated with a firm key pasted into Vibe Files Setup (like the B2 sync key). |
 | D8 | Sending | A **Share** button in Vibe Files' right-hand file pane opens a window listing the client's portal users, with a switch per user to show or hide the file. |
-| D9 | Lifetime | A shared file stays on the portal until staff remove it (hidden from every user, or **Remove from portal**). |
+| D9 | Lifetime | A shared file stays on the portal until staff remove it (hidden from every user, or **Remove from portal**). One exception (P95, 2026-11-17): a file staff added from Vibe Files' B2 bucket is removed by the portal itself when its document leaves B2. |
 | D10 | Uploads | Client uploads are fetched by Vibe Files into a Portal inbox and filed through Intake like scans. |
 | D11 | With full TB | The portals run side by side; the firm decides per client which one to use. No migration in v1. |
 | D12 | Not TB "files only" | Considered running TB itself with its portal feature switches (`@vibe/core/portal-features`) set to Documents only. Rejected: Vibe Portal stays a separate, smaller app (no worker, Redis or TB's full staff app) with its own license and releases; copied TB code is tracked in `VENDORED.md`. |
