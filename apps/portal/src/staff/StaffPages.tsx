@@ -2182,7 +2182,9 @@ function Requests(): JSX.Element {
   const [recordNote, setRecordNote] = useState('');
   const { act, busy, error } = useAct(reqs.reload);
   // P61: the clients chosen for each request (one or more).
-  const [pick, setPick] = useState<Record<string, { clients: string[]; role: string }>>({});
+  const [pick, setPick] = useState<
+    Record<string, { clients: string[]; role: string; find?: string }>
+  >({});
   const active = (clients.data?.clients ?? []).filter((c) => c.active);
   const nameOf = (id: string): string => {
     const c = active.find((x) => x.id === id);
@@ -2200,8 +2202,21 @@ function Requests(): JSX.Element {
       <Status load={clients} what="the clients" />
       {reqs.data?.requests.length === 0 && <p>No requests waiting.</p>}
       {(reqs.data?.requests ?? []).map((r) => {
-        const p = pick[r.id] ?? { clients: [], role: '' };
+        const p: { clients: string[]; role: string; find?: string } = pick[r.id] ?? {
+          clients: [],
+          role: '',
+        };
         const set = (v: Partial<typeof p>): void => setPick({ ...pick, [r.id]: { ...p, ...v } });
+        // P99: the clients not chosen yet, narrowed by what is typed in Find a client.
+        const matching = (typed: string): typeof active => {
+          const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
+          return active.filter(
+            (c) =>
+              !p.clients.includes(c.id) &&
+              words.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
+          );
+        };
+        const offered = matching(p.find ?? '');
         const chosen = CHECKS.find((c) => c.method === check.method);
         const approve = (how?: { method: CheckMethod; note: string }): void => {
           void act(`/v1/access-requests/${r.id}/approve`, {
@@ -2283,6 +2298,19 @@ function Requests(): JSX.Element {
             )}
             {r.note && <span>“{r.note}”</span>}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'end' }}>
+              <Input
+                label={`Find a client for ${r.name} (name or client ID)`}
+                name={`find-${r.id}`}
+                value={p.find ?? ''}
+                onChange={(e) => {
+                  const typed = e.target.value;
+                  const left = matching(typed);
+                  // Only one client left: it is the one meant, and the box is ready for the next.
+                  if (typed.trim() && left.length === 1 && left[0]) {
+                    set({ clients: [...p.clients, left[0].id], find: '' });
+                  } else set({ find: typed });
+                }}
+              />
               <label style={{ display: 'grid', gap: 4 }}>
                 <span>
                   {p.clients.length ? 'Add another client' : 'Client'} for {r.name}
@@ -2291,17 +2319,18 @@ function Requests(): JSX.Element {
                   value=""
                   onChange={(e) => {
                     const id = e.target.value;
-                    if (id && !p.clients.includes(id)) set({ clients: [...p.clients, id] });
+                    if (id && !p.clients.includes(id))
+                      set({ clients: [...p.clients, id], find: '' });
                   }}
                 >
-                  <option value="">Choose…</option>
-                  {active
-                    .filter((c) => !p.clients.includes(c.id))
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.displayName} {c.clientCode && `(${c.clientCode})`}
-                      </option>
-                    ))}
+                  <option value="">
+                    {(p.find ?? '').trim() ? `Choose… (${offered.length} match)` : 'Choose…'}
+                  </option>
+                  {offered.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.displayName} {c.clientCode && `(${c.clientCode})`}
+                    </option>
+                  ))}
                 </select>
               </label>
               <Input

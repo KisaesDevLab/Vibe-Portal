@@ -679,9 +679,12 @@ describe('staff page', () => {
     const more = within(box).getByLabelText('Add another client for Jane Smith');
     expect(within(more).queryByRole('option', { name: /Smith, John/ })).toBeNull();
     fireEvent.change(more, { target: { value: 'c2' } });
-    fireEvent.change(within(box).getByLabelText('Add another client for Jane Smith'), {
-      target: { value: 'c3' },
-    });
+    // P99: a name or client ID typed beside it narrows the list; one left is added at once.
+    const find = within(box).getByLabelText('Find a client for Jane Smith (name or client ID)');
+    fireEvent.change(find, { target: { value: 'zzz' } });
+    expect(within(box).getByRole('option', { name: 'Choose… (0 match)' })).toBeTruthy();
+    fireEvent.change(find, { target: { value: 'jones' } });
+    expect((find as HTMLInputElement).value).toBe('');
     fireEvent.click(
       within(box).getByRole('button', { name: 'Remove Jones, Ann (JONES) for Jane Smith' }),
     );
