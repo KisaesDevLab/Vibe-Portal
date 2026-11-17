@@ -688,7 +688,7 @@ function ClientDetail({ allClients }: { allClients: boolean }): JSX.Element {
                       const to = i.email ?? i.phone ?? '';
                       if (
                         !window.confirm(
-                          `Delete the invitation to ${to}? The link they were sent stops working.`,
+                          `Delete the invitation to ${to}? The link they were sent stops working, and files chosen for them are chosen for nobody.`,
                         )
                       ) {
                         return;
@@ -1090,8 +1090,14 @@ function ClientFiles({
   // Everyone with access and everyone invited, until the staff member narrows it.
   const everyone = [...activePeople.map((p) => p.identityId), ...invited.map(inviteKey)];
   // What was ticked, without anyone who is no longer there (an invitation accepted or deleted
-  // since: its tick must not go on being sent).
-  const chosen = who ? new Set(everyone.filter((k) => who.has(k))) : new Set(everyone);
+  // since: its tick must not go on being sent). Until something is ticked: everyone, but not
+  // an invitation that expired (it reaches nobody unless it is resent).
+  const chosen = who
+    ? new Set(everyone.filter((k) => who.has(k)))
+    : new Set([
+        ...activePeople.map((p) => p.identityId),
+        ...invited.filter((i) => i.status !== 'expired').map(inviteKey),
+      ]);
   const years = [...new Set(all.map((f) => f.taxYear))].sort((a, b) => (b ?? 0) - (a ?? 0));
   // A year not among the files (an old link) is every year, so the list is never stuck empty.
   const year =
@@ -1368,14 +1374,15 @@ function ClientFiles({
                       setWho(next);
                     }}
                   />
-                  {invitedLabel(i)} (invited)
+                  {invitedLabel(i)} ({i.status === 'expired' ? 'invitation expired' : 'invited'})
                 </label>
               ))}
             </fieldset>
           )}
           {invited.length > 0 && (
             <small style={{ color: tokens.color.textMuted }}>
-              Someone invited sees the files chosen for them once they accept the invitation.
+              Everyone is ticked to start with, those invited too: untick anyone the files are not
+              for. Someone invited sees the files chosen for them once they accept the invitation.
             </small>
           )}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -2327,7 +2334,9 @@ function Requests(): JSX.Element {
                   }}
                 >
                   <option value="">
-                    {(p.find ?? '').trim() ? `Choose… (${offered.length} match)` : 'Choose…'}
+                    {(p.find ?? '').trim()
+                      ? `Choose… (${offered.length} ${offered.length === 1 ? 'matches' : 'match'})`
+                      : 'Choose…'}
                   </option>
                   {offered.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -2914,12 +2923,10 @@ function Person(): JSX.Element {
   const has = new Set(d.clients.filter((c) => c.active).map((c) => c.id));
   const canAdd = (all.data?.clients ?? []).filter((c) => c.active && !has.has(c.id));
   // P99: a firm has hundreds of clients: the list is narrowed by a name or client ID typed
-  // above it. The one chosen stays in the list whatever is typed.
+  // above it.
   const findWords = clientFind.toLowerCase().split(/\s+/).filter(Boolean);
-  const offered = canAdd.filter(
-    (c) =>
-      c.id === adding.clientId ||
-      findWords.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
+  const offered = canAdd.filter((c) =>
+    findWords.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
   );
   const notifyOptions = (Object.keys(NOTIFY_WORDS) as (keyof typeof NOTIFY_WORDS)[]).filter(
     (k) =>
@@ -3166,13 +3173,17 @@ function Person(): JSX.Element {
             onChange={(e) => {
               const typed = e.target.value;
               setClientFind(typed);
-              // Only one client left: it is the one meant.
               const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
               const left = canAdd.filter((c) =>
                 words.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
               );
+              // Only one client left: it is the one meant (Add client is still to be pressed).
+              // A client chosen before that no longer matches is let go: what is added is
+              // always one the list shows.
               if (words.length && left.length === 1 && left[0]) {
                 setAdding({ ...adding, clientId: left[0].id });
+              } else if (adding.clientId && !left.some((c) => c.id === adding.clientId)) {
+                setAdding({ ...adding, clientId: '' });
               }
             }}
           />

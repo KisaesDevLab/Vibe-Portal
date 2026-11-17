@@ -26,6 +26,7 @@ import { TooLarge } from '../files/blobs';
 import { drop, enqueue } from '../files/notify-queue';
 import { removeFile, replaceContent } from '../files/replace';
 import { cleanName, contentTypeOf } from '../files/types';
+import { maskContact } from '../lib/contact';
 import { record, type Actor } from '../lib/events';
 import { body, h, HttpError, notForStaff, queryWithText } from '../lib/http';
 import { inScope } from '../staff/scope';
@@ -244,6 +245,7 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
       // P98: the invitations a file was chosen for, or taken back from, by this call.
       const chosenFor: string[] = [];
       const takenFrom: string[] = [];
+      const invitedNames = new Map<string, string>();
       let staleInvites = 0;
       await ctx.db.transaction(async (tx) => {
         for (const identityId of [...shown, ...hidden]) {
@@ -266,7 +268,12 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
         // longer waits is passed over, not a failure of the whole: the rest still applies.
         const waiting = inviteIds.length
           ? await tx
-              .select({ id: schema.portalInvitation.id })
+              .select({
+                id: schema.portalInvitation.id,
+                name: schema.portalInvitation.name,
+                email: schema.portalInvitation.email,
+                phone: schema.portalInvitation.phone,
+              })
               .from(schema.portalInvitation)
               .where(
                 and(
@@ -279,6 +286,10 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
               .for('update')
           : [];
         staleInvites = inviteIds.length - waiting.length;
+        for (const i of waiting) {
+          // Who it is for, as History says it: their name, else the contact, masked.
+          invitedNames.set(i.id, i.name || maskContact(i.email ?? i.phone ?? ''));
+        }
         for (const { id: invitationId } of waiting) {
           if (invites[invitationId]) {
             const made = await tx
@@ -312,14 +323,14 @@ export function firmFilesRouter(ctx: Ctx, staff = false): Router {
         await record(ctx.db, 'share', actor, {
           clientId: file.clientId,
           fileId: id,
-          detail: { invitationId, invited: true },
+          detail: { invitationId, invited: invitedNames.get(invitationId) ?? '' },
         });
       }
       for (const invitationId of takenFrom) {
         await record(ctx.db, 'unshare', actor, {
           clientId: file.clientId,
           fileId: id,
-          detail: { invitationId, invited: true },
+          detail: { invitationId, invited: invitedNames.get(invitationId) ?? '' },
         });
       }
       res.json({ ok: true, shown, hidden, ...(staleInvites ? { staleInvites } : {}) });

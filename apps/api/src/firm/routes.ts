@@ -529,7 +529,8 @@ function firmApi(ctx: Ctx, auth: RequestHandler, staff: boolean): Router {
             `get files from the firm and send files to it.\n\n` +
             // Files were chosen for them while an earlier invitation waited (owner
             // 2026-11-17): said, with no name or count of them.
-            (filesWaiting ? 'Files are waiting for you there.\n\n' : '') +
+            // Only by email: a text has no room for it beside the link.
+            (filesWaiting && email ? 'Files are waiting for you there.\n\n' : '') +
             `Accept the invitation (within ${INVITE_DAYS} days): ${link}`,
         ),
       );

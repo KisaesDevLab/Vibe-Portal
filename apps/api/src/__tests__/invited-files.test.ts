@@ -96,6 +96,12 @@ describe('files chosen for someone invited (P98)', () => {
       .expect(200);
     expect(wrong.body.staleInvites).toBe(1);
     expect((await filesOf(OTHER))[0]?.invites).toEqual([]);
+    // The client's History says who it was chosen for, who is no person yet.
+    const hist = (await staff.get(`/api/staff/v1/clients/${CLIENT}/history`).expect(200)).body
+      .events as { kind: string; person: string | null }[];
+    expect(hist.find((e) => e.kind === 'share')?.person).toBe(
+      'Joe Smith (invited, not accepted yet)',
+    );
     // History has only what changed: chosen three times, taken back once.
     const said = (await w.t.db.select().from(schema.events)).filter(
       (e) => e.kind === 'share' || e.kind === 'unshare',

@@ -270,8 +270,8 @@ reads it from the B2 bucket Vibe Files' sync uses. It needs Vibe Portal 0.3.17 o
 where the portal keeps its own files in that same bucket); Vibe Files needs nothing newer than
 the 0.1.38 the list itself needs.
 
-1. On the staff page, **Settings › Storage**, under **Vibe Files' documents in B2**, say where
-   Vibe Files' documents are:
+1. On the staff page, **Settings**, in the card **Vibe Files' documents in B2** (below
+   **Storage**; a part of the Storage card before 0.3.19), say where Vibe Files' documents are:
    - **In a bucket of Vibe Files' own** (the usual case, and the only one for a bucket with
      **Object Lock**): enter that bucket's **endpoint**, **name**, a **key ID** and its
      **application key**. The portal only reads this bucket, so make the key in Backblaze for
@@ -472,6 +472,7 @@ clients each can see. Find a person by name, email or mobile number, and open th
   with **Withdraw**. When they confirm, they are signed out, and the old address or number is told
   it was changed. **Remove** takes a mobile number away (they keep signing in by email).
 - **Clients**: **Add a client** gives them access at once and tells them by email or text.
+  **Find a client** above the list narrows it by name or client ID (0.3.19).
   **Remove** takes it away at once. On a client's page, a person's name opens their page too.
 - **Account**: **Send sign-in link** emails them a link (by text if they have only a number) that
   signs them in once, within 24 hours: for someone who cannot manage signing in. **Turn account
@@ -528,11 +529,14 @@ working. Both ask first. An invitation that expired stays listed until it is res
 
 **Files for someone who has not accepted yet.** Under **Files on the portal**, tick the files,
 and in the bar that appears tick the invited person under **For:** (their name, with
-**(invited)**), then press **Show to them**. The file's row then says it is chosen for them.
+**(invited)**; everyone is ticked to start with, so untick anyone the files are not for), then
+press **Show to them**. An invitation that expired is listed as **(invitation expired)** and is
+not ticked: resend it first, or the files reach nobody. The file's row then says it is chosen for them.
 They are told nothing of the files then; when they accept the invitation, the files are on their
 page at once, marked **New**, with no further email. To tell them files are waiting, press
-**Resend** after choosing: the new invitation adds the line "Files are waiting for you there."
-(no file names). The choices follow a **Resend**; **Delete** drops them, and a file
+**Resend** after choosing: the new invitation, when it goes by email, adds the line "Files are
+waiting for you there." (no file names; a text message has no room for it). History names who a
+file was chosen for, as invited and not accepted yet. All this needs Vibe Portal 0.3.19. The choices follow a **Resend**; **Delete** drops them, and a file
 removed from the portal meanwhile is left out.
 
 **People** lists only those who can sign in, so someone invited is not among them until they

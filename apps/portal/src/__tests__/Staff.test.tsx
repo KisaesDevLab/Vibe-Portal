@@ -685,7 +685,7 @@ describe('staff page', () => {
     fireEvent.change(find, { target: { value: 'zzz' } });
     expect(within(box).getByRole('option', { name: 'Choose… (0 match)' })).toBeTruthy();
     fireEvent.change(find, { target: { value: 'jones' } });
-    expect(within(box).getByRole('option', { name: 'Choose… (1 match)' })).toBeTruthy();
+    expect(within(box).getByRole('option', { name: 'Choose… (1 matches)' })).toBeTruthy();
     expect(
       within(within(box).getByRole('list', { name: 'Clients for Jane Smith' })).getAllByRole(
         'listitem',
@@ -1322,6 +1322,17 @@ describe('staff page', () => {
       target: { value: 'farm' },
     });
     expect(pick.value).toBe('c2');
+    // Typed on to something it does not match: the choice is let go, and nothing can be added.
+    fireEvent.change(screen.getByLabelText('Find a client (name or client ID)'), {
+      target: { value: 'farm zzz' },
+    });
+    expect(pick.value).toBe('');
+    expect((screen.getByRole('button', { name: 'Add client' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.change(screen.getByLabelText('Find a client (name or client ID)'), {
+      target: { value: '' },
+    });
     fireEvent.change(pick, { target: { value: 'c2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add client' }));
     expect(await screen.findByText('Smith Farms LLC added. Mary Smith was told.')).toBeTruthy();
