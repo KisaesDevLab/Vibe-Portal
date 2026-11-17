@@ -6,6 +6,8 @@
 //   GET    /api/staff/v1/people/list?q=&offset=         everyone, turned-off accounts too;
 //          with the first page, `invited`: invitations not accepted yet (P98: they are not
 //          people of the portal until they accept, and the page says so instead of nothing)
+//   GET    /api/staff/v1/people/invited/:invitationId   someone invited who has not accepted
+//          (P100): every invitation waiting for the same contact, by client
 //   GET    /api/staff/v1/people/:id                     details, clients, a contact change waiting
 //   PATCH  /api/staff/v1/people/:id                     { name?, notify? }
 //   POST   /api/staff/v1/people/:id/turn-off | turn-on  the whole account
@@ -207,6 +209,74 @@ export function staffPeopleRouter(ctx: Ctx): Router {
         })),
         more: people.length > PAGE,
         invited: invited.map((i) => ({ ...i, status: i.expiresAt > now ? 'invited' : 'expired' })),
+      });
+    }),
+  );
+
+  // P100: someone invited who has not accepted, as a page of their own. They are no person of
+  // the portal yet; what there is to them is the invitations waiting for their contact (the
+  // email, else the number the link goes to), one for each client. Before `/:identityId`.
+  r.get(
+    '/invited/:invitationId',
+    h(async (req, res) => {
+      const id = Id.safeParse(req.params['invitationId']);
+      if (!id.success) throw new HttpError(404, 'not_found');
+      const inv = schema.portalInvitation;
+      const waiting = and(isNull(inv.acceptedAt), isNull(inv.revokedAt));
+      const [one] = await ctx.db
+        .select()
+        .from(inv)
+        .where(and(eq(inv.id, id.data), waiting));
+      if (!one) throw new HttpError(404, 'not_found');
+      const same = one.email
+        ? eq(inv.email, one.email)
+        : and(isNull(inv.email), eq(inv.phone, one.phone ?? ''));
+      const rows = await ctx.db
+        .select({
+          invitationId: inv.id,
+          name: inv.name,
+          email: inv.email,
+          phone: inv.phone,
+          roleLabel: inv.roleLabel,
+          invitedBy: inv.invitedBy,
+          createdAt: inv.createdAt,
+          expiresAt: inv.expiresAt,
+          clientId: schema.clients.id,
+          clientName: schema.clients.displayName,
+          clientActive: schema.clients.active,
+          files: sql<number>`(SELECT count(*) FROM invitation_file c JOIN files f ON f.id = c.file_id
+            WHERE c.invitation_id = ${inv.id} AND f.removed_at IS NULL)`,
+        })
+        .from(inv)
+        .innerJoin(schema.clients, eq(schema.clients.id, inv.clientId))
+        .where(and(waiting, same))
+        .orderBy(asc(schema.clients.displayName));
+      // Someone who signs in with this contact already: accepting adds the client to that
+      // account.
+      const [account] = await ctx.db
+        .select({
+          identityId: schema.portalIdentity.id,
+          name: schema.portalIdentity.name,
+          status: schema.portalIdentity.status,
+        })
+        .from(schema.portalIdentity)
+        .where(
+          one.email
+            ? eq(schema.portalIdentity.email, one.email)
+            : eq(schema.portalIdentity.phone, one.phone ?? ''),
+        );
+      const has = account ? (await clientsOf(account.identityId)).filter((c) => c.active) : [];
+      const now = ctx.now();
+      res.json({
+        invited: { name: one.name, email: one.email, phone: one.phone },
+        invitations: rows.map((r) => ({
+          ...r,
+          files: Number(r.files),
+          status: r.expiresAt > now ? 'invited' : 'expired',
+        })),
+        account: account ?? null,
+        // The clients that account sees already: not offered again.
+        accountClients: has.map((c) => c.id),
       });
     }),
   );

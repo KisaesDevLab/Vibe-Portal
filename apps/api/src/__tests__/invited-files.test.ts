@@ -231,6 +231,66 @@ describe('files chosen for someone invited (P98)', () => {
     expect(w.notes.last('joe@example.test').body).not.toContain('Files are waiting');
   });
 
+  it('someone invited has a page: their invitations by client; one acceptance takes them all (P100)', async () => {
+    const mine = await share(CLIENT, 'Return.pdf');
+    const farm = await share(OTHER, 'Farm.pdf');
+    const first = await invite(CLIENT, 'joe@example.test', 'Joe Smith');
+    await staff
+      .put(`/api/staff/v1/files/${mine}/visibility`)
+      .send({ invites: { [first]: true } })
+      .expect(200);
+    // Add a client for him from his page: an invitation to that client, the same contact.
+    const second = await invite(OTHER, 'joe@example.test', 'Joe Smith');
+    await staff
+      .put(`/api/staff/v1/files/${farm}/visibility`)
+      .send({ invites: { [second]: true } })
+      .expect(200);
+    // Someone else waits too: not on his page.
+    await invite(CLIENT, 'ann@example.test', 'Ann Smith');
+
+    const page = (await staff.get(`/api/staff/v1/people/invited/${first}`).expect(200)).body;
+    expect(page.invited).toEqual({ name: 'Joe Smith', email: 'joe@example.test', phone: null });
+    expect(page.account).toBeNull();
+    expect(
+      (page.invitations as { clientName: string; files: number; status: string }[]).map((i) => [
+        i.clientName,
+        i.files,
+        i.status,
+      ]),
+    ).toEqual([
+      ['Smith Farms LLC', 1, 'invited'],
+      ['Smith, John', 1, 'invited'],
+    ]);
+    // By either of his invitations; not by an id that is none, nor without a staff session.
+    await staff.get(`/api/staff/v1/people/invited/${second}`).expect(200);
+    await staff.get('/api/staff/v1/people/invited/not-an-id').expect(404);
+    await request(w.app).get(`/api/staff/v1/people/invited/${first}`).expect(401);
+
+    // He opens the first link: both clients are his, each with its file, and nothing waits.
+    const joe = request.agent(w.app);
+    const mail = w.notes.sent.filter((m) => m.to === 'joe@example.test');
+    const token = /#t=([\w-]+)/.exec(mail[0]!.body)?.[1] ?? '';
+    await joe.post('/api/portal/invitations/accept').send({ token }).expect(200);
+    const me = (await joe.get('/api/portal/auth/me').expect(200)).body;
+    expect((me.clients as { name: string }[]).map((c) => c.name).sort()).toEqual([
+      'Smith Farms LLC',
+      'Smith, John',
+    ]);
+    await joe.get(`/api/portal/files/${mine}/content`).expect(200);
+    const after = (await staff.get('/api/staff/v1/people/list').expect(200)).body;
+    expect((after.invited as { email: string }[]).map((i) => i.email)).toEqual([
+      'ann@example.test',
+    ]);
+    await staff.get(`/api/staff/v1/people/invited/${first}`).expect(404);
+    const accepted = (await w.t.db.select().from(schema.events)).filter(
+      (e) => e.kind === 'invite_accepted',
+    );
+    expect(accepted).toHaveLength(2);
+    // The second link, opened later, has nothing left to accept.
+    const token2 = /#t=([\w-]+)/.exec(mail[1]!.body)?.[1] ?? '';
+    await request(w.app).post('/api/portal/invitations/accept').send({ token: token2 }).expect(404);
+  });
+
   it('a deleted invitation takes its choices with it', async () => {
     const a = await share(CLIENT, 'Return.pdf');
     const inv = await invite(CLIENT, 'joe@example.test', 'Joe Smith');

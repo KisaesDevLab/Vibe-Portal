@@ -513,8 +513,9 @@ shared with them, so the preview lists the files someone at the client can see. 
 open; nothing downloads, and opening a file here does not count as the client having seen it (it
 is in History as yours).
 
-To see it as **one person** does, press **View as** beside them under **People with access**, or
-choose them under **View as** at the top of the preview. The preview then lists only the files
+To see it as **one person** does, press **View as** beside them under **People with access**, on
+the person's own page beside each of their clients (0.3.20), or choose them under **View as**
+at the top of the preview. The preview then lists only the files
 shared with that person, each marked **New** where they have not opened it yet. It is still read
 only, and opening a file there still does not count as their opening it. What the person sent to
 the firm is not shown there (it is on the client's page, under its uploads). Someone whose
@@ -541,7 +542,23 @@ removed from the portal meanwhile is left out.
 
 **People** lists only those who can sign in, so someone invited is not among them until they
 accept. Below the list, **Invited, not accepted yet** names each invitation still waiting and
-its client, with a link to the client's page, where it is resent, deleted, or given files.
+its client.
+
+**Someone invited has a page of their own** (0.3.20): press their name there. It lists every
+invitation waiting for that email or number, one for each client, with **Resend** and
+**Delete**, and **Add a client**, which invites them to another client (they get an invitation
+for it too). **Accepting any one invitation accepts every one still waiting for them**, so one
+link is enough to see all their clients. Files are chosen for them on each client's page. If
+they already sign in to the portal with that email or number, the page says so and links to
+their account: accepting adds the clients to it, and no second account is made.
+
+**Inviting someone who already has an account.** The portal knows a person by the email (or
+number) the invitation goes to. If they already see this client, the form says so; if their
+account is turned off, it says to turn it on first; otherwise accepting adds this client to
+the account they have, and they choose between their clients at the top of their page. For
+someone who already has an account, **People › (the person) › Add a client** gives access at
+once, without an invitation. An invitation to a different email than the one they sign in with
+makes a second, separate account.
 
 ## When something is wrong
 

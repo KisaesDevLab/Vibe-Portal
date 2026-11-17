@@ -378,6 +378,7 @@ export function StaffHome(): JSX.Element {
           <Route path="clients/:id" element={<ClientDetail allClients={allClients} />} />
           {allClients && <Route path="requests" element={<Requests />} />}
           {allClients && <Route path="people" element={<People />} />}
+          {allClients && <Route path="people/invited/:invitationId" element={<InvitedPerson />} />}
           {allClients && <Route path="people/:identityId" element={<Person />} />}
           <Route
             path="uploads"
@@ -2807,13 +2808,18 @@ function People(): JSX.Element {
             Invited, not accepted yet
           </h3>
           <p style={{ marginTop: 0 }}>
-            They are listed above once they accept. Until then, resend or delete the invitation, and
-            choose files for them, on the client’s page.
+            Someone new is listed above once they accept. Open one to resend or delete their
+            invitations, or to invite them to another client; files are chosen for them on the
+            client’s page.
           </p>
           <Table head={['Name', 'Email / phone', 'Client', 'Invitation']}>
             {(load.data?.invited ?? []).map((i) => (
               <tr key={i.invitationId}>
-                <td style={td}>{i.name || '—'}</td>
+                <td style={td}>
+                  <Link to={`/staff/people/invited/${i.invitationId}`}>
+                    {i.name || i.email || i.phone || 'Someone invited'}
+                  </Link>
+                </td>
                 <td style={{ ...td, overflowWrap: 'anywhere' }}>
                   {[i.email, i.phone].filter(Boolean).join(', ')}
                 </td>
@@ -2862,6 +2868,260 @@ const NOTIFY_WORDS = {
   both: 'By email and text',
   none: 'Not at all',
 } as const;
+
+/** P100: what `GET /people/invited/:id` gives of someone invited who has not accepted. */
+interface InvitedPersonData {
+  invited: { name: string; email: string | null; phone: string | null };
+  invitations: {
+    invitationId: string;
+    roleLabel: string;
+    invitedBy: string;
+    expiresAt: string;
+    status: 'invited' | 'expired';
+    clientId: string;
+    clientName: string;
+    clientActive: boolean;
+    files: number;
+  }[];
+  account: { identityId: string; name: string; status: 'active' | 'disabled' } | null;
+  accountClients: string[];
+}
+
+/**
+ * P100 (owner 2026-11-17: "open their details and add clients and resend from the people
+ * view"): someone invited who has not accepted. They are no person of the portal yet, so this
+ * page is their invitations: one for each client, resent or deleted here, and another client
+ * is added by inviting them to it. Accepting any one of them accepts all that still wait.
+ */
+function InvitedPerson(): JSX.Element {
+  const { invitationId = '' } = useParams();
+  const navigate = useNavigate();
+  const load = useLoad<InvitedPersonData>(`/v1/people/invited/${invitationId}`);
+  const all = useLoad<{ clients: ClientRow[] }>('/v1/clients');
+  const { act, actAt, busy, busyAt, error, errorAt } = useAct(load.reload);
+  const [note, setNote] = useState('');
+  const [adding, setAdding] = useState({ clientId: '', roleLabel: '' });
+  const [clientFind, setClientFind] = useState('');
+  const d = load.data;
+  const back = (
+    <Link to="/staff/people">
+      <span aria-hidden="true">← </span>People
+    </Link>
+  );
+  if (!d) {
+    return (
+      <div style={{ display: 'grid', gap: 16 }}>
+        {back}
+        {load.error ? (
+          <p role="alert">
+            This invitation is no longer waiting: it was accepted, deleted or sent again. Find the
+            person under People.
+          </p>
+        ) : (
+          <p role="status">Loading the invitation…</p>
+        )}
+      </div>
+    );
+  }
+  const who = d.invited.name || d.invited.email || d.invited.phone || 'Someone invited';
+  const contact = [d.invited.email, d.invited.phone].filter(Boolean).join(', ');
+  // As the first invitation was sent: the same email, number and name.
+  const same = {
+    ...(d.invited.email ? { email: d.invited.email } : {}),
+    ...(d.invited.phone ? { phone: d.invited.phone } : {}),
+    name: d.invited.name,
+  };
+  const taken = new Set([...d.invitations.map((i) => i.clientId), ...d.accountClients]);
+  const canAdd = (all.data?.clients ?? []).filter((c) => c.active && !taken.has(c.id));
+  const findWords = clientFind.toLowerCase().split(/\s+/).filter(Boolean);
+  const offered = canAdd.filter((c) =>
+    findWords.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
+  );
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      {back}
+      <div>
+        <h2 style={{ margin: 0, fontSize: 24 }}>{who}</h2>
+        <p style={{ margin: '4px 0 0', color: tokens.color.textMuted }}>
+          Invited, not accepted yet · {contact}
+        </p>
+      </div>
+      <Problem text={error} />
+      {note && <p role="status">{note}</p>}
+      <Card title="Invitations">
+        <p style={{ marginTop: 0 }}>
+          {d.account ? (
+            <>
+              They already sign in to the portal as{' '}
+              <Link to={`/staff/people/${d.account.identityId}`}>{d.account.name || contact}</Link>
+              {d.account.status === 'disabled' ? ' (account turned off)' : ''}: accepting adds these
+              clients to that account.{' '}
+            </>
+          ) : (
+            'They have no account yet: one is made when they accept. '
+          )}
+          Accepting any one invitation accepts every one below that is still waiting. Files are
+          chosen for them on each client’s page.
+        </p>
+        <Table head={['Client', 'Role', 'Invitation', 'Files chosen', 'Actions']}>
+          {d.invitations.map((i) => (
+            <tr key={i.invitationId}>
+              <td style={td}>
+                <Link className="client-name" to={`/staff/clients/${i.clientId}`}>
+                  {i.clientName}
+                </Link>
+                {!i.clientActive && ' (switched off)'}
+              </td>
+              <td style={td}>{i.roleLabel}</td>
+              <td style={td}>
+                {i.status === 'expired' ? 'expired' : `waiting until ${when(i.expiresAt)}`}
+              </td>
+              <td style={td}>{i.files || ''}</td>
+              <td style={td}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy || !i.clientActive}
+                    aria-label={`Resend the invitation to ${i.clientName}`}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          i.status === 'expired'
+                            ? `Send ${who} a new invitation to ${i.clientName}?`
+                            : `Send ${who} a new invitation to ${i.clientName}? The link they have now stops working.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setNote('');
+                      void act(`/v1/clients/${i.clientId}/invites`, {
+                        body: { ...same, roleLabel: i.roleLabel },
+                      }).then((r) => {
+                        if (!r) return;
+                        setNote(`A new invitation to ${i.clientName} was sent.`);
+                        // The new invitation takes the place of the one this page was opened by.
+                        navigate(
+                          `/staff/people/invited/${(r as { invitationId: string }).invitationId}`,
+                          { replace: true },
+                        );
+                      });
+                    }}
+                  >
+                    Resend
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={busy}
+                    aria-label={`Delete the invitation to ${i.clientName}`}
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Delete the invitation to ${i.clientName}? The link they were sent stops working, and files chosen for them there are chosen for nobody.`,
+                        )
+                      ) {
+                        return;
+                      }
+                      setNote('');
+                      const left = d.invitations.filter((x) => x.invitationId !== i.invitationId);
+                      void act(`/v1/clients/${i.clientId}/invites/${i.invitationId}`, {
+                        method: 'DELETE',
+                      }).then((r) => {
+                        if (!r) return;
+                        // Nothing waits for them any more: back to People. Else to one that does.
+                        navigate(
+                          left[0]
+                            ? `/staff/people/invited/${left[0].invitationId}`
+                            : '/staff/people',
+                          { replace: true },
+                        );
+                      });
+                    }}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </Table>
+        <form
+          style={{ display: 'grid', gap: 8, maxWidth: 520, marginTop: 16 }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            const client = canAdd.find((c) => c.id === adding.clientId);
+            if (!client) return;
+            setNote('');
+            void actAt('addClient')(`/v1/clients/${client.id}/invites`, {
+              body: {
+                ...same,
+                ...(adding.roleLabel.trim() ? { roleLabel: adding.roleLabel } : {}),
+              },
+            }).then((r) => {
+              if (!r) return;
+              setAdding({ clientId: '', roleLabel: '' });
+              setClientFind('');
+              setNote(`${who} was invited to ${client.displayName} too.`);
+            });
+          }}
+        >
+          <strong>Add a client</strong>
+          <span style={{ fontSize: 13 }}>
+            They are sent an invitation to it. They see it once they accept: any one of their
+            invitations will do.
+          </span>
+          <Input
+            label="Find a client (name or client ID)"
+            name="invitedClientFind"
+            value={clientFind}
+            onChange={(e) => {
+              const typed = e.target.value;
+              setClientFind(typed);
+              const words = typed.toLowerCase().split(/\s+/).filter(Boolean);
+              const left = canAdd.filter((c) =>
+                words.every((w) => `${c.displayName} ${c.clientCode}`.toLowerCase().includes(w)),
+              );
+              // A client chosen before that no longer matches is let go.
+              if (adding.clientId && !left.some((c) => c.id === adding.clientId)) {
+                setAdding({ ...adding, clientId: '' });
+              }
+            }}
+          />
+          <Select
+            label="Client"
+            value={adding.clientId}
+            onChange={(e) => setAdding({ ...adding, clientId: e.target.value })}
+          >
+            <option value="">
+              {findWords.length
+                ? `Choose a client (${offered.length} of ${canAdd.length} match)`
+                : 'Choose a client'}
+            </option>
+            {offered.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.displayName}
+                {c.clientCode ? ` (${c.clientCode})` : ''}
+              </option>
+            ))}
+          </Select>
+          <Input
+            label="Role (optional, e.g. Spouse)"
+            name="invitedRole"
+            value={adding.roleLabel}
+            onChange={(e) => setAdding({ ...adding, roleLabel: e.target.value })}
+          />
+          <Problem text={errorAt('addClient')} />
+          <div>
+            <Button type="submit" disabled={busy || !adding.clientId}>
+              {busyAt === 'addClient' ? 'Sending…' : 'Send invitation'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+    </div>
+  );
+}
 
 /** One person: details, clients, account and activity (P66). */
 function Person(): JSX.Element {
@@ -3136,6 +3396,23 @@ function Person(): JSX.Element {
                   >
                     Remove
                   </Button>
+                )}
+                {/* P92/P100: this client's portal as this person sees it, read only, in a new
+                    tab. Not for an account that is off, a client that is off or access removed:
+                    they sign in to nothing there. */}
+                {c.active && c.clientActive && !off && (
+                  <a
+                    href={`/staff/preview/${c.id}?as=${p.identityId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ marginLeft: 8, whiteSpace: 'nowrap' }}
+                  >
+                    View as
+                    <span className="visually-hidden">
+                      {' '}
+                      {who} at {c.name} (opens in a new tab)
+                    </span>
+                  </a>
                 )}
               </td>
             </tr>

@@ -13,7 +13,7 @@
 // (/api/portal/account/phone/verify). The full number never reaches the browser.
 
 import express, { type Router } from 'express';
-import { and, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { schema } from '@vibe-portal/db';
 
@@ -104,45 +104,80 @@ export function invitationsRouter(ctx: Ctx): Router {
         // The link went to the email when there was one, else by text: that contact is proved.
         const proved = inv.email ?? inv.phone;
         if (!proved) throw new Error('invitation without a contact');
-        const granted = await grantAccess(tx, {
-          clientId: inv.clientId,
-          proved,
-          name: input.name || inv.name,
-          roleLabel: inv.roleLabel,
-          by: inv.invitedBy,
-        });
-        // P98: the files staff chose for them while the invitation waited are theirs now, new
-        // to them (files removed since are left out).
-        const chosen = await tx
-          .select({ fileId: schema.invitationFile.fileId, by: schema.invitationFile.chosenBy })
-          .from(schema.invitationFile)
-          .innerJoin(schema.files, eq(schema.files.id, schema.invitationFile.fileId))
+        // Gives them the invitation's client, and the files chosen for them while it waited
+        // (P98: new to them; files removed since are left out).
+        const take = async (i: typeof inv): Promise<{ identityId: string; files: number }> => {
+          const granted = await grantAccess(tx, {
+            clientId: i.clientId,
+            proved,
+            name: input.name || i.name,
+            roleLabel: i.roleLabel,
+            by: i.invitedBy,
+          });
+          const chosen = await tx
+            .select({ fileId: schema.invitationFile.fileId, by: schema.invitationFile.chosenBy })
+            .from(schema.invitationFile)
+            .innerJoin(schema.files, eq(schema.files.id, schema.invitationFile.fileId))
+            .where(
+              and(
+                eq(schema.invitationFile.invitationId, i.id),
+                eq(schema.files.clientId, i.clientId),
+                isNull(schema.files.removedAt),
+              ),
+            );
+          for (const c of chosen) {
+            await tx
+              .insert(schema.fileVisibility)
+              .values({
+                fileId: c.fileId,
+                identityId: granted.identityId,
+                visible: true,
+                changedAt: now,
+                changedBy: c.by,
+              })
+              .onConflictDoUpdate({
+                target: [schema.fileVisibility.fileId, schema.fileVisibility.identityId],
+                set: { visible: true, changedAt: now, changedBy: c.by, viewedAt: null },
+              });
+          }
+          await tx
+            .delete(schema.invitationFile)
+            .where(eq(schema.invitationFile.invitationId, i.id));
+          return { identityId: granted.identityId, files: chosen.length };
+        };
+        const first = await take(inv);
+        // P100: staff may have invited the same person to more clients (the People page's
+        // Add a client for someone invited). The contact this link went to is proved, and the
+        // others went to that same contact: every one of them still waiting, not expired and
+        // for a client that is on is accepted with it, so one acceptance is enough.
+        const others = await tx
+          .update(schema.portalInvitation)
+          .set({ acceptedAt: now })
           .where(
             and(
-              eq(schema.invitationFile.invitationId, inv.id),
-              eq(schema.files.clientId, inv.clientId),
-              isNull(schema.files.removedAt),
+              ne(schema.portalInvitation.id, inv.id),
+              isNull(schema.portalInvitation.acceptedAt),
+              isNull(schema.portalInvitation.revokedAt),
+              gt(schema.portalInvitation.expiresAt, now),
+              inv.email
+                ? eq(schema.portalInvitation.email, inv.email)
+                : and(
+                    isNull(schema.portalInvitation.email),
+                    eq(schema.portalInvitation.phone, proved),
+                  ),
+              inArray(
+                schema.portalInvitation.clientId,
+                tx
+                  .select({ id: schema.clients.id })
+                  .from(schema.clients)
+                  .where(eq(schema.clients.active, true)),
+              ),
             ),
-          );
-        for (const c of chosen) {
-          await tx
-            .insert(schema.fileVisibility)
-            .values({
-              fileId: c.fileId,
-              identityId: granted.identityId,
-              visible: true,
-              changedAt: now,
-              changedBy: c.by,
-            })
-            .onConflictDoUpdate({
-              target: [schema.fileVisibility.fileId, schema.fileVisibility.identityId],
-              set: { visible: true, changedAt: now, changedBy: c.by, viewedAt: null },
-            });
-        }
-        await tx
-          .delete(schema.invitationFile)
-          .where(eq(schema.invitationFile.invitationId, inv.id));
-        return { inv, identityId: granted.identityId, files: chosen.length };
+          )
+          .returning();
+        const more: { inv: typeof inv; files: number }[] = [];
+        for (const o of others) more.push({ inv: o, files: (await take(o)).files });
+        return { inv, identityId: first.identityId, files: first.files, more };
       });
       if (!accepted) throw new HttpError(404, 'invite_expired');
       const { inv, identityId } = accepted;
@@ -156,6 +191,23 @@ export function invitationsRouter(ctx: Ctx): Router {
           detail: { invitationId: inv.id, ...(accepted.files ? { files: accepted.files } : {}) },
         },
       );
+      for (const m of accepted.more) {
+        await record(
+          ctx.db,
+          'invite_accepted',
+          { kind: 'client', name: identityId },
+          {
+            clientId: m.inv.clientId,
+            identityId,
+            detail: {
+              invitationId: m.inv.id,
+              // Accepted with the invitation whose link was opened.
+              with: inv.id,
+              ...(m.files ? { files: m.files } : {}),
+            },
+          },
+        );
+      }
       await signIn(ctx, res, identityId, input.keepSignedIn);
       // Also sign in by text: a code to the number staff typed, unless the account has one.
       let phoneCode: string | null = null;
