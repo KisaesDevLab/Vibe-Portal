@@ -111,7 +111,38 @@ export function invitationsRouter(ctx: Ctx): Router {
           roleLabel: inv.roleLabel,
           by: inv.invitedBy,
         });
-        return { inv, identityId: granted.identityId };
+        // P98: the files staff chose for them while the invitation waited are theirs now, new
+        // to them (files removed since are left out).
+        const chosen = await tx
+          .select({ fileId: schema.invitationFile.fileId, by: schema.invitationFile.chosenBy })
+          .from(schema.invitationFile)
+          .innerJoin(schema.files, eq(schema.files.id, schema.invitationFile.fileId))
+          .where(
+            and(
+              eq(schema.invitationFile.invitationId, inv.id),
+              eq(schema.files.clientId, inv.clientId),
+              isNull(schema.files.removedAt),
+            ),
+          );
+        for (const c of chosen) {
+          await tx
+            .insert(schema.fileVisibility)
+            .values({
+              fileId: c.fileId,
+              identityId: granted.identityId,
+              visible: true,
+              changedAt: now,
+              changedBy: c.by,
+            })
+            .onConflictDoUpdate({
+              target: [schema.fileVisibility.fileId, schema.fileVisibility.identityId],
+              set: { visible: true, changedAt: now, changedBy: c.by, viewedAt: null },
+            });
+        }
+        await tx
+          .delete(schema.invitationFile)
+          .where(eq(schema.invitationFile.invitationId, inv.id));
+        return { inv, identityId: granted.identityId, files: chosen.length };
       });
       if (!accepted) throw new HttpError(404, 'invite_expired');
       const { inv, identityId } = accepted;
@@ -119,7 +150,11 @@ export function invitationsRouter(ctx: Ctx): Router {
         ctx.db,
         'invite_accepted',
         { kind: 'client', name: identityId },
-        { clientId: inv.clientId, identityId, detail: { invitationId: inv.id } },
+        {
+          clientId: inv.clientId,
+          identityId,
+          detail: { invitationId: inv.id, ...(accepted.files ? { files: accepted.files } : {}) },
+        },
       );
       await signIn(ctx, res, identityId, input.keepSignedIn);
       // Also sign in by text: a code to the number staff typed, unless the account has one.

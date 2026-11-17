@@ -679,9 +679,22 @@ describe('staff page', () => {
     const more = within(box).getByLabelText('Add another client for Jane Smith');
     expect(within(more).queryByRole('option', { name: /Smith, John/ })).toBeNull();
     fireEvent.change(more, { target: { value: 'c2' } });
+    // P99: a name or client ID typed beside it narrows the list; the client is still chosen
+    // from the list, never added by the typing alone.
+    const find = within(box).getByLabelText('Find a client for Jane Smith (name or client ID)');
+    fireEvent.change(find, { target: { value: 'zzz' } });
+    expect(within(box).getByRole('option', { name: 'Choose… (0 match)' })).toBeTruthy();
+    fireEvent.change(find, { target: { value: 'jones' } });
+    expect(within(box).getByRole('option', { name: 'Choose… (1 matches)' })).toBeTruthy();
+    expect(
+      within(within(box).getByRole('list', { name: 'Clients for Jane Smith' })).getAllByRole(
+        'listitem',
+      ),
+    ).toHaveLength(2);
     fireEvent.change(within(box).getByLabelText('Add another client for Jane Smith'), {
       target: { value: 'c3' },
     });
+    expect((find as HTMLInputElement).value).toBe('');
     fireEvent.click(
       within(box).getByRole('button', { name: 'Remove Jones, Ann (JONES) for Jane Smith' }),
     );
@@ -1297,8 +1310,29 @@ describe('staff page', () => {
     const pick = (await screen.findByLabelText('Client')) as HTMLSelectElement;
     expect(Array.from(pick.options).map((o) => o.text)).toEqual([
       'Choose a client',
-      'Smith Farms LLC',
+      'Smith Farms LLC (1002)',
     ]);
+    // A name or client ID typed above narrows the list; one left is chosen by itself.
+    fireEvent.change(screen.getByLabelText('Find a client (name or client ID)'), {
+      target: { value: 'zzz' },
+    });
+    expect(Array.from(pick.options).map((o) => o.text)).toEqual(['Choose a client (0 of 1 match)']);
+    expect(screen.getByText(/^No client matches\./)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Find a client (name or client ID)'), {
+      target: { value: 'farm' },
+    });
+    expect(pick.value).toBe('c2');
+    // Typed on to something it does not match: the choice is let go, and nothing can be added.
+    fireEvent.change(screen.getByLabelText('Find a client (name or client ID)'), {
+      target: { value: 'farm zzz' },
+    });
+    expect(pick.value).toBe('');
+    expect((screen.getByRole('button', { name: 'Add client' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.change(screen.getByLabelText('Find a client (name or client ID)'), {
+      target: { value: '' },
+    });
     fireEvent.change(pick, { target: { value: 'c2' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add client' }));
     expect(await screen.findByText('Smith Farms LLC added. Mary Smith was told.')).toBeTruthy();
@@ -1577,6 +1611,124 @@ describe('staff page', () => {
       { fileId: 'f9', name: 'Old.pdf', removed: true },
     ],
   };
+
+  it('client page: files are chosen for someone invited; People lists who is waiting (P98)', async () => {
+    const id = CLIENT.id;
+    const waiting = {
+      invitationId: 'i1',
+      name: 'Jane Smith',
+      email: 'jane@example.test',
+      phone: null,
+      roleLabel: 'Spouse',
+      expiresAt: '2026-11-20T10:00:00Z',
+      status: 'invited',
+    };
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [], invitations: [waiting] } },
+      [`/v1/files?clientId=${id}`]: {
+        body: {
+          files: [
+            portalFile('f1', 'Return 2025.pdf'),
+            { ...(portalFile('f2', 'Return 2024.pdf') as object), invites: ['i1'] },
+          ],
+        },
+      },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      'PUT /v1/files/f1/visibility': { body: { ok: true } },
+      'PUT /v1/files/f2/visibility': { body: { ok: true } },
+      '/v1/people/list?q=': {
+        body: {
+          people: [],
+          more: false,
+          invited: [{ ...waiting, clientId: id, clientName: 'Smith, John' }],
+        },
+      },
+    });
+    at(`/staff/clients/${id}`);
+    // Already chosen for her: said on the file's row, and it can be taken back.
+    expect(
+      await screen.findByText(/Jane Smith \(invited: sees it once they accept\)/),
+    ).toBeTruthy();
+    // Nobody has accepted yet, and a file can still be given to the one invited.
+    fireEvent.click(screen.getByLabelText('Select Return 2025.pdf'));
+    expect((screen.getByLabelText('Jane Smith (invited)') as HTMLInputElement).checked).toBe(true);
+    const show = screen.getByRole('button', { name: 'Show to them' }) as HTMLButtonElement;
+    expect(show.disabled).toBe(false);
+    fireEvent.click(show);
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'PUT' && c.path === '/v1/files/f1/visibility')?.body,
+      ).toEqual({ users: {}, invites: { i1: true } }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Return 2024.pdf from Jane Smith' }));
+    await waitFor(() =>
+      expect(
+        calls.find((c) => c.method === 'PUT' && c.path === '/v1/files/f2/visibility')?.body,
+      ).toEqual({ invites: { i1: false } }),
+    );
+    cleanup();
+
+    // The People page: nobody can sign in yet, and it says who was invited and for which client.
+    serve({
+      '/auth/me': ME,
+      '/v1/people/list?q=': {
+        body: {
+          people: [],
+          more: false,
+          invited: [{ ...waiting, clientId: id, clientName: 'Smith, John' }],
+        },
+      },
+    });
+    at('/staff/people');
+    expect(await screen.findByRole('heading', { name: 'Invited, not accepted yet' })).toBeTruthy();
+    expect(screen.getByText('jane@example.test')).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'Smith, John' }).getAttribute('href')).toBe(
+      `/staff/clients/${id}`,
+    );
+  });
+
+  it('client page: the selected files go out together in one secure link (P97)', async () => {
+    const id = CLIENT.id;
+    const calls = serve({
+      '/auth/me': ME,
+      [`/v1/clients/${id}/users`]: { body: { users: [USER], invitations: [] } },
+      [`/v1/files?clientId=${id}`]: {
+        body: {
+          files: [
+            portalFile('f1', 'Return 2025.pdf'),
+            portalFile('f2', 'Return 2024.pdf'),
+            portalFile('f3', 'Return 2023.pdf'),
+          ],
+        },
+      },
+      [`/v1/shares?clientId=${id}`]: { body: { shares: [] } },
+      'POST /v1/shares': { status: 201, body: { shareId: 's2', expiresAt: '2026-11-17T15:00Z' } },
+    });
+    at(`/staff/clients/${id}`);
+    fireEvent.click(await screen.findByLabelText('Select Return 2025.pdf'));
+    fireEvent.click(screen.getByLabelText('Select Return 2023.pdf'));
+    expect(screen.getByText('2 files selected')).toBeTruthy();
+    // The bar's own button, beside each row's.
+    fireEvent.click(screen.getByRole('button', { name: 'Send securely…' }));
+    // The form opens with the selected files ticked, and the others to add.
+    expect((screen.getByLabelText('Return 2025.pdf') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Return 2023.pdf') as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText('Return 2024.pdf') as HTMLInputElement).checked).toBe(false);
+    fireEvent.change(screen.getByLabelText('Recipient email'), {
+      target: { value: 'lee@first-bank.test' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send secure link' }));
+    await waitFor(() =>
+      expect(
+        (
+          calls.find((c) => c.method === 'POST' && c.path === '/v1/shares')?.body as {
+            fileIds: string[];
+          }
+        ).fileIds.sort(),
+      ).toEqual(['f1', 'f3']),
+    );
+  });
 
   it('client page: sends files to someone outside by a secure link, and revokes one (P49)', async () => {
     const id = CLIENT.id;

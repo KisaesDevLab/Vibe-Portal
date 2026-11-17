@@ -481,6 +481,8 @@ describe('looking after the bucket (P51 follow-ups)', () => {
     expect(locked.status).toBe(400);
     expect(locked.body.error).toBe('b2_refused');
     expect(locked.body.detail).toContain('Object Lock is on');
+    // The whole of it reaches the page: where Vibe Files' bucket is entered instead.
+    expect(locked.body.detail).toMatch(/documents in B2 below instead\.$/);
     // A key that may not ask about Object Lock is not refused for that.
     bucket.locked = null;
     await boss.put('/api/staff/v1/settings/storage/b2').send(B2).expect(200);

@@ -116,7 +116,12 @@ export async function historyRows(
       at: e.at,
       kind: e.kind,
       who,
-      person: named(e.personName, e.personEmail, e.personPhone),
+      // P98: a file chosen for someone invited, who is not a person of the portal yet.
+      person:
+        named(e.personName, e.personEmail, e.personPhone) ??
+        (typeof d['invited'] === 'string' && d['invited']
+          ? `${d['invited']} (invited, not accepted yet)`
+          : null),
       file: e.file ?? e.upload ?? null,
       recipient: typeof d['to'] === 'string' ? d['to'] : null,
       client: e.client ?? null,

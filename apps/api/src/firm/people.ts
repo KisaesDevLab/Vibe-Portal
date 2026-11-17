@@ -3,7 +3,9 @@
 // P66: the staff page's People view, for staff who see every client (the router is mounted
 // after requireAllClients, and only on the staff API: Vibe Files keeps P63's search).
 //
-//   GET    /api/staff/v1/people/list?q=&offset=         everyone, turned-off accounts too
+//   GET    /api/staff/v1/people/list?q=&offset=         everyone, turned-off accounts too;
+//          with the first page, `invited`: invitations not accepted yet (P98: they are not
+//          people of the portal until they accept, and the page says so instead of nothing)
 //   GET    /api/staff/v1/people/:id                     details, clients, a contact change waiting
 //   PATCH  /api/staff/v1/people/:id                     { name?, notify? }
 //   POST   /api/staff/v1/people/:id/turn-off | turn-on  the whole account
@@ -162,6 +164,40 @@ export function staffPeopleRouter(ctx: Ctx): Router {
             )
             .orderBy(asc(schema.clients.displayName))
         : [];
+      // P98: who was invited and has not accepted (with the first page only).
+      const inv = schema.portalInvitation;
+      const invited =
+        q.offset === 0
+          ? await ctx.db
+              .select({
+                invitationId: inv.id,
+                name: inv.name,
+                email: inv.email,
+                phone: inv.phone,
+                expiresAt: inv.expiresAt,
+                clientId: schema.clients.id,
+                clientName: schema.clients.displayName,
+              })
+              .from(inv)
+              .innerJoin(schema.clients, eq(schema.clients.id, inv.clientId))
+              .where(
+                and(
+                  isNull(inv.acceptedAt),
+                  isNull(inv.revokedAt),
+                  ...words.map((w) => {
+                    const digits = w.replace(/\D/g, '');
+                    return or(
+                      ilike(inv.name, likeText(w)),
+                      ilike(inv.email, likeText(w)),
+                      digits.length >= 3 ? like(inv.phone, likeText(digits)) : undefined,
+                    );
+                  }),
+                ),
+              )
+              .orderBy(asc(inv.name), asc(inv.email), asc(inv.createdAt))
+              .limit(PAGE)
+          : [];
+      const now = ctx.now();
       res.json({
         people: shown.map((p) => ({
           ...p,
@@ -170,6 +206,7 @@ export function staffPeopleRouter(ctx: Ctx): Router {
             .map(({ id: cid, name }) => ({ id: cid, name })),
         })),
         more: people.length > PAGE,
+        invited: invited.map((i) => ({ ...i, status: i.expiresAt > now ? 'invited' : 'expired' })),
       });
     }),
   );

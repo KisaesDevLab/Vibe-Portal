@@ -174,7 +174,9 @@ A lender, a lawyer or another accountant sometimes needs a client's document. Th
 the client's people, so they get no portal account. Send them a **secure link** instead, from the
 staff page:
 
-1. Open the client. Beside a file under the shared files press **Send securely…**. The file must
+1. Open the client. Beside a file under the shared files press **Send securely…**. To send
+   several in one link, tick them first and press **Send securely…** in the bar that appears
+   above the list (a link holds at most 20 files). The file must
    already be on the portal: share it from Vibe Files first.
 2. Tick any other files of this client to send with it (up to 20).
 3. Enter the **recipient's email**, and their name and organization if you like (the recipient
@@ -268,8 +270,8 @@ reads it from the B2 bucket Vibe Files' sync uses. It needs Vibe Portal 0.3.17 o
 where the portal keeps its own files in that same bucket); Vibe Files needs nothing newer than
 the 0.1.38 the list itself needs.
 
-1. On the staff page, **Settings › Storage**, under **Vibe Files' documents in B2**, say where
-   Vibe Files' documents are:
+1. On the staff page, **Settings**, in the card **Vibe Files' documents in B2** (below
+   **Storage**; a part of the Storage card before 0.3.19), say where Vibe Files' documents are:
    - **In a bucket of Vibe Files' own** (the usual case, and the only one for a bucket with
      **Object Lock**): enter that bucket's **endpoint**, **name**, a **key ID** and its
      **application key**. The portal only reads this bucket, so make the key in Backblaze for
@@ -470,6 +472,7 @@ clients each can see. Find a person by name, email or mobile number, and open th
   with **Withdraw**. When they confirm, they are signed out, and the old address or number is told
   it was changed. **Remove** takes a mobile number away (they keep signing in by email).
 - **Clients**: **Add a client** gives them access at once and tells them by email or text.
+  **Find a client** above the list narrows it by name or client ID (0.3.19).
   **Remove** takes it away at once. On a client's page, a person's name opens their page too.
 - **Account**: **Send sign-in link** emails them a link (by text if they have only a number) that
   signs them in once, within 24 hours: for someone who cannot manage signing in. **Turn account
@@ -523,6 +526,22 @@ On a client's page, under **People with access**, an invitation still waiting ha
 **Resend** sends a new invitation to the same email or number: a new link, good for 7 days, and
 the link sent before stops working. **Delete** takes the invitation away, and its link stops
 working. Both ask first. An invitation that expired stays listed until it is resent or deleted.
+
+**Files for someone who has not accepted yet.** Under **Files on the portal**, tick the files,
+and in the bar that appears tick the invited person under **For:** (their name, with
+**(invited)**; everyone is ticked to start with, so untick anyone the files are not for), then
+press **Show to them**. An invitation that expired is listed as **(invitation expired)** and is
+not ticked: resend it first, or the files reach nobody. The file's row then says it is chosen for them.
+They are told nothing of the files then; when they accept the invitation, the files are on their
+page at once, marked **New**, with no further email. To tell them files are waiting, press
+**Resend** after choosing: the new invitation, when it goes by email, adds the line "Files are
+waiting for you there." (no file names; a text message has no room for it). History names who a
+file was chosen for, as invited and not accepted yet. All this needs Vibe Portal 0.3.19. The choices follow a **Resend**; **Delete** drops them, and a file
+removed from the portal meanwhile is left out.
+
+**People** lists only those who can sign in, so someone invited is not among them until they
+accept. Below the list, **Invited, not accepted yet** names each invitation still waiting and
+its client, with a link to the client's page, where it is resent, deleted, or given files.
 
 ## When something is wrong
 
